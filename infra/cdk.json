@@ -88,6 +88,21 @@
     "@aws-cdk/s3-notifications:addS3TrustKeyPolicyForSnsSubscriptions": true,
     "@aws-cdk/aws-ec2:requirePrivateSubnetsForEgressOnlyInternetGateway": true,
     "@aws-cdk/aws-s3:publicAccessBlockedByDefault": true,
-    "@aws-cdk/core:defaultCrossStackReferences": "strong"
+    "@aws-cdk/core:defaultCrossStackReferences": "strong",
+    "@aws-cdk/aws-batch:defaultToAL2023": false,
+    "@aws-cdk/aws-cloudfront:defaultFunctionRuntimeV2_0": false,
+    "@aws-cdk/aws-ecs-patterns:secGroupsDisablesImplicitOpenListener": false,
+    "@aws-cdk/aws-ecs-patterns:uniqueTargetGroupId": false,
+    "@aws-cdk/aws-eks:defaultToAL2023": false,
+    "@aws-cdk/aws-eks:useNativeOidcProvider": false,
+    "@aws-cdk/aws-elasticloadbalancingv2:networkLoadBalancerWithSecurityGroupByDefault": false,
+    "@aws-cdk/aws-elasticloadbalancingv2:usePostQuantumTlsPolicy": false,
+    "@aws-cdk/aws-kms:applyImportedAliasPermissionsToPrincipal": false,
+    "@aws-cdk/aws-lambda:useCdkManagedLogGroup": false,
+    "@aws-cdk/aws-route53-patterns:useDistribution": false,
+    "@aws-cdk/aws-signer:signingProfileNamePassedToCfn": false,
+    "@aws-cdk/core:annotationsInValidationReport": false,
+    "@aws-cdk/core:explicitStackTags": false,
+    "@aws-cdk/core:validateAgainstDefaultRules": false
   }
 }
