@@ -16,6 +16,13 @@ import { jobText, readWorkflow, REPOSITORY_ROOT } from './helpers/workflow-text'
  */
 const WORKFLOWS = readdirSync(join(REPOSITORY_ROOT, '.github', 'workflows')).filter((name) => /\.ya?ml$/.test(name)).sort();
 const ALLOWED_TRIGGERS = ['pull_request', 'push', 'workflow_dispatch'];
+/**
+ * The repository's Actions policy (Settings > Actions > General: selected actions, SHA pinning required) allows
+ * GitHub's own actions (actions/*, github/*) and, of all others, only these exact commits. A workflow that uses
+ * anything else is not started at all (startup_failure), and a pull request's checks cannot show that, so change
+ * the policy and this list together.
+ */
+const POLICY_ALLOWED_ACTIONS = ['aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a'];
 
 /** The keys of a top-level block (two spaces in), such as `on:` or `jobs:`. */
 const blockKeys = (workflow: string, block: string): string[] => {
@@ -59,6 +66,14 @@ describe('every workflow', () => {
     }
     // The only write permission anywhere is id-token: write, in deploy.yml's deploy job (next test).
     expect([...workflow.matchAll(/^\s+([\w-]+): write$/gm)].map(([, scope]) => scope).filter((scope) => scope !== 'id-token')).toEqual([]);
+  });
+
+  test.each(WORKFLOWS)("%s uses, besides GitHub's own actions, only commits the repository's policy allows", (name) => {
+    const workflow = readWorkflow(name);
+    const others = [...workflow.matchAll(/^\s+(?:- )?uses: (\S+)/gm)]
+      .map(([, action]) => action)
+      .filter((action) => !/^(?:actions|github)\//.test(action));
+    expect(others.filter((action) => !POLICY_ALLOWED_ACTIONS.includes(action))).toEqual([]);
   });
 
   test("id-token: write and secrets appear only in deploy.yml's deploy job, in production, on main", () => {
