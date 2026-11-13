@@ -39,7 +39,8 @@ The `deploy` job, once approved:
 1. publishes the release this run built to the artifacts bucket (`scripts/ci/publish-release.sh`: zips first, the
    manifest last), with the release role, before any package is installed; a run given `release_id` skips this;
 2. clears those credentials;
-3. installs `infra/`, takes the deploy role, synthesizes the app strictly against the release manifest, runs
+3. installs `infra/`, takes the deploy role, and in a run given `release_id` checks every zip of that release against
+   its manifest (the release zip check, below); then synthesizes the app strictly against the release manifest, runs
    `cdk diff` against production and the deploy guard (below); a diff run also shows the alias pins a deploy would
    write, and stops there;
 4. in deploy mode only: writes the alias pins, runs `cdk deploy --all`, then moves each changed Lambda's `prod` alias
@@ -67,10 +68,11 @@ is disabled on purpose.
   anything but `pull_request`, `push` or `workflow_dispatch`.
 - The release role lists, reads and writes the artifacts bucket and nothing else, for at most an hour.
 - The deploy role reaches CloudFormation and the CDK assets bucket only through the CDK bootstrap roles. Otherwise it
-  grants the release manifest download, `lambda:GetAlias`, the alias pin parameters and the CodeDeploy and alarm reads
-  of `release:deploy-lambdas`. A diff run narrows it further with an inline session policy (the manifest download,
-  `lambda:GetAlias` and the bootstrap roles a change-set diff assumes), so it cannot write an alias pin or start a
-  CodeDeploy deployment. The bootstrap deploy role can still change stacks, so a diff run is narrowed, not read-only.
+  grants the release manifest and zip downloads (`releases/` and `artifacts/` of the artifacts bucket, read only),
+  `lambda:GetAlias`, the alias pin parameters and the CodeDeploy and alarm reads of `release:deploy-lambdas`. A diff
+  run narrows it further with an inline session policy (the manifest and zip downloads, `lambda:GetAlias` and the
+  bootstrap roles a change-set diff assumes), so it cannot write an alias pin or start a CodeDeploy deployment. The
+  bootstrap deploy role can still change stacks, so a diff run is narrowed, not read-only.
   `infra/test/deploy-workflow.test.ts` keeps the roles, the session policy and the workflow's AWS calls in step.
 - The AWS account ID is the `production` environment's `AWS_ACCOUNT_ID` secret. The role ARNs and `CDK_DEFAULT_ACCOUNT`
   are built from it, so GitHub masks it in the logs; the diff summary leaves it out too. The account in
@@ -78,7 +80,52 @@ is disabled on purpose.
 - Runs keep no deploy record. Logs are kept 30 days.
 
 A step that fails with `AccessDenied` needs the denied role widened in `github-oidc.ts`, never an admin role. An IAM
-change applies only once a deploy run's `cdk deploy` has deployed `GitHubOidcStack`.
+change applies only once a deploy run's `cdk deploy` has deployed `GitHubOidcStack`, and a run that fails before
+`cdk deploy` cannot deploy it. So a new step must not need a grant that is not deployed yet: land and deploy the grant
+first, or keep the step out of the runs that would deploy it. The release zip check, for one, runs only in a run given
+`release_id`, so a run that builds its release never needs the deploy role's read of `artifacts/` and can always
+deploy a change to it.
+
+## The release zip check
+
+Each zip of a release lives at `artifacts/<logicalName>/<sha256>.zip`, a key that holds the zip's own SHA-256, and the
+manifest lists that hash too. CloudFormation deploys whatever object sits at the key, and a run given `release_id`
+deploys zips an earlier run uploaded. So in such a run, before synth and in both modes, the step "Check every release
+zip against the manifest" downloads each zip the manifest names to the runner and compares its SHA-256 with the
+manifest's; it takes well under a minute. Synth itself rejects, for every release, a manifest whose keys are not of
+that form (`infra/lib/release/lambda-artifacts.ts`).
+
+A run that builds its release skips the check: `scripts/ci/publish-release.sh` compares each zip with the manifest
+just before it uploads it, and the run then never needs the deploy role's read of `artifacts/` (above). To try the
+check on a release without deploying it, run a diff with its `release_id` (the command under Rolling back).
+
+The check has two limits:
+
+- It trusts the manifest: a manifest rewritten together with its zips passes.
+- It reads each key once, before synth, and the Lambda updates of `cdk deploy` fetch the key again later, by key with
+  no S3 object version pinned. A write to the key in between is not caught. Pinning the checked versions in the
+  templates would close that gap; the templates do not pin them.
+
+Both rest on only the release upload of an approved run writing the artifacts bucket, which is why uploads happen only
+in the approved `deploy` job, with the release role.
+
+On a failure the run stops before anything is deployed; a run given `release_id` has published nothing either. Each
+zip that fails gets its own error, which names the artifact, and a last `Release zip check` error gives the count (the
+step summary lists the artifacts):
+
+- **`Release zip changed`:** the object at that key is not the zip the release was published with, so something wrote
+  the key after the release was published. Do not deploy that release, and find out what wrote the key before the
+  next deploy: only the release upload of an approved run should. The bucket is versioned and keeps a replaced
+  object's earlier version for 7 days, so the published zip can be restored from it. To roll back in the meantime,
+  revert the change on `main` instead (below): that builds and publishes a fresh release.
+- **`Release zip missing`:** the zip is gone or unreadable. The deploy role cannot list the bucket, so a missing key
+  shows as a 403. Run without `release_id` to publish a fresh release, or revert on `main`.
+- **`Release zip key` or `Release zip version`:** the manifest names a key that is not content-addressed, or pins an
+  S3 object version, so its zips cannot be checked. Every release `scripts/ci/build-release.sh` builds passes; for
+  any other, run without `release_id` or revert on `main`.
+- **`Release zip check` alone:** the manifest is not one JSON document whose `artifacts` are a non-empty array of
+  entries with `logicalName`, `s3Key` and `sha256` strings, so no zip was checked. No release `build-release.sh` builds
+  fails this way; run without `release_id` or revert on `main`.
 
 ## The deploy guard
 
@@ -121,7 +168,8 @@ release builds are deterministic, so an unchanged function shows no lines at all
   infrastructure and Lambda code together.
 - **Lambda code only:** deploy an earlier release. Every published release keeps its manifest at
   `releases/<release id>/manifest.json` and its zips under content-addressed keys. A run given `release_id` publishes
-  nothing and synthesizes `main` with that release's Lambda code:
+  nothing, checks each of that release's zips against its manifest (the release zip check, above) and synthesizes
+  `main` with that release's Lambda code. Start with a diff run, which runs the check and deploys nothing:
 
   ```bash
   gh workflow run deploy.yml -R BillBoardApp/billboard-backend --ref main -f mode=diff -f release_id=<earlier release id>

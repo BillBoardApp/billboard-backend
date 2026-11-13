@@ -78,18 +78,31 @@ const validateReleaseManifest = (value: unknown): LambdaReleaseManifestV1 => {
       throw new Error(`[release-manifest] artifacts[${index}].sha256 must be 64-char lowercase hex`);
     }
 
+    // Each zip lives under the content-addressed key services/scripts/generateReleaseManifest.cjs gives it, which
+    // holds the zip's SHA-256. A deploy run given release_id downloads the zip at exactly this key before synth and
+    // checks its hash, so the templates must point at no other key. artifacts/ is also the prefix that check reads,
+    // and no lifecycle rule expires it (releases/ expires after 730 days; shared-infra.ts).
+    const logicalName = assertString(artifact.logicalName, `artifacts[${index}].logicalName`);
+    const s3Key = assertString(artifact.s3Key, `artifacts[${index}].s3Key`);
+    const contentAddressedKey = `artifacts/${logicalName}/${sha256}.zip`;
+    if (s3Key !== contentAddressedKey) {
+      throw new Error(
+        `[release-manifest] artifacts[${index}].s3Key must be '${contentAddressedKey}' (its logicalName and sha256), got '${s3Key}'`,
+      );
+    }
+
     const sizeBytes = artifact.sizeBytes;
     if (sizeBytes !== undefined && (typeof sizeBytes !== "number" || !Number.isInteger(sizeBytes) || sizeBytes <= 0)) {
       throw new Error(`[release-manifest] artifacts[${index}].sizeBytes must be a positive integer when set`);
     }
 
     return {
-      logicalName: assertString(artifact.logicalName, `artifacts[${index}].logicalName`),
+      logicalName,
       functionName: assertString(artifact.functionName, `artifacts[${index}].functionName`),
       runtime,
       handler: assertString(artifact.handler, `artifacts[${index}].handler`),
       s3Bucket: assertString(artifact.s3Bucket, `artifacts[${index}].s3Bucket`),
-      s3Key: assertString(artifact.s3Key, `artifacts[${index}].s3Key`),
+      s3Key,
       ...(typeof artifact.s3ObjectVersion === "string" && artifact.s3ObjectVersion.trim().length > 0
         ? { s3ObjectVersion: artifact.s3ObjectVersion }
         : {}),

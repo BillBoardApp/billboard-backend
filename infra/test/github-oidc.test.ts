@@ -136,6 +136,12 @@ describe('GitHubOidcStack', () => {
         Action: 's3:GetObject',
         Resource: `${BUCKET_ARN}/releases/*`,
       },
+      DownloadReleaseZips: {
+        Sid: 'DownloadReleaseZips',
+        Effect: 'Allow',
+        Action: 's3:GetObject',
+        Resource: `${BUCKET_ARN}/artifacts/*`,
+      },
       ReadProdAliases: {
         Sid: 'ReadProdAliases',
         Effect: 'Allow',

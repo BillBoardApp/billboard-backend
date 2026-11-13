@@ -1,8 +1,10 @@
 /**
  * Strict-mode error paths of lib/release/lambda-artifacts.ts, the guard that
- * stops a production synth from silently falling back to "latest" zips.
+ * stops a production synth from silently falling back to "latest" zips, and
+ * the content-addressed keys it requires (artifacts/<logicalName>/<sha256>.zip).
  */
 
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -156,6 +158,56 @@ describe('release manifest strict mode', () => {
 
     expect(() => release.lambdaCodeFromRelease(artifactsBucket(), 'fnA', 'fnA.zip'))
       .toThrow("[release-manifest] artifacts[0].runtime has unsupported value 'nodejs18.x'");
+  });
+
+  test.each<[string, (logicalName: string) => string]>([
+    ['holds another hash', (logicalName) => `artifacts/${logicalName}/${'b'.repeat(64)}.zip`],
+    ['names another artifact', () => `artifacts/fnB/${SHA256}.zip`],
+    ['is outside artifacts/', (logicalName) => `releases/${RELEASE_ID}/${logicalName}.zip`],
+    ['adds a prefix', (logicalName) => `history/artifacts/${logicalName}/${SHA256}.zip`],
+    ['adds a suffix', (logicalName) => `artifacts/${logicalName}/${SHA256}.zip.old`],
+  ])('fails when an s3Key %s instead of artifacts/<logicalName>/<sha256>.zip', (_case, keyOf) => {
+    const release = loadReleaseModule(strictEnv(writeManifest(manifest([
+      artifact('fnB'),
+      { ...artifact('fnA'), s3Key: keyOf('fnA') },
+    ]))));
+
+    expect(() => release.lambdaCodeFromRelease(artifactsBucket(), 'fnA', 'fnA.zip'))
+      .toThrow(`[release-manifest] artifacts[1].s3Key must be 'artifacts/fnA/${SHA256}.zip' (its logicalName and sha256), got '${keyOf('fnA')}'`);
+  });
+
+  test('accepts the contract example manifest', () => {
+    const example = JSON.parse(fs.readFileSync(
+      path.join(__dirname, '..', '..', 'contracts', 'fixtures', 'release', 'lambda-release-manifest.v1.valid.json'),
+      'utf8',
+    )) as LambdaReleaseManifestV1;
+    const release = loadReleaseModule({ ...strictEnv(writeManifest(example)), BILLBOARD_RELEASE_ID: example.releaseId });
+
+    for (const { logicalName } of example.artifacts) {
+      release.lambdaCodeFromRelease(artifactsBucket(), logicalName, `${logicalName}.zip`);
+    }
+    expect(() => release.assertReleaseManifestFullyConsumed()).not.toThrow();
+  });
+
+  // The manifest exactly as scripts/ci/build-release.sh has the services generator write it.
+  test('accepts a manifest from services/scripts/generateReleaseManifest.cjs', () => {
+    const zipDir = path.join(tmpDir, 'zips');
+    fs.mkdirSync(zipDir);
+    fs.writeFileSync(path.join(zipDir, 'fnA-abc1234.zip'), 'first zip');
+    fs.writeFileSync(path.join(zipDir, 'fnB-abc1234.zip'), 'second zip');
+    const manifestFile = path.join(tmpDir, 'generated.json');
+    execFileSync(process.execPath, [
+      path.join(__dirname, '..', '..', 'services', 'scripts', 'generateReleaseManifest.cjs'),
+      '--release-id', RELEASE_ID, '--bucket', BUCKET_NAME, '--version', 'abc1234', '--zip-dir', zipDir,
+      '--repository', 'BillBoardApp/billboard-backend', '--commit-sha', 'abc1234', '--branch', 'main', '--out', manifestFile,
+    ], { stdio: 'pipe' });
+    const release = loadReleaseModule(strictEnv(manifestFile));
+
+    for (const logicalName of ['fnA', 'fnB']) {
+      const config = release.lambdaCodeFromRelease(artifactsBucket(), logicalName, `${logicalName}.zip`).bind(new cdk.Stack());
+      expect(config.s3Location?.objectKey).toMatch(new RegExp(`^artifacts/${logicalName}/[a-f0-9]{64}\\.zip$`));
+    }
+    expect(() => release.assertReleaseManifestFullyConsumed()).not.toThrow();
   });
 
   test('fails when the manifest belongs to a different release', () => {

@@ -130,8 +130,8 @@ export class GitHubOidcStack extends cdk.Stack {
     // billboard-platform .github/workflows/deploy.yml, deploy job, plus scripts/syncLambdaAliasVersionParameters.ts
     // and scripts/deployLambdaRelease.ts. CloudFormation changes and asset
     // publishing go through the CDK bootstrap roles, never this role directly.
-    // A diff run narrows its session with an inline session policy in deploy.yml to the manifest
-    // download, GetAlias and three bootstrap roles; that policy can only take away from this one.
+    // A diff run narrows its session with an inline session policy in deploy.yml to the manifest and
+    // zip downloads, GetAlias and three bootstrap roles; that policy can only take away from this one.
     this.infraDeployRole = new iam.Role(this, 'GitHubInfraDeployRole', {
       roleName: GITHUB_INFRA_DEPLOY_ROLE_NAME,
       description: 'GitHub Actions: billboard-platform main deploys CDK stacks and Lambda releases',
@@ -157,6 +157,13 @@ export class GitHubOidcStack extends cdk.Stack {
               sid: 'DownloadReleaseManifest',
               actions: ['s3:GetObject'],
               resources: [`${bucketArn}/releases/*`],
+            }),
+            // In a run given release_id, deploy.yml downloads each zip the manifest names and checks its
+            // SHA-256 before synth. A run that builds its release does not need this, so it can deploy it.
+            new iam.PolicyStatement({
+              sid: 'DownloadReleaseZips',
+              actions: ['s3:GetObject'],
+              resources: [`${bucketArn}/artifacts/*`],
             }),
             new iam.PolicyStatement({
               sid: 'ReadProdAliases',
