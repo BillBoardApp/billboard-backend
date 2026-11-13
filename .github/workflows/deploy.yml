@@ -335,7 +335,9 @@ jobs:
           ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
         run: |
           set -o pipefail
-          npx cdk diff --app cdk.out --all --no-color 2>&1 | tee "$RUNNER_TEMP/cdk-diff.txt"
+          # No stack named: diff takes every top-level stack (it has no --all option), and the deploy guard below
+          # fails the run if any stack of cdk.out has no section in this output.
+          npx cdk diff --app cdk.out --no-color 2>&1 | tee "$RUNNER_TEMP/cdk-diff.txt"
           # Build the summary from files, not a grep | head pipe: under pipefail a large diff makes
           # head exit early, grep dies of SIGPIPE, and the step would fail after a successful diff.
           # The account ID is masked in the log, and taken out of the summary here.
