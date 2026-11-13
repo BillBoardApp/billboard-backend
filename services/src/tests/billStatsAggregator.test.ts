@@ -166,6 +166,7 @@ describe("billStatsAggregator handler", () => {
   });
 
   it("extracts bill ids from dynamodb stream records", async () => {
+    const log = jest.spyOn(console, "log").mockImplementation(() => undefined);
     mockSend
       // query for BILL-3
       .mockResolvedValueOnce({ Items: [] })
@@ -213,6 +214,12 @@ describe("billStatsAggregator handler", () => {
       processedBillIds: ["BILL-3", "BILL-4"],
       updatedCount: 2,
     });
+    expect(log).toHaveBeenCalledWith("billStatsAggregator stream batch", {
+      records: 3,
+      skippedRecords: 0,
+      distinctBills: 2,
+    });
+    log.mockRestore();
   });
 
   it("builds reason breakdown buckets at or above minCount", async () => {
@@ -613,6 +620,7 @@ describe("billStatsAggregator handler", () => {
     it("throws a stats write failure for stream invocations so the mapping retries", async () => {
       const { send, loaded } = loadWithManifest();
       jest.spyOn(console, "error").mockImplementation(() => undefined);
+      const log = jest.spyOn(console, "log").mockImplementation(() => undefined);
       send
         .mockResolvedValueOnce({ Items: [] })
         .mockRejectedValueOnce(
@@ -634,6 +642,11 @@ describe("billStatsAggregator handler", () => {
         ([command]: [FakeCommand]) => command?.input?.TableName === "BillsManifest",
       );
       expect(manifestCalls).toHaveLength(0);
+      expect(log).toHaveBeenCalledWith("billStatsAggregator stream batch", {
+        records: 1,
+        skippedRecords: 0,
+        distinctBills: 1,
+      });
     });
 
     it("returns 500 to API callers when the stats write fails", async () => {

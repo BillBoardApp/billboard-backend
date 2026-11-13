@@ -357,6 +357,7 @@ describe("createBillsManifest handler", () => {
   });
 
   it("deletes old SK and inserts new SK when manifest exists", async () => {
+    const info = jest.spyOn(console, "info").mockImplementation(() => undefined);
     jest.useFakeTimers();
     jest.setSystemTime(new Date("2026-01-08T22:47:57.000Z"));
 
@@ -446,6 +447,17 @@ describe("createBillsManifest handler", () => {
     expect(ddbItems[ddbKey("BILL", oldSk)]).toBeUndefined();
     const lookup = items.find((item: Item) => item.pk?.S === "BILL_GUID");
     expect(lookup!.manifestSk.S).toBe("2026-01-05T10:30:00.000Z#BILLS-108s922");
+    expect(info).toHaveBeenCalledWith(
+      "Dated manifest upsert",
+      expect.objectContaining({
+        guid: "BILLS-108s922",
+        decision: "moved",
+        moves: ["newerAction"],
+        rowUpdatedAt: "2026-01-01T00:00:00.000Z",
+        storedAt: "2026-01-05T10:30:00.000Z",
+      }),
+    );
+    info.mockRestore();
   });
 
   it("rewrites manifest row when bill status changes but updatedAt stays the same", async () => {
@@ -821,6 +833,7 @@ describe("createBillsManifest handler", () => {
 
     beforeEach(() => {
       jest.spyOn(Math, "random").mockReturnValue(0); // zero retry backoff
+      jest.spyOn(console, "info").mockImplementation(() => undefined);
       jest.spyOn(console, "warn").mockImplementation(() => undefined);
       jest.spyOn(console, "error").mockImplementation(() => undefined);
     });

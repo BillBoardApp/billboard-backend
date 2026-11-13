@@ -38,6 +38,7 @@ describe("billPriorityResolver handler", () => {
   beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
+    jest.spyOn(console, "log").mockImplementation(() => undefined);
     restoreEnv?.();
     restoreEnv = applyTestEnv(
       {
@@ -301,6 +302,7 @@ describe("billPriorityResolver ranking", () => {
   beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
+    jest.spyOn(console, "log").mockImplementation(() => undefined);
     restoreEnv?.();
     restoreEnv = applyTestEnv(
       {
@@ -523,6 +525,7 @@ describe("billPriorityResolver companion groups (APPF-23)", () => {
   beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
+    jest.spyOn(console, "log").mockImplementation(() => undefined);
     restoreEnv?.();
     restoreEnv = applyTestEnv(
       {

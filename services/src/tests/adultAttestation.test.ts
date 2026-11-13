@@ -72,6 +72,7 @@ describe("adultAttestation handler", () => {
 
   it("returns 500 instead of writing when the eligibility lookup fails", async () => {
     mockSend.mockRejectedValueOnce(new Error("DynamoDB unavailable"));
+    const errorLog = jest.spyOn(console, "error").mockImplementation(() => undefined);
 
     const response = await handler({
       requestContext: { authorizer: { jwt: { claims: { sub: "u1" } } } },
@@ -80,6 +81,11 @@ describe("adultAttestation handler", () => {
 
     expect(response.statusCode).toBe(500);
     expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(errorLog).toHaveBeenCalledWith(
+      "adultAttestation failed",
+      expect.objectContaining({ message: "DynamoDB unavailable" }),
+    );
+    errorLog.mockRestore();
   });
 
   it("returns 409 when deletion is in progress", async () => {

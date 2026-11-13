@@ -83,6 +83,7 @@ describe("generateWeeklyDigests handler", () => {
   let mockCloudWatchSend: jest.Mock;
   let mockSqsSend: jest.Mock;
   let restoreEnv: (() => void) | undefined;
+  let logSpy: jest.SpyInstance;
 
   function useEnv(overrides: Record<string, string> = {}) {
     restoreEnv?.();
@@ -94,6 +95,7 @@ describe("generateWeeklyDigests handler", () => {
     // advanceTimers: the planner's send retries sleep, so fake time has to move.
     jest.useFakeTimers({ advanceTimers: true });
     jest.setSystemTime(new Date(WEEKLY_DIGEST_TEST_NOW));
+    logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
 
     ({ __mockSend: mockDynamoSend } = jest.requireMock("@aws-sdk/client-dynamodb"));
     ({ __mockSend: mockS3Send } = jest.requireMock("@aws-sdk/client-s3"));
@@ -116,6 +118,7 @@ describe("generateWeeklyDigests handler", () => {
     restoreEnv?.();
     restoreEnv = undefined;
     jest.useRealTimers();
+    logSpy.mockRestore();
   });
 
   function metricData(metricName: string) {
@@ -870,13 +873,17 @@ describe("weekly digest companion groups (APPF-23)", () => {
       if (command.input?.Key?.pk?.S === "BILL_COMPANION_GROUPS") throw new Error("AccessDenied");
       return weeklyDigestDynamoRoute()(command);
     });
-    jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    const log = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const { createWeeklyDigestGenerationContextForWindow } = require("../shared/weeklyDigestGeneration");
 
     const context = await createWeeklyDigestGenerationContextForWindow(window);
 
     expect(context.companionIndex.size).toBe(0);
     expect(context.manifestItems).toHaveLength(3);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('"CompanionGroupsReadFailed":1'));
+    warn.mockRestore();
+    log.mockRestore();
   });
 });
 

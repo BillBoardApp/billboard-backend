@@ -17,7 +17,7 @@
     "build": "cd services && npm run build",
     "synth": "cd infra && npm run synth",
     "release:build": "bash scripts/ci/build-release.sh .release",
-    "release:synth": "cd infra && BILLBOARD_STRICT_RELEASE=true BILLBOARD_RELEASE_MANIFEST_FILE=../.release/manifest.json BILLBOARD_RELEASE_ID=$(cat ../.release/release-id) npx cdk synth --all --quiet --no-lookups --no-notices -o ../.release/cdk.out",
+    "release:synth": "cd infra && BILLBOARD_STRICT_RELEASE=true BILLBOARD_RELEASE_MANIFEST_FILE=../.release/manifest.json BILLBOARD_RELEASE_ID=$(cat ../.release/release-id) npx cdk synth --quiet --no-lookups --no-notices -o ../.release/cdk.out",
     "verify": "npm run check && npm run typecheck && npm run lint && npm test && npm run build && npm run synth && npm run release:build && npm run release:synth"
   }
 }

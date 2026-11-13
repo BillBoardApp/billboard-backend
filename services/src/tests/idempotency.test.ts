@@ -97,9 +97,11 @@ const makeReadableBodyFn = (obj: unknown) => () => {
 describe("userMatcher — duplicate notification suppression", () => {
   let handler: (event: SQSEvent) => Promise<{ batchItemFailures: Array<{ itemIdentifier: string }> }>;
   let restoreEnv: () => void;
+  let logSpy: jest.SpyInstance;
 
   beforeEach(() => {
     jest.resetModules();
+    logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
     mockDynamoSend.mockReset();
     mockS3Send.mockReset();
 
@@ -120,6 +122,7 @@ describe("userMatcher — duplicate notification suppression", () => {
 
   afterEach(() => {
     restoreEnv?.();
+    logSpy.mockRestore();
   });
 
   it("returns empty batchItemFailures when ConditionalCheckFailed blocks a duplicate notification", async () => {

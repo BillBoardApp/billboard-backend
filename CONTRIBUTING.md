@@ -78,6 +78,15 @@ npm run verify    # check, typecheck, lint, tests, esbuild bundles, offline synt
 workflow checks the pull request's commits for secrets and for addresses other than GitHub noreply ones. Everything
 must pass with no warnings. Paste the `Tests:` lines into the pull request.
 
+Dependency install scripts are reviewed: `allowScripts` in `services/package.json` and `infra/package.json` approves
+esbuild's install script (for its exact version) and denies the others, which the install does not need. When an
+update changes that list (a new esbuild version, a new package with a script), `npm ci` warns and
+`npm install-scripts ls` names it; read the script, then run `npm install-scripts approve <pkg>` or `deny <pkg>` in that
+package and commit the change. If your own npm config sets `allow-scripts`, npm warns that it ignores it here; set it
+for global installs only (`npm install -g --allow-scripts=<pkg> <pkg>`). Both packages also override `test-exclude`
+under `babel-plugin-istanbul` to 8.x, so Jest's coverage no longer pulls in deprecated `glob` versions; remove that
+override once `babel-plugin-istanbul` itself depends on `test-exclude` 8.
+
 Some npm scripts in `services/` (`backfill:*`, `repair:*`, `eval:*`, `probe:*` and similar) and in `infra/`
 (`cdk deploy`, `release:*`) act on whatever AWS account your credentials point at. Never run them against an account
 you do not own.

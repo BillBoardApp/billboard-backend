@@ -96,7 +96,7 @@ but it does not move `prod` aliases. Each alias is pinned to its live version th
 
 1. `npm run release:build` at the root (deterministic zips and a manifest) and an upload of the release to the
    artifacts bucket (`../scripts/ci/publish-release.sh`);
-2. `npx cdk synth --all --quiet` with the strict release variables;
+2. `npx cdk synth --quiet` with the strict release variables;
 3. `npm run release:sync-prod-alias-versions -- --templates cdk.out`;
 4. `npx cdk deploy --app cdk.out --all --require-approval never --outputs-file cdk-outputs.json`;
 5. `npm run release:deploy-lambdas -- --outputs cdk-outputs.json`.

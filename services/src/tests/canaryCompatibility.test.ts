@@ -55,10 +55,12 @@ describe("isSyntheticEvent", () => {
 describe("fetchBillsManifest — synthetic event short-circuit", () => {
   let handler: (event?: unknown) => Promise<{ statusCode: number; body: string; headers?: Record<string, string> }>;
   let restoreEnv: () => void;
+  let logSpy: jest.SpyInstance;
 
   beforeEach(() => {
     jest.resetModules();
     mockDdbSend.mockReset();
+    logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
 
     restoreEnv = applyTestEnv({
       TABLE_NAME: "bills-table",
@@ -72,6 +74,7 @@ describe("fetchBillsManifest — synthetic event short-circuit", () => {
 
   afterEach(() => {
     restoreEnv?.();
+    logSpy.mockRestore();
   });
 
   it("returns { status: 'healthy', synthetic: true } without querying DynamoDB", async () => {
@@ -84,6 +87,7 @@ describe("fetchBillsManifest — synthetic event short-circuit", () => {
 
     // No DynamoDB calls should have been made
     expect(mockDdbSend).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"message":"Synthetic health check"'));
   });
 
   it("returns { status: 'healthy' } for x-synthetic-test: 'true' header pattern", async () => {
@@ -93,6 +97,7 @@ describe("fetchBillsManifest — synthetic event short-circuit", () => {
     const body = JSON.parse(result.body);
     expect(body.status).toBe("healthy");
     expect(mockDdbSend).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"message":"Synthetic health check"'));
   });
 });
 
