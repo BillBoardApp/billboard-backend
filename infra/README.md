@@ -40,7 +40,7 @@ env -u AWS_PROFILE -u AWS_DEFAULT_REGION AWS_CONFIG_FILE=/dev/null AWS_SHARED_CR
 
 | Input | Kind | Effect |
 |---|---|---|
-| `BILLBOARD_RELEASE_MANIFEST_FILE`, `BILLBOARD_RELEASE_ID` | env | Build Lambda code from that release (content-addressed `artifacts/` keys). Without them the templates point at `<handler>.zip` keys |
+| `BILLBOARD_RELEASE_MANIFEST_FILE`, `BILLBOARD_RELEASE_ID` | env | Build Lambda code from that release. Each artifact's key must be `artifacts/<logicalName>/<sha256>.zip`; a deploy run given `release_id` checks each zip's hash before synth. Without them the templates point at `<handler>.zip` keys |
 | `BILLBOARD_STRICT_RELEASE=true` | env | Fail unless every Lambda comes from the manifest and every manifest artifact is used (root `npm run release:synth` sets it) |
 | `BILLS_API_POLLER_RESERVED_CONCURRENCY` | env | Unset: reserve 1; `off`: none; an integer ≥ 1: that many |
 | `FETCH_RAW_BILLS_RESERVED_CONCURRENCY`, `ENRICH_OFFICIAL_VOTES_RESERVED_CONCURRENCY`, `BILL_SUMMARIZER_RESERVED_CONCURRENCY` | env | Optional reservations, unset by default |

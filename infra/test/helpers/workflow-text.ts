@@ -48,6 +48,21 @@ export const stepInput = (step: string, input: string): string | undefined => {
   return folded.join(' ');
 };
 
+/** The script of a step's `run: |` block (ten spaces in), as the runner's shell gets it. */
+export const stepRun = (step: string): string => {
+  const lines = step.split('\n');
+  const start = lines.indexOf('        run: |');
+  expect({ step: lines[0], run: start >= 0 }).toEqual({ step: lines[0], run: true });
+  const body: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line !== '' && !line.startsWith('          ')) {
+      break;
+    }
+    body.push(line.slice(10));
+  }
+  return `${body.join('\n').trimEnd()}\n`;
+};
+
 /** The steps of a job that take AWS credentials. */
 export const credentialSteps = (job: string): string[] =>
   stepsOf(job).filter((step) => /^ {6}- (?:[^\n]*\n {8})*uses: aws-actions\/configure-aws-credentials@/.test(step));

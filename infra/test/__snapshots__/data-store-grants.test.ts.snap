@@ -2769,6 +2769,9 @@ exports[`data store grants (CQ-15) every role keeps the same normalized permissi
     "arn:aws:lambda:\${Region}:\${Account}:function:*": [
       "lambda:GetAlias",
     ],
+    "arn:aws:s3:::\${LambdaArtifactsBucket}/artifacts/*": [
+      "s3:GetObject",
+    ],
     "arn:aws:s3:::\${LambdaArtifactsBucket}/releases/*": [
       "s3:GetObject",
     ],

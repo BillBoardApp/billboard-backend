@@ -1,5 +1,6 @@
-import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_LAMBDA_ARTIFACTS_BUCKET_NAME, GITHUB_INFRA_DEPLOY_ROLE_NAME, GITHUB_SERVICES_RELEASE_ROLE_NAME } from '../lib/stacks/github-oidc';
@@ -17,14 +18,14 @@ import {
   synthOidcStack,
   type SessionPolicy,
 } from './helpers/github-oidc-roles';
-import { awsCallsIn, credentialSteps, jobText, readWorkflow, stepIf, stepInput, stepsOf } from './helpers/workflow-text';
+import { awsCallsIn, credentialSteps, jobText, readWorkflow, stepIf, stepInput, stepRun, stepsOf } from './helpers/workflow-text';
 
 /**
  * The production deploy workflow, .github/workflows/deploy.yml (docs/DEPLOYING.md): one job, `deploy`, holds all AWS
  * work in the `production` environment. It publishes the release with the services release role, clears those
- * credentials, installs, and only then takes the infra deploy role, narrowed for a diff run. The deploy guard runs
- * before any production write, and the CodeDeploy wait fits the job's timeout. workflows.test.ts checks the rules
- * every workflow follows.
+ * credentials, installs, and only then takes the infra deploy role, narrowed for a diff run. A run given release_id
+ * checks every zip of that release against its manifest before synth, the deploy guard runs before any production
+ * write, and the CodeDeploy wait fits the job's timeout. workflows.test.ts checks the rules every workflow follows.
  */
 const ACCOUNT_SECRET = '${{ secrets.AWS_ACCOUNT_ID }}';
 const raw = readWorkflow('deploy.yml');
@@ -192,7 +193,7 @@ describe('deploy.yml uses the GitHubOidcStack roles', () => {
     }
     expect(workflow).toContain(`ARTIFACTS_BUCKET: ${DEFAULT_LAMBDA_ARTIFACTS_BUCKET_NAME}\n`);
     expect(policy.Statement.filter((statement) => asArray(statement.Action).includes('s3:GetObject'))
-      .flatMap((statement) => asArray(statement.Resource))).toEqual([`${BUCKET_ARN}/releases/*`]);
+      .flatMap((statement) => asArray(statement.Resource))).toEqual([`${BUCKET_ARN}/releases/*`, `${BUCKET_ARN}/artifacts/*`]);
   });
 
   test("the diff session policy names exactly the bootstrap roles the app's cloud assembly has the CLI assume", () => {
@@ -217,9 +218,20 @@ describe('deploy.yml uses the GitHubOidcStack roles', () => {
     const direct = awsCallsIn(steps.join('\n'));
     expect(direct).toEqual(['s3:GetObject']);
     expect(direct.filter((action) => !allowed.has(action))).toEqual([]);
-    // Its S3 reads stay under releases/, the session policy's only S3 resource.
-    for (const path of steps.join('\n').matchAll(/s3:\/\/\$\{ARTIFACTS_BUCKET\}\/([^"\s]+)|\bkey="([^"]+)"/g)) {
-      expect(path[1] ?? path[2]).toMatch(/^releases\//);
+    // Its S3 reads stay inside the session policy's S3 resources, the release manifests (releases/) and the release
+    // zips (artifacts/), and the role grants each one.
+    const prefixes = diffSessionPolicy().Statement
+      .filter((statement) => asArray(statement.Action).includes('s3:GetObject'))
+      .flatMap((statement) => asArray(statement.Resource))
+      .map((resource) => resource.replace(`${BUCKET_ARN}/`, '').replace(/\*$/, ''));
+    expect(prefixes).toEqual(['releases/', 'artifacts/']);
+    const paths = [...steps.join('\n').matchAll(/s3:\/\/\$\{ARTIFACTS_BUCKET\}\/([^"\s]+)|\bkey="([^"]+)"/g)]
+      .map((match) => match[1] ?? match[2]);
+    expect(paths).toEqual(expect.arrayContaining(['releases/${BILLBOARD_RELEASE_ID}/manifest.json', 'artifacts/${name}/${sum}.zip']));
+    for (const path of paths) {
+      const object = `${BUCKET_ARN}/${path.replace(/\$\{\w+\}/g, 'x')}`;
+      expect({ path, inPolicy: prefixes.some((prefix) => path.startsWith(prefix)), granted: roleAllows(infraRole, 's3:GetObject', object) })
+        .toEqual({ path, inPolicy: true, granted: true });
     }
     // npm scripts: the guard makes no AWS call; the alias pin dry run only reads aliases (next test).
     const scripts = [...steps.join('\n').matchAll(/npm run (release:[\w:-]+)([^\n]*)/g)].map(([, name, args]) => ({ name, args }));
@@ -270,6 +282,196 @@ describe('deploy.yml uses the GitHubOidcStack roles', () => {
     for (const key of ['artifacts/x.zip', 'releases/services-20261015-abcdef0/manifest.json', 'history/x.zip', 'x.zip']) {
       expect(roleAllows(servicesRole, 's3:PutObject', `${BUCKET_ARN}/${key}`)).toBe(true);
     }
+  });
+});
+
+describe('deploy.yml checks every zip of a release_id run against its manifest before synth', () => {
+  const ZIP_CHECK = 'Check every release zip against the manifest';
+  const RELEASE_GIVEN = "env.EXISTING_RELEASE_ID != ''";
+
+  test('for a run given release_id, with the deploy role, after the manifest download and before synth; its only call is a download', () => {
+    const step = stepNamed(ZIP_CHECK);
+    expect(stepIf(step)).toBe(RELEASE_GIVEN);
+    expect(diffModeSteps()).toContain(step);
+    const check = indexIn(deployJob, `name: ${ZIP_CHECK}\n`);
+    expect(check).toBeGreaterThan(indexIn(deployJob, 'name: Download the release manifest\n'));
+    expect(check).toBeLessThan(indexIn(deployJob, 'name: Synthesize'));
+    expect(awsCallsIn(step)).toEqual(['s3:GetObject']);
+  });
+
+  // An IAM change applies only once a run's cdk deploy has deployed GitHubOidcStack. A run that needed the deploy
+  // role's artifacts/ read could not deploy that grant, or a fix to it.
+  test('a run that builds its release reads nothing under artifacts/ with the deploy role', () => {
+    const steps = stepsOf(deployJob);
+    const fresh = steps.slice(steps.findIndex((step) => step.includes('name: AWS credentials for a diff')))
+      .filter((step) => stepIf(step) !== RELEASE_GIVEN);
+    expect(fresh.length).toBeGreaterThan(5);
+    const paths = [...fresh.join('\n').matchAll(/s3:\/\/\$\{ARTIFACTS_BUCKET\}\/([^"\s]+)|\bkey="([^"]+)"/g)]
+      .map((match) => match[1] ?? match[2]);
+    expect(paths.length).toBeGreaterThan(0);
+    expect(paths.filter((path) => !path.startsWith('releases/'))).toEqual([]);
+  });
+
+  describe('the step, run with a fake CLI over a local bucket', () => {
+    const BUCKET = DEFAULT_LAMBDA_ARTIFACTS_BUCKET_NAME;
+    const RELEASE_ID = 'services-20261112-abcdef0';
+    const script = stepRun(stepNamed(ZIP_CHECK));
+    const sha256 = (content: string): string => createHash('sha256').update(content).digest('hex');
+    type Artifact = { logicalName: string; s3Key: string; sha256: string; s3ObjectVersion?: string };
+    const artifactOf = (logicalName: string, content: string): Artifact =>
+      ({ logicalName, s3Key: `artifacts/${logicalName}/${sha256(content)}.zip`, sha256: sha256(content) });
+    let dir: string;
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), 'billboard-zip-check-'));
+      for (const name of ['bin', 'bucket', 'temp']) {
+        mkdirSync(join(dir, name));
+      }
+      // Copies s3://<bucket>/<key> from bucket/<key>, as a 403 when it is not there; logs every call.
+      writeFileSync(join(dir, 'bin', 'aws'), [
+        '#!/bin/sh',
+        `echo "$*" >> '${join(dir, 'calls.log')}'`,
+        `[ "$1 $2" = "s3 cp" ] || exit 2`,
+        `case "$3" in "s3://${BUCKET}/"*) ;; *) exit 2;; esac`,
+        `src='${join(dir, 'bucket')}'/"\${3#s3://${BUCKET}/}"`,
+        `[ -f "$src" ] || { echo 'fatal error: An error occurred (403) when calling the HeadObject operation: Forbidden' >&2; exit 1; }`,
+        'cp "$src" "$4"',
+        '',
+      ].join('\n'));
+      chmodSync(join(dir, 'bin', 'aws'), 0o755);
+      // GitHub's Ubuntu runners have sha256sum; older macOS has only shasum, which prints the same.
+      if (spawnSync('sh', ['-c', 'command -v sha256sum'], { stdio: 'ignore' }).status !== 0) {
+        writeFileSync(join(dir, 'bin', 'sha256sum'), '#!/bin/sh\nexec shasum -a 256 "$@"\n');
+        chmodSync(join(dir, 'bin', 'sha256sum'), 0o755);
+      }
+    });
+    afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+    const upload = (key: string, content: string): void => {
+      mkdirSync(join(dir, 'bucket', key, '..'), { recursive: true });
+      writeFileSync(join(dir, 'bucket', key), content);
+    };
+    const download = (s3Key: string): string =>
+      `s3 cp s3://${BUCKET}/${s3Key} ${join(dir, 'temp', 'release-zip-check', s3Key.split('/')[2])} --only-show-errors`;
+
+    /** Runs the step over these artifacts, or over this manifest text. */
+    const run = (manifest: Artifact[] | string): { status: number | null; output: string; summary: string; calls: string[] } => {
+      const file = join(dir, 'manifest.json');
+      writeFileSync(file, typeof manifest === 'string' ? manifest : JSON.stringify({ schemaVersion: 1, artifacts: manifest }));
+      const summary = join(dir, 'summary.md');
+      writeFileSync(join(dir, 'step.sh'), script);
+      const result = spawnSync('bash', ['-e', join(dir, 'step.sh')], {
+        encoding: 'utf8',
+        env: {
+          PATH: `${join(dir, 'bin')}:${process.env.PATH ?? ''}`,
+          RUNNER_TEMP: join(dir, 'temp'),
+          ARTIFACTS_BUCKET: BUCKET,
+          BILLBOARD_RELEASE_ID: RELEASE_ID,
+          BILLBOARD_RELEASE_MANIFEST_FILE: file,
+          GITHUB_STEP_SUMMARY: summary,
+        },
+      });
+      const read = (path: string): string => (existsSync(path) ? readFileSync(path, 'utf8') : '');
+      return {
+        status: result.status,
+        output: `${result.stdout}${result.stderr}`,
+        summary: read(summary),
+        calls: read(join(dir, 'calls.log')).trim().split('\n').filter(Boolean),
+      };
+    };
+    const failedLine = (failed: number, total: number): string =>
+      `::error title=Release zip check::${failed} of ${total} zips of release ${RELEASE_ID} failed the check (errors above). Nothing has been deployed.`;
+
+    test('passes when every zip is there with its hash, downloading each one once', () => {
+      const artifacts = [artifactOf('fnA', 'zip A'), artifactOf('fnB', 'zip B')];
+      upload(artifacts[0].s3Key, 'zip A');
+      upload(artifacts[1].s3Key, 'zip B');
+      const result = run(artifacts);
+      expect(result).toEqual(expect.objectContaining({ status: 0, summary: 'Release zips checked against the manifest: 2\n' }));
+      expect(result.output).not.toContain('::error');
+      expect(result.calls).toEqual(artifacts.map(({ s3Key }) => download(s3Key)));
+    });
+
+    test('fails, naming the artifact, when a zip was replaced, and still checks the rest', () => {
+      const artifacts = [artifactOf('fnA', 'zip A'), artifactOf('fnB', 'zip B')];
+      upload(artifacts[0].s3Key, 'another zip A');
+      upload(artifacts[1].s3Key, 'zip B');
+      const result = run(artifacts);
+      expect(result.status).toBe(1);
+      expect(result.output).toContain(
+        `::error title=Release zip changed::fnA: s3://${BUCKET}/${artifacts[0].s3Key} has SHA-256 ${sha256('another zip A')}, ` +
+          `not the manifest's ${artifacts[0].sha256}`,
+      );
+      expect(result.output).toContain(failedLine(1, 2));
+      expect(result.calls).toEqual(artifacts.map(({ s3Key }) => download(s3Key)));
+      expect(result.summary).toBe('Release zip check: 1 of 2 zips failed: fnA\n');
+    });
+
+    test('fails, naming the artifact, when a zip is missing', () => {
+      const artifacts = [artifactOf('fnA', 'zip A'), artifactOf('fnB', 'zip B')];
+      upload(artifacts[1].s3Key, 'zip B');
+      const result = run(artifacts);
+      expect(result.status).toBe(1);
+      expect(result.output).toContain('(403) when calling the HeadObject operation');
+      expect(result.output).toContain(`::error title=Release zip missing::fnA: s3://${BUCKET}/${artifacts[0].s3Key} is missing or unreadable`);
+      expect(result.output).toContain(failedLine(1, 2));
+      expect(result.calls).toHaveLength(2);
+    });
+
+    test('names every bad zip in one run', () => {
+      const artifacts = [artifactOf('fnA', 'zip A'), artifactOf('fnB', 'zip B'), artifactOf('fnC', 'zip C'), artifactOf('fnD', 'zip D')];
+      upload(artifacts[0].s3Key, 'another zip A');
+      upload(artifacts[2].s3Key, 'zip C');
+      upload(artifacts[3].s3Key, 'another zip D');
+      const result = run(artifacts);
+      expect(result.status).toBe(1);
+      expect(result.output.match(/^::error title=Release zip (changed|missing)::(\w+): /gm)).toEqual([
+        '::error title=Release zip changed::fnA: ',
+        '::error title=Release zip missing::fnB: ',
+        '::error title=Release zip changed::fnD: ',
+      ]);
+      expect(result.output).toContain(failedLine(3, 4));
+      expect(result.summary).toBe('Release zip check: 3 of 4 zips failed: fnA fnB fnD\n');
+    });
+
+    test.each<[string, (artifact: Artifact) => Artifact, string]>([
+      ['a key that is not content-addressed', (artifact) => ({ ...artifact, s3Key: 'releases/r1/fnB.zip' }), 'Release zip key'],
+      ['a key that holds another hash', (artifact) => ({ ...artifact, s3Key: `artifacts/fnB/${'b'.repeat(64)}.zip` }), 'Release zip key'],
+      ['a hash that is not one', (artifact) => ({ ...artifact, sha256: 'B'.repeat(64), s3Key: `artifacts/fnB/${'B'.repeat(64)}.zip` }), 'Release zip key'],
+      ['a pinned object version', (artifact) => ({ ...artifact, s3ObjectVersion: 'v1' }), 'Release zip version'],
+    ])('fails, without downloading that zip, for %s', (_case, change, title) => {
+      const artifacts = [change(artifactOf('fnB', 'zip B')), artifactOf('fnA', 'zip A')];
+      upload(artifacts[0].s3Key, 'zip B');
+      upload(artifacts[1].s3Key, 'zip A');
+      const result = run(artifacts);
+      expect(result.status).toBe(1);
+      expect(result.output).toContain(`::error title=${title}::fnB: `);
+      expect(result.output).toContain(failedLine(1, 2));
+      expect(result.calls).toEqual([download(artifacts[1].s3Key)]);
+    });
+
+    // Each of these would pass a check that read the list leniently: bash's read merges empty tab-separated fields.
+    const zipA = artifactOf('fnA', 'zip A');
+    test.each<[string, string, string]>([
+      ['no artifacts', JSON.stringify({ schemaVersion: 1, artifacts: [] }), 'its artifacts are not a non-empty array'],
+      ['no artifacts list', JSON.stringify({ schemaVersion: 1 }), 'its artifacts are not a non-empty array'],
+      ['artifacts that are an object', JSON.stringify({ schemaVersion: 1, artifacts: { fnA: zipA } }), 'its artifacts are not a non-empty array'],
+      ['two JSON documents', `${JSON.stringify({ schemaVersion: 1, artifacts: [zipA] })}\n${JSON.stringify({ artifacts: [] })}`, 'it is not one JSON document'],
+      [
+        'an empty logicalName, which would shift the fields after it',
+        JSON.stringify({ schemaVersion: 1, artifacts: [{ logicalName: '', s3Key: 'fnA', sha256: zipA.s3Key, s3ObjectVersion: zipA.sha256 }] }),
+        'an artifact has no logicalName, s3Key or sha256 string',
+      ],
+      ['a sha256 that is not a string', JSON.stringify({ schemaVersion: 1, artifacts: [{ ...zipA, sha256: 1 }] }), 'an artifact has no logicalName, s3Key or sha256 string'],
+    ])('fails, downloading nothing, for a manifest with %s', (_case, manifest, reason) => {
+      upload(zipA.s3Key, 'zip A');
+      const result = run(manifest);
+      expect(result.status).toBe(1);
+      expect(result.output).toMatch(new RegExp(
+        `^::error title=Release zip check::the manifest of release ${RELEASE_ID} cannot be checked: jq: error \\(at [^\\n]*\\): ${reason} $`, 'm'));
+      expect(result.calls).toEqual([]);
+      expect(result.summary).toBe('');
+    });
   });
 });
 

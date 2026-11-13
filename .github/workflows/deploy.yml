@@ -195,8 +195,8 @@ jobs:
         run: test -z "${AWS_ACCESS_KEY_ID:-}${AWS_SECRET_ACCESS_KEY:-}${AWS_SESSION_TOKEN:-}"
       - run: npm ci
       # GitHubInfraDeployRole reaches CloudFormation and the CDK assets bucket only through the CDK bootstrap
-      # roles. A diff run keeps, of its policy, the release manifest download, the alias reads and the three
-      # bootstrap roles a change-set diff assumes: it cannot write an alias pin or start a CodeDeploy
+      # roles. A diff run keeps, of its policy, the release manifest and zip downloads, the alias reads and the
+      # three bootstrap roles a change-set diff assumes: it cannot write an alias pin or start a CodeDeploy
       # deployment. The bootstrap deploy role can still change stacks, so this is not a read-only diff.
       - name: AWS credentials for a diff (no alias pin or CodeDeploy writes)
         if: env.MODE == 'diff'
@@ -214,6 +214,8 @@ jobs:
             "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/cdk-hnb659fds-lookup-role-${{ secrets.AWS_ACCOUNT_ID }}-us-east-1"]},
             {"Sid":"DownloadReleaseManifest","Effect":"Allow","Action":"s3:GetObject",
             "Resource":"arn:aws:s3:::billboard-lambda-artifacts/releases/*"},
+            {"Sid":"DownloadReleaseZips","Effect":"Allow","Action":"s3:GetObject",
+            "Resource":"arn:aws:s3:::billboard-lambda-artifacts/artifacts/*"},
             {"Sid":"ReadProdAliases","Effect":"Allow","Action":"lambda:GetAlias",
             "Resource":"arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:*"}]}
       - name: AWS credentials for a deploy
@@ -238,6 +240,72 @@ jobs:
           aws s3 cp "s3://${ARTIFACTS_BUCKET}/releases/${BILLBOARD_RELEASE_ID}/manifest.json" "$manifest"
           if [ "$BUILT_THIS_RUN" = "true" ]; then test "$(jq -r .git.commitSha "$manifest")" = "$GITHUB_SHA"; fi
           echo "BILLBOARD_RELEASE_MANIFEST_FILE=$manifest" >> "$GITHUB_ENV"
+      # CloudFormation deploys whatever object sits at each manifest key, and a run given release_id deploys zips an
+      # earlier run uploaded. Each key holds its zip's SHA-256 (artifacts/<logicalName>/<sha256>.zip, which synth
+      # also requires), so in such a run this downloads every zip to the runner and fails the run, before anything
+      # is deployed, on each missing zip or hash that differs from the manifest's. A run that builds its release
+      # skips it: publish-release.sh compared each zip with the manifest just before step 1 uploaded it, and the run
+      # then never needs this role's artifacts/ read, so it can always deploy a change to that grant. A diff run
+      # given release_id runs the check and deploys nothing.
+      # Limits: it trusts the manifest, so a manifest rewritten together with its zips passes; and it reads each key
+      # once, here, while the Lambda updates of cdk deploy fetch the key again later with no object version pinned,
+      # so a write to the key in between is not caught. Both rest on only the release upload of an approved run
+      # writing artifacts/, which is why uploads happen only in step 1 of this job.
+      - name: Check every release zip against the manifest
+        if: env.EXISTING_RELEASE_ID != ''
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/release-zip-check"
+          mkdir -p "$dir"
+          # One JSON document whose artifacts are a non-empty array, each naming its zip with non-empty strings. Only
+          # the last field below may then be empty: bash's read merges empty fields and would shift the ones after.
+          if ! jq -r -s '
+            if length != 1 then error("it is not one JSON document") else .[0] end
+            | .artifacts
+            | if type == "array" and length > 0 then .[] else error("its artifacts are not a non-empty array") end
+            | if type == "object" and ([.logicalName, .s3Key, .sha256] | all(type == "string" and length > 0))
+              then [.logicalName, .s3Key, .sha256, (.s3ObjectVersion // "" | tostring)] | @tsv
+              else error("an artifact has no logicalName, s3Key or sha256 string") end
+          ' "$BILLBOARD_RELEASE_MANIFEST_FILE" > "$dir/artifacts.tsv" 2> "$dir/jq-error.txt"; then
+            echo "::error title=Release zip check::the manifest of release ${BILLBOARD_RELEASE_ID} cannot be checked: $(tr '\n' ' ' < "$dir/jq-error.txt")"
+            exit 1
+          fi
+          total=0
+          failed=0
+          failed_names=""
+          fail() {
+            echo "::error title=$1::${name}: $2"
+            failed=$((failed + 1))
+            failed_names="${failed_names} ${name}"
+          }
+          while IFS=$'\t' read -r name s3_key sum version; do
+            total=$((total + 1))
+            if [[ ! "$sum" =~ ^[a-f0-9]{64}$ ]] || [ "$s3_key" != "artifacts/${name}/${sum}.zip" ]; then
+              fail "Release zip key" "the manifest key '${s3_key}' is not artifacts/${name}/<its sha256>.zip, so its zip cannot be checked."
+              continue
+            fi
+            if [ -n "$version" ]; then
+              fail "Release zip version" "the manifest pins S3 object version '${version}', and this check reads only the current object."
+              continue
+            fi
+            zip="$dir/${sum}.zip"
+            if ! error="$(aws s3 cp "s3://${ARTIFACTS_BUCKET}/artifacts/${name}/${sum}.zip" "$zip" --only-show-errors 2>&1 < /dev/null)"; then
+              echo "$error" >&2
+              fail "Release zip missing" "s3://${ARTIFACTS_BUCKET}/artifacts/${name}/${sum}.zip is missing or unreadable (a 403 also means missing: the deploy role cannot list the bucket)."
+              continue
+            fi
+            actual="$(sha256sum "$zip" | cut -d ' ' -f 1)"
+            rm -f "$zip"
+            if [ "$actual" != "$sum" ]; then
+              fail "Release zip changed" "s3://${ARTIFACTS_BUCKET}/artifacts/${name}/${sum}.zip has SHA-256 ${actual}, not the manifest's ${sum}: something replaced it after the release was published."
+            fi
+          done < "$dir/artifacts.tsv"
+          if [ "$failed" -gt 0 ]; then
+            echo "Release zip check: ${failed} of ${total} zips failed:${failed_names}" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=Release zip check::${failed} of ${total} zips of release ${BILLBOARD_RELEASE_ID} failed the check (errors above). Nothing has been deployed. docs/DEPLOYING.md says what each error means; to roll back meanwhile, revert the change on main, which builds and publishes a fresh release."
+            exit 1
+          fi
+          echo "Release zips checked against the manifest: $total" >> "$GITHUB_STEP_SUMMARY"
       - name: Synthesize (strict release; website/ and contracts/ come from this checkout)
         env:
           # Unset reserves 1 poller execution; "off" drops it. See infra/lib/config/congress-integration-service-constants.ts.
