@@ -19,7 +19,7 @@ maintainers deploy it ([docs/DEPLOYING.md](docs/DEPLOYING.md)). The iOS app live
 | `website/` | The static public site: landing page, Help, How Billboard works, privacy policy, roadmap and the `/b/<guid>` share page | [website/README.md](website/README.md) |
 | `scripts/ci/` | `build-release.sh` (deterministic Lambda zips and a release manifest), `publish-release.sh` (its upload), the layout guard `check-layout.sh`, and the commit-safety check's two scripts | |
 | `.github/workflows/` | `pr.yml` (the checks every pull request runs) and `deploy.yml` (the production pipeline) | [docs/DEPLOYING.md](docs/DEPLOYING.md) |
-| `docs/` | How deploys work, and a glossary of the IDs that code comments cite | [docs/README.md](docs/README.md) |
+| `docs/` | How deploys work, a glossary of the IDs that code comments cite, and why the operations runbook they cite is not public | [docs/README.md](docs/README.md) |
 
 How data flows: congress.gov → `BillsApiPoller` → raw bills in S3 → `BillSummarizer` (Amazon Bedrock) → processed
 bills in S3 → manifests in DynamoDB → the user API (API Gateway, Cognito) → the iOS app. Changes to processed bills
