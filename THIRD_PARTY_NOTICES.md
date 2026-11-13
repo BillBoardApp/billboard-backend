@@ -15,9 +15,9 @@ lockfiles when the repository was published; update this list when a runtime dep
 
 ## npm packages: services/
 
-Bundled into the Lambda functions (esbuild) and run by the operator scripts. 123 runtime packages (services/package-lock.json).
+Bundled into the Lambda functions (esbuild) and run by the operator scripts. 117 runtime packages (services/package-lock.json).
 
-Licences: Apache-2.0 112, MIT 10, 0BSD 1.
+Licences: Apache-2.0 112, MIT 4, 0BSD 1.
 
 | Package | Version | Licence |
 |---|---|---|
@@ -76,9 +76,8 @@ Licences: Apache-2.0 112, MIT 10, 0BSD 1.
 | `@aws-sdk/util-locate-window` | 3.965.5 | Apache-2.0 |
 | `@aws-sdk/util-user-agent-browser` | 3.972.8 | Apache-2.0 |
 | `@aws-sdk/util-user-agent-node` | 3.973.10 | Apache-2.0 |
-| `@aws-sdk/xml-builder` | 3.972.19 | Apache-2.0 |
+| `@aws-sdk/xml-builder` | 3.972.43 | Apache-2.0 |
 | `@aws/lambda-invoke-store` | 0.2.4 | Apache-2.0 |
-| `@nodable/entities` | 2.1.0 | MIT |
 | `@smithy/abort-controller` | 4.2.12 | Apache-2.0 |
 | `@smithy/chunked-blob-reader` | 5.2.2 | Apache-2.0 |
 | `@smithy/chunked-blob-reader-native` | 4.2.3 | Apache-2.0 |
@@ -114,7 +113,7 @@ Licences: Apache-2.0 112, MIT 10, 0BSD 1.
 | `@smithy/shared-ini-file-loader` | 4.4.7 | Apache-2.0 |
 | `@smithy/signature-v4` | 5.3.12 | Apache-2.0 |
 | `@smithy/smithy-client` | 4.12.7 | Apache-2.0 |
-| `@smithy/types` | 4.19.0 | Apache-2.0 |
+| `@smithy/types` | 4.20.0 | Apache-2.0 |
 | `@smithy/url-parser` | 4.2.12 | Apache-2.0 |
 | `@smithy/util-base64` | 4.3.2 | Apache-2.0 |
 | `@smithy/util-body-length-browser` | 4.2.2 | Apache-2.0 |
@@ -135,15 +134,10 @@ Licences: Apache-2.0 112, MIT 10, 0BSD 1.
 | `@smithy/util-waiter` | 4.2.13 | Apache-2.0 |
 | `@smithy/uuid` | 1.1.2 | Apache-2.0 |
 | `bowser` | 2.14.1 | MIT |
-| `fast-xml-builder` | 1.3.1 | MIT |
-| `fast-xml-parser` | 5.7.1 | MIT |
 | `fflate` | 0.8.3 | MIT |
 | `mnemonist` | 0.38.3 | MIT |
 | `obliterator` | 1.6.1 | MIT |
-| `path-expression-matcher` | 1.6.2 | MIT |
-| `strnum` | 2.2.3 | MIT |
 | `tslib` | 2.8.1 | 0BSD |
-| `xml-naming` | 0.3.0 | MIT |
 
 ## npm packages: infra/
 
