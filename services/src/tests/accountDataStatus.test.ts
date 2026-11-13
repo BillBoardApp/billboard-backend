@@ -24,6 +24,24 @@ describe("accountDataStatus handler", () => {
     expect(response.statusCode).toBe(401);
   });
 
+  it("returns 500 without the error's detail, and logs the failure, when a read fails", async () => {
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    mockSend.mockRejectedValueOnce(new Error("ProvisionedThroughputExceededException"));
+
+    const response = await handler({
+      requestContext: { authorizer: { jwt: { claims: { sub: "u1" } } } },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(JSON.parse(response.body)).toEqual({ error: "Internal server error" });
+    expect(consoleError).toHaveBeenCalledWith(
+      "accountDataStatus: could not read the deletion status or the adult eligibility",
+      expect.any(Error),
+    );
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("u1");
+    consoleError.mockRestore();
+  });
+
   it("returns not_requested when no status exists", async () => {
     mockSend
       .mockResolvedValueOnce({}) // eligibility lookup

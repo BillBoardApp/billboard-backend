@@ -42,7 +42,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       canWrite: blockReason === null,
     });
   } catch (error) {
-    console.error("accountDataStatus failed", error);
+    // The error only: never the user ID, which the caller already knows and the log does not need.
+    console.error("accountDataStatus: could not read the deletion status or the adult eligibility", error);
     return jsonResponse(500, { error: "Internal server error" });
   }
 }
