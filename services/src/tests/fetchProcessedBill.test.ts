@@ -260,6 +260,7 @@ describe("fetchProcessedBill handler", () => {
 
   it("should return 404 if the bill is not found", async () => {
     mockSend.mockRejectedValueOnce(new Error("Not Found"));
+    const errorLog = jest.spyOn(console, "error").mockImplementation(() => undefined);
 
     const event = {
       queryStringParameters: {
@@ -273,6 +274,10 @@ describe("fetchProcessedBill handler", () => {
 
     expect(result.statusCode).toBe(404);
     expect(JSON.parse(result.body)).toEqual({ error: "Bill not found" });
+    expect(errorLog).toHaveBeenCalledTimes(2);
+    expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('"message":"Failed to load bill from S3"'));
+    expect(errorLog).toHaveBeenCalledWith(expect.objectContaining({ message: "Not Found" }));
+    errorLog.mockRestore();
   });
 
   describe("input validation (SEC-12)", () => {

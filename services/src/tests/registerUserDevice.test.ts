@@ -184,6 +184,7 @@ describe("registerUserDevice handler", () => {
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({ Items: [] })
       .mockRejectedValueOnce(new Error("DynamoDB error"));
+    const errorLog = jest.spyOn(console, "error").mockImplementation(() => undefined);
     mockSnsSend.mockResolvedValueOnce({
       EndpointArn: "arn:aws:sns:us-east-1:123:endpoint/APNS/app/endpoint123",
     });
@@ -197,6 +198,11 @@ describe("registerUserDevice handler", () => {
     expect(result.statusCode).toBe(500);
     expect(JSON.parse(result.body)).toEqual({ error: "Internal server error" });
     expect(mockDynamoSend).toHaveBeenCalled();
+    expect(errorLog).toHaveBeenCalledWith(
+      "Error registering device:",
+      expect.objectContaining({ message: "DynamoDB error" }),
+    );
+    errorLog.mockRestore();
   });
 
   it("allows registration when adult attestation is still unknown", async () => {
@@ -230,6 +236,7 @@ describe("registerUserDevice handler", () => {
 
   it("returns 500 and registers nothing when the eligibility lookup fails", async () => {
     mockDynamoSend.mockRejectedValueOnce(new Error("DynamoDB unavailable"));
+    const errorLog = jest.spyOn(console, "error").mockImplementation(() => undefined);
     const result = await handler(
       asApiGatewayEvent({
         requestContext: { authorizer: { jwt: { claims: { sub: "user123" } } } },
@@ -239,6 +246,11 @@ describe("registerUserDevice handler", () => {
     expect(result.statusCode).toBe(500);
     expect(PutItemCommand).not.toHaveBeenCalled();
     expect(mockSnsSend).not.toHaveBeenCalled();
+    expect(errorLog).toHaveBeenCalledWith(
+      "Error registering device:",
+      expect.objectContaining({ message: "DynamoDB unavailable" }),
+    );
+    errorLog.mockRestore();
   });
 
   it("removes another user's registration only when it holds the same push token", async () => {

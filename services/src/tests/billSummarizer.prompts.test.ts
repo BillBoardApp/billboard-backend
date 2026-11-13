@@ -381,7 +381,14 @@ describe("billSummarizer response parsing", () => {
     expect(parseBedrockResponse(payload.slice(0, payload.length - 40))).toBeNull();
     expect(parseBedrockResponse("```json\n" + payload.slice(0, 200))).toBeNull();
     expect(parseBedrockResponse("I cannot analyze these bills.")).toBeNull();
-    expect(parseBedrockResponse(JSON.stringify({ results: [] }))).toBeNull();
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      expect(parseBedrockResponse(JSON.stringify({ results: [] }))).toBeNull();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith("Invalid Bedrock response structure: missing bills array");
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("salvages the bills completed before a max_tokens cut", () => {

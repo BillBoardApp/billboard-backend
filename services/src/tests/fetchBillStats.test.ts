@@ -558,15 +558,21 @@ describe("fetchBillStats scope=companions (APPF-23)", () => {
   });
 
   describe("a group document older than a member's own stats", () => {
+    let log: jest.SpyInstance;
     // 40 votes when the group was last recomputed; H.R. 1285 got more votes afterwards (while the
     // groups were off, or in a batch whose groups read failed), so its own stats are newer.
     beforeEach(() => {
+      log = jest.spyOn(console, "log").mockImplementation(() => undefined);
       stored[GROUP_KEY] = statsPayload({
         billId: GROUP_KEY,
         generatedAt: "2026-09-01T00:00:00.000Z",
         totals: bucket(40, 0),
       });
       stored[HOUSE] = statsPayload({ billId: HOUSE, generatedAt: "2026-09-10T00:00:00.000Z" });
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
     });
 
     it("is folded again from the members' votes, without writing", async () => {
@@ -586,6 +592,7 @@ describe("fetchBillStats scope=companions (APPF-23)", () => {
       expect(body.totals).toMatchObject({ weightedVotes: 3, weightedYeaPct: 66.6667 });
       expect(featureQueries()).toHaveLength(2);
       expect(writes()).toHaveLength(0);
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('"groupGeneratedAt":"2026-09-01T00:00:00.000Z"'));
     });
 
     it("is still served when the fold fails", async () => {

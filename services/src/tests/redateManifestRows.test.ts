@@ -832,10 +832,16 @@ describe("redateManifestRows: the dry run", () => {
       throw Object.assign(new Error("Access Denied"), { name: "AccessDenied" });
     });
 
-    const { result, lines } = await run({ table }, { planFile: "plan.jsonl" });
+    const errorLog = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const { result, lines } = await run({ table }, { planFile: "plan.jsonl" });
 
-    expect(result.exitCode).toBe(1);
-    expect(summaryOf(lines)).toContain("unreadable=1");
+      expect(result.exitCode).toBe(1);
+      expect(summaryOf(lines)).toContain("unreadable=1");
+      expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('"message":"Failed to load bill from S3"'));
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 });
 
