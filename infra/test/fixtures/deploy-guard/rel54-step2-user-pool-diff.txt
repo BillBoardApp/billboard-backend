@@ -1,0 +1,24 @@
+# REL-54 step 2 (2026-10-29): the user pool's change exactly as cdk diff prints it. This branch's synth compared with
+# the live UserAPIServiceStack template (aws cloudformation get-template, the pool byte for byte main's at 717d67f),
+# recorded with: cdk diff --app <synth> --exclusively UserAPIServiceStack --template <live> --no-change-set --no-color.
+# Only the stack header, the Resources line and the pool's resource and property lines are kept; the rest of that
+# diff was the local synth's Lambda versions and release-target outputs (a local synth has no release manifest).
+# The identity ARN shows AWS's documentation example account, 123456789012, in place of the real one.
+Stack UserAPIServiceStack
+Resources
+[~] AWS::Cognito::UserPool BillboardUserPool BillboardUserPoolC41FE3DD
+ ├─ [+] EmailConfiguration
+ │   └─ {"ConfigurationSet":"BillboardAccountEmail","EmailSendingAccount":"DEVELOPER","From":"Billboard <no-reply@billboard-project.com>","ReplyToEmailAddress":"contact@billboard-project.com","SourceArn":"arn:aws:ses:us-east-1:123456789012:identity/billboard-project.com"}
+ ├─ [~] EmailVerificationMessage
+ │   ├─ [-] Thanks for signing up for BillBoard! Your verification code is {####}
+ │   └─ [+] Your Billboard verification code is {####}. Enter it in the app to continue. If you didn't ask for this code, you can ignore this email.
+ ├─ [~] EmailVerificationSubject
+ │   ├─ [-] Verify your email for BillBoard!
+ │   └─ [+] Your Billboard verification code
+ └─ [~] VerificationMessageTemplate
+     ├─ [~] .EmailMessage:
+     │   ├─ [-] Thanks for signing up for BillBoard! Your verification code is {####}
+     │   └─ [+] Your Billboard verification code is {####}. Enter it in the app to continue. If you didn't ask for this code, you can ignore this email.
+     └─ [~] .EmailSubject:
+         ├─ [-] Verify your email for BillBoard!
+         └─ [+] Your Billboard verification code

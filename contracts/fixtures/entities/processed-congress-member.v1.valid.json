@@ -1,0 +1,38 @@
+{
+  "bioguideId": "D000001",
+  "name": "Jane Doe",
+  "firstName": "Jane",
+  "lastName": "Doe",
+  "directOrderName": "Jane Doe",
+  "chamber": "House of Representatives",
+  "state": "CA",
+  "district": "12",
+  "party": "Democratic",
+  "partyAbbreviation": "D",
+  "partyName": "Democratic",
+  "depictionImageUrl": "https://example.com/members/D000001.jpg",
+  "sponsoredLegislationCount": 12,
+  "cosponsoredLegislationCount": 84,
+  "currentCongressBillsSupportedCount": 9,
+  "trackedSponsoredCount": 2,
+  "trackedSupportedCount": 9,
+  "termCount": 3,
+  "congress": 119,
+  "memberType": "Representative",
+  "startYear": 2021,
+  "stateCode": "CA",
+  "stateName": "California",
+  "updateDate": "2026-03-05T12:00:00.000Z",
+  "terms": [
+    {
+      "chamber": "House of Representatives",
+      "memberType": "Representative",
+      "congress": 119,
+      "district": 12,
+      "startYear": 2025,
+      "endYear": 2027,
+      "stateCode": "CA",
+      "stateName": "California"
+    }
+  ]
+}

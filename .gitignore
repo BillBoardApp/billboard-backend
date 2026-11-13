@@ -1,0 +1,18 @@
+node_modules/
+.DS_Store
+*.log
+coverage/
+.claude/
+.release/
+
+# Never commit secrets, signing material or AI tool files (OPS-14; CONTRIBUTING.md, "AI-assisted contributions").
+.env
+.env.*
+.infisical*
+*.p8
+*.p12
+*.pem
+*.key
+*.mobileprovision
+CLAUDE.md
+AGENTS.md

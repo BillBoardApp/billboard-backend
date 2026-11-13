@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "purpose": "request",
+  "challenge": "UnkhyiRuEgI0rqLFqNM1ohQIpBXcj0DZnDzVArtK5Ro",
+  "method": "POST",
+  "path": "/feedback",
+  "bodySha256": "13W9j4MdFaAe5_Ij6saOKFgKiICysDRngQEz-xTLMQ8"
+}

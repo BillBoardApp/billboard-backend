@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.billboard/schemas/entities/bills-manifest-snapshot-pointer.v1.schema.json",
+  "title": "BillsManifestSnapshotPointerV1",
+  "description": "Where to download the full bills manifest. GET /bills-manifest returns this instead of the manifest when the client sends delivery=snapshot without updatedAfter and a snapshot exists.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["snapshotUrl", "generatedAt", "count", "expiresAt"],
+  "properties": {
+    "snapshotUrl": {
+      "type": "string",
+      "format": "uri",
+      "description": "Short-lived presigned S3 URL. A GET without an Authorization header returns the full BillsManifest as JSON with Content-Encoding gzip. It stops working at expiresAt."
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "The generatedAt of the BillsManifest in the snapshot."
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The count of the BillsManifest in the snapshot (its number of bills)."
+    },
+    "expiresAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When snapshotUrl expires. After it, request the pointer again."
+    }
+  }
+}

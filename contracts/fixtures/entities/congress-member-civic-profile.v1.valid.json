@@ -1,0 +1,67 @@
+{
+  "axes": {
+    "individualVsCommunity": 0.62,
+    "localVsFederal": 0.31,
+    "freeMarketVsRegulated": 0.47,
+    "traditionalVsProgressive": 0.56
+  },
+  "votesUsed": 76,
+  "totalVotesWithProfile": 93,
+  "sponsoredBillsUsed": 14,
+  "cosponsoredBillsUsed": 10,
+  "totalEvidenceUsed": 100,
+  "totalEvidenceWithProfile": 132,
+  "minEvidenceRequired": 20,
+  "isReady": true,
+  "diagnostics": {
+    "rollingWindow": 100,
+    "evidenceWeights": {
+      "voteYea": 1,
+      "voteNay": 1,
+      "sponsor": 0.75,
+      "cosponsor": 0.35
+    },
+    "weightedEvidenceUsed": 89.5,
+    "totalWeightedEvidenceWithProfile": 113.2,
+    "minWeightedEvidenceRequired": 20,
+    "minAxisWeightedEvidenceRequired": 3,
+    "minAxesRequired": 3,
+    "axesWithSufficientSignal": 4,
+    "axisCoverage": {
+      "individualVsCommunity": { "evidenceCount": 76, "weightedEvidence": 68.4, "isReady": true },
+      "localVsFederal": { "evidenceCount": 52, "weightedEvidence": 48.2, "isReady": true },
+      "freeMarketVsRegulated": { "evidenceCount": 31, "weightedEvidence": 27.8, "isReady": true },
+      "traditionalVsProgressive": { "evidenceCount": 25, "weightedEvidence": 21.1, "isReady": true },
+      "interventionistVsRestrained": { "evidenceCount": 2, "weightedEvidence": 2, "isReady": false },
+      "privacyVsSecurity": { "evidenceCount": 0, "weightedEvidence": 0, "isReady": false }
+    },
+    "readinessReasons": [],
+    "latestEvidenceAt": "2026-03-21T00:00:00.000Z"
+  },
+  "evidence": [
+    {
+      "billGuid": "BILLS-119hr1ih",
+      "title": "Example tax bill",
+      "evidenceType": "voteYea",
+      "votePosition": "Yea",
+      "occurredAt": "2026-03-21T00:00:00.000Z",
+      "weight": 1,
+      "axes": ["freeMarketVsRegulated", "localVsFederal"],
+      "civicProfile": {
+        "freeMarketVsRegulated": -0.4,
+        "localVsFederal": 0.2
+      }
+    },
+    {
+      "billGuid": "BILLS-119s2is",
+      "title": "Example privacy bill",
+      "evidenceType": "cosponsor",
+      "occurredAt": "2026-03-18T00:00:00.000Z",
+      "weight": 0.35,
+      "axes": ["privacyVsSecurity"],
+      "civicProfile": {
+        "privacyVsSecurity": -0.7
+      }
+    }
+  ]
+}

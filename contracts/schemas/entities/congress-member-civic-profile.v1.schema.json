@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.billboard/schemas/entities/congress-member-civic-profile.v1.schema.json",
+  "title": "CongressMemberCivicProfileV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "axes",
+    "votesUsed",
+    "totalVotesWithProfile",
+    "sponsoredBillsUsed",
+    "cosponsoredBillsUsed",
+    "totalEvidenceUsed",
+    "totalEvidenceWithProfile",
+    "minEvidenceRequired",
+    "isReady",
+    "diagnostics",
+    "evidence"
+  ],
+  "properties": {
+    "axes": { "$ref": "#/$defs/normalizedCivicProfileScores" },
+    "votesUsed": { "type": "integer", "minimum": 0 },
+    "totalVotesWithProfile": { "type": "integer", "minimum": 0 },
+    "sponsoredBillsUsed": { "type": "integer", "minimum": 0 },
+    "cosponsoredBillsUsed": { "type": "integer", "minimum": 0 },
+    "totalEvidenceUsed": { "type": "integer", "minimum": 0 },
+    "totalEvidenceWithProfile": { "type": "integer", "minimum": 0 },
+    "minEvidenceRequired": { "type": "integer", "minimum": 1 },
+    "isReady": { "type": "boolean" },
+    "diagnostics": { "$ref": "#/$defs/diagnostics" },
+    "evidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidenceItem" }
+    }
+  },
+  "$defs": {
+    "normalizedCivicProfileScores": {
+      "title": "CivicProfileScoresV1",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "individualVsCommunity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "localVsFederal": { "type": "number", "minimum": 0, "maximum": 1 },
+        "freeMarketVsRegulated": { "type": "number", "minimum": 0, "maximum": 1 },
+        "traditionalVsProgressive": { "type": "number", "minimum": 0, "maximum": 1 },
+        "interventionistVsRestrained": { "type": "number", "minimum": 0, "maximum": 1 },
+        "privacyVsSecurity": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "rawCivicProfileScores": {
+      "title": "CivicProfileScoresV1",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "individualVsCommunity": { "type": "number", "minimum": -1, "maximum": 1 },
+        "localVsFederal": { "type": "number", "minimum": -1, "maximum": 1 },
+        "freeMarketVsRegulated": { "type": "number", "minimum": -1, "maximum": 1 },
+        "traditionalVsProgressive": { "type": "number", "minimum": -1, "maximum": 1 },
+        "interventionistVsRestrained": { "type": "number", "minimum": -1, "maximum": 1 },
+        "privacyVsSecurity": { "type": "number", "minimum": -1, "maximum": 1 }
+      }
+    },
+    "axisCoverage": {
+      "title": "CongressMemberCivicProfileAxisCoverageV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidenceCount", "weightedEvidence", "isReady"],
+      "properties": {
+        "evidenceCount": { "type": "integer", "minimum": 0 },
+        "weightedEvidence": { "type": "number", "minimum": 0 },
+        "isReady": { "type": "boolean" }
+      }
+    },
+    "axisCoverageMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "individualVsCommunity": { "$ref": "#/$defs/axisCoverage" },
+        "localVsFederal": { "$ref": "#/$defs/axisCoverage" },
+        "freeMarketVsRegulated": { "$ref": "#/$defs/axisCoverage" },
+        "traditionalVsProgressive": { "$ref": "#/$defs/axisCoverage" },
+        "interventionistVsRestrained": { "$ref": "#/$defs/axisCoverage" },
+        "privacyVsSecurity": { "$ref": "#/$defs/axisCoverage" }
+      }
+    },
+    "evidenceWeights": {
+      "title": "CongressMemberCivicProfileEvidenceWeightsV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["voteYea", "voteNay", "sponsor", "cosponsor"],
+      "properties": {
+        "voteYea": { "type": "number", "minimum": 0 },
+        "voteNay": { "type": "number", "minimum": 0 },
+        "sponsor": { "type": "number", "minimum": 0 },
+        "cosponsor": { "type": "number", "minimum": 0 }
+      }
+    },
+    "diagnostics": {
+      "title": "CongressMemberCivicProfileDiagnosticsV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rollingWindow",
+        "evidenceWeights",
+        "weightedEvidenceUsed",
+        "totalWeightedEvidenceWithProfile",
+        "minWeightedEvidenceRequired",
+        "minAxisWeightedEvidenceRequired",
+        "minAxesRequired",
+        "axesWithSufficientSignal",
+        "axisCoverage",
+        "readinessReasons"
+      ],
+      "properties": {
+        "rollingWindow": { "type": "integer", "minimum": 1 },
+        "evidenceWeights": { "$ref": "#/$defs/evidenceWeights" },
+        "weightedEvidenceUsed": { "type": "number", "minimum": 0 },
+        "totalWeightedEvidenceWithProfile": { "type": "number", "minimum": 0 },
+        "minWeightedEvidenceRequired": { "type": "number", "minimum": 0 },
+        "minAxisWeightedEvidenceRequired": { "type": "number", "minimum": 0 },
+        "minAxesRequired": { "type": "integer", "minimum": 1 },
+        "axesWithSufficientSignal": { "type": "integer", "minimum": 0 },
+        "axisCoverage": { "$ref": "#/$defs/axisCoverageMap" },
+        "readinessReasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "latestEvidenceAt": { "type": "string" }
+      }
+    },
+    "evidenceItem": {
+      "title": "CongressMemberCivicProfileEvidenceItemV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["billGuid", "evidenceType", "occurredAt", "weight", "axes", "civicProfile"],
+      "properties": {
+        "billGuid": { "type": "string" },
+        "title": { "type": "string" },
+        "evidenceType": {
+          "title": "CongressMemberCivicProfileEvidenceTypeV1",
+          "type": "string",
+          "enum": ["voteYea", "voteNay", "sponsor", "cosponsor"]
+        },
+        "votePosition": {
+          "type": "string",
+          "enum": ["Yea", "Nay"]
+        },
+        "occurredAt": { "type": "string" },
+        "weight": { "type": "number", "minimum": 0 },
+        "axes": {
+          "type": "array",
+          "items": {
+            "title": "CivicProfileAxisV1",
+            "type": "string",
+            "enum": [
+              "individualVsCommunity",
+              "localVsFederal",
+              "freeMarketVsRegulated",
+              "traditionalVsProgressive",
+              "interventionistVsRestrained",
+              "privacyVsSecurity"
+            ]
+          }
+        },
+        "civicProfile": { "$ref": "#/$defs/rawCivicProfileScores" }
+      }
+    }
+  }
+}

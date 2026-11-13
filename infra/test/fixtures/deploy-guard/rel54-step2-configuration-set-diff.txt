@@ -1,0 +1,11 @@
+# REL-54 step 2 (2026-10-29): the configuration set's change exactly as cdk diff prints it. This branch's
+# synth compared with the live EmailStack template (aws cloudformation get-template), recorded with: cdk diff --app
+# <synth> --exclusively EmailStack --template <live> --no-change-set --no-color. The whole diff: EmailStack's only
+# change is VdmOptions and SuppressionOptions.ValidationOptions on the set, both "Update requires: No interruption".
+Stack EmailStack
+Resources
+[~] AWS::SES::ConfigurationSet AccountEmailConfigurationSet AccountEmailConfigurationSet31CB700C
+ ├─ [~] SuppressionOptions
+ │   └─ [+] Added: .ValidationOptions
+ └─ [+] VdmOptions
+     └─ {"DashboardOptions":{"EngagementMetrics":"DISABLED"},"GuardianOptions":{"OptimizedSharedDelivery":"DISABLED"}}

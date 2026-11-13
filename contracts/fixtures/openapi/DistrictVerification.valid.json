@@ -1,0 +1,16 @@
+{
+  "verified": false,
+  "status": "self_attested",
+  "method": "address_capped",
+  "verifiedAt": "2026-10-08T12:00:00.000Z",
+  "resolved": { "state": "CA", "districtId": "CA-12" },
+  "signals": {
+    "addressGeocoded": true,
+    "ipStateConsistency": "unknown",
+    "ipStateObserved": null,
+    "districtClaimMatch": null
+  },
+  "repsSignalEligible": false,
+  "limitReason": "address_limit",
+  "nextStep": "This address already has the most verified accounts we allow. Your district is saved; your votes count with all users but not as verified."
+}

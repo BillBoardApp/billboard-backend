@@ -1,0 +1,12 @@
+*.js
+!jest.config.js
+!lib/custom_resources/apns-platform-application-on-event/index.js
+!lib/canaries/user-api-canary.js
+*.d.ts
+node_modules
+dist
+.claude/
+
+# CDK asset staging directory
+.cdk.staging
+cdk.out

@@ -1,0 +1,73 @@
+{
+  "generatedAt": "2026-03-06T20:00:00.000Z",
+  "count": 4,
+  "bills": [
+    {
+      "guid": "BILLS-119hr1234ih",
+      "billType": "hr",
+      "congress": "119",
+      "billNumber": "1234",
+      "updatedAt": "2026-03-06T19:59:00.000Z",
+      "title": "Clean Energy Access Act",
+      "subCategories": ["Energy"],
+      "lifeAreas": ["Utility Bills"],
+      "sponsors": ["D000001"],
+      "cosponsors": ["S000001"],
+      "isPriority": true,
+      "priorityRank": 1,
+      "priorityReason": "Major national coverage around federal grid funding negotiations.",
+      "priorityExpiresAt": "2026-03-07T08:00:00.000Z",
+      "billStatus": "Updated",
+      "civicProfile": {
+        "individualVsCommunity": 0.2,
+        "localVsFederal": -0.1
+      }
+    },
+    {
+      "guid": "BILLS-119hr1285",
+      "billType": "hr",
+      "congress": "119",
+      "billNumber": "1285",
+      "updatedAt": "2026-03-05T15:00:00.000Z",
+      "title": "Clean Energy Access Act",
+      "subCategories": ["Energy"],
+      "lifeAreas": ["Utility Bills"],
+      "sponsors": ["G000001"],
+      "cosponsors": ["M000001", "R000001"],
+      "billStatus": "New"
+    },
+    {
+      "guid": "BILLS-119s570",
+      "billType": "s",
+      "congress": "119",
+      "billNumber": "570",
+      "updatedAt": "2026-03-04T15:00:00.000Z",
+      "title": "Clean Energy Access Act",
+      "subCategories": ["Energy"],
+      "lifeAreas": ["Utility Bills"],
+      "sponsors": ["K000001"],
+      "cosponsors": [],
+      "billStatus": "New"
+    },
+    {
+      "guid": "BILLS-119s98is",
+      "billType": "s",
+      "congress": "119",
+      "billNumber": "98",
+      "updatedAt": "2026-03-06T18:00:00.000Z",
+      "title": "Rural Health Expansion Act",
+      "subCategories": ["Healthcare"],
+      "lifeAreas": ["Health Insurance"],
+      "sponsors": ["P000001"],
+      "cosponsors": [],
+      "billStatus": "New"
+    }
+  ],
+  "companionGroups": [
+    {
+      "primaryGuid": "BILLS-119hr1285",
+      "memberGuids": ["BILLS-119hr1285", "BILLS-119s570"],
+      "relationship": "identical"
+    }
+  ]
+}

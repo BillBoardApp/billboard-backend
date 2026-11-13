@@ -1,0 +1,28 @@
+name: Idea or change
+description: Suggest a feature or a change, or ask before you start a large pull request.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues are public. Never post your email address, street address or votes. Billboard takes no side on any bill;
+        see "Staying neutral" in CONTRIBUTING.md.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: Who it is for and what they cannot do today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: The change you suggest
+      description: What would change in the service, the API, the infrastructure or the website.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Contract changes, resources replaced, cost, or app changes that would need an App Store release.

@@ -1,0 +1,14 @@
+{
+  "axes": {
+    "individualVsCommunity": 0.75,
+    "localVsFederal": 0.375
+  },
+  "votesUsed": 25,
+  "totalVotesWithProfile": 25,
+  "minVotesRequired": 26,
+  "isReady": false,
+  "lockedBy": "themes",
+  "themesReady": 2,
+  "minThemesRequired": 3,
+  "minThemeVotes": 8
+}

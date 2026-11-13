@@ -1,0 +1,21 @@
+{
+  "name": "billboard-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Source-of-truth API, data, event, and release contracts for Billboard",
+  "license": "Apache-2.0",
+  "scripts": {
+    "check": "node scripts/check-contracts.mjs && node scripts/generate.mjs --check",
+    "generate": "node scripts/generate.mjs",
+    "check:swift": "node scripts/check-swift.mjs",
+    "validate:live": "node scripts/validate-live-processed-bills.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@apidevtools/swagger-parser": "~12.1.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "snapshotUrl": "https://billboard-bills-manifest-example.s3.us-east-1.amazonaws.com/snapshots/bills-manifest.v1.json.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20260306T200000Z&X-Amz-Expires=300&X-Amz-SignedHeaders=host&X-Amz-Signature=0123456789abcdef",
+  "generatedAt": "2026-03-06T20:00:00.000Z",
+  "count": 18234,
+  "expiresAt": "2026-03-06T20:05:00.000Z"
+}

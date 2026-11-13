@@ -1,0 +1,23 @@
+{
+  "name": "billboard-platform",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Billboard backend: API contracts, Lambda services, CDK infrastructure and the share site. Each package keeps its own lockfile; see README.md.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "setup": "cd contracts && env -u npm_config_allow_scripts npm ci && cd ../services && env -u npm_config_allow_scripts npm ci && cd ../infra && env -u npm_config_allow_scripts npm ci",
+    "check": "cd contracts && npm run check --silent && cd .. && bash scripts/ci/check-layout.sh && node --check website/app.js && node scripts/ci/check-website-chrome.mjs && node scripts/ci/test-website-app.mjs",
+    "generate": "cd contracts && npm run generate --silent",
+    "typecheck": "cd services && npm run typecheck && cd ../infra && npm run typecheck",
+    "lint": "cd services && npm run lint --silent && npm run format:check --silent",
+    "test": "cd services && npm test --silent -- --ci --coverage && cd ../infra && npm test -- --ci",
+    "build": "cd services && npm run build",
+    "synth": "cd infra && npm run synth",
+    "release:build": "bash scripts/ci/build-release.sh .release",
+    "release:synth": "cd infra && BILLBOARD_STRICT_RELEASE=true BILLBOARD_RELEASE_MANIFEST_FILE=../.release/manifest.json BILLBOARD_RELEASE_ID=$(cat ../.release/release-id) npx cdk synth --all --quiet --no-lookups --no-notices -o ../.release/cdk.out",
+    "verify": "npm run check && npm run typecheck && npm run lint && npm test && npm run build && npm run synth && npm run release:build && npm run release:synth"
+  }
+}

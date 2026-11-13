@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Billboard - Privacy Policy</title>
+    <meta
+      name="description"
+      content="Billboard privacy policy describing what data we collect, how we use it, and user choices."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#0b1d3a" />
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="document-page">
+    <header class="masthead">
+      <div class="masthead-inner">
+        <div class="masthead-bar">
+          <a href="/" class="wordmark" aria-label="Billboard home"
+            ><span class="wordmark-bill">Bill</span><span class="wordmark-board">board</span></a
+          >
+          <nav class="site-nav" aria-label="Primary navigation">
+            <a href="/">Home</a>
+            <a href="/roadmap.html">Roadmap</a>
+            <a href="/privacy.html" aria-current="page">Privacy</a>
+            <a href="/support.html">Help</a>
+          </nav>
+        </div>
+        <div class="masthead-rule" aria-hidden="true"></div>
+      </div>
+    </header>
+
+    <main class="page">
+      <article class="policy">
+        <header class="page-front">
+          <p class="kicker">Billboard Privacy Policy</p>
+          <h1 class="page-title">Privacy Policy</h1>
+          <p class="docket">
+            Effective date: November 3, 2026
+          </p>
+        </header>
+        <div class="double-rule" aria-hidden="true"></div>
+        <div class="policy-body">
+        <p>
+          This Privacy Policy explains how Billboard collects, uses, and protects information when you use
+          the Billboard mobile app and related services.
+        </p>
+
+        <h2 class="heading">1. Information We Collect</h2>
+        <p>Depending on how you use Billboard, we may collect:</p>
+        <ul>
+          <li>
+            Account information, including your email address used for authentication (AWS Cognito). We also keep
+            salted one-way hashes (irreversibly scrambled forms) of your email address, both as you entered it and with
+            any "+" tag removed (and, for Gmail addresses, any dots), used only to stop duplicate accounts.
+          </li>
+          <li>
+            Optional profile and preference information, such as saved preferences, followed topics, and
+            represented districts.
+          </li>
+          <li>
+            District verification information you submit, including state/district selection and, if you choose
+            address verification, address fields such as street, city, state, and ZIP code. We do not store the
+            street address itself; we store the state and congressional district it resolves to. If a lookup
+            fails, our operational logs record the state, ZIP code, and one-way hashed (irreversibly scrambled)
+            forms of the other address fields for troubleshooting; those logs are kept for 30 days.
+            If you verify by address, we also keep salted one-way hashes of the address as the Census Bureau
+            matched it, with and without any unit number, and the dates of your last three address changes. We use
+            them only to limit how many accounts can verify at one address and how often an account can change its
+            verified address.
+          </li>
+          <li>
+            Network information when you verify your district: a one-way hash (an irreversibly scrambled form) of
+            your device's IP address. We do not store the IP address itself, and we do not look up where it is
+            located. We keep the hash only to investigate abuse of district verification.
+          </li>
+          <li>
+            Device and notification information, including device identifier, push token, and notification settings.
+          </li>
+          <li>
+            App integrity information. To keep votes and accounts genuine, the app uses Apple's App Attest and
+            DeviceCheck to show it is a real copy of Billboard on a real Apple device. We store a random identifier
+            for your app installation, its public key, Apple's attestation receipt and a use counter, which accounts
+            have used that installation, and with each vote the result of this check. Apple keeps a small per-device
+            counter of accounts created, with no account information. The installation records expire about 400 days
+            after their last use, and deleting your account deletes its link to the installation.
+          </li>
+          <li>
+            In-app activity records required to provide app features, including feedback submissions and
+            preference updates.
+          </li>
+        </ul>
+
+        <h2 class="heading">2. How We Use Information</h2>
+        <ul>
+          <li>Provide, maintain, and secure your account and app features.</li>
+          <li>Personalize bill feeds, notifications, and related content.</li>
+          <li>Process and store your feedback and preference settings.</li>
+          <li>Verify district data when you request district verification.</li>
+          <li>Detect abuse, prevent fraud, troubleshoot issues, and improve service reliability.</li>
+        </ul>
+
+        <h2 class="heading">3. Sharing and Disclosure</h2>
+        <p>
+          We do not sell your personal information. We may share limited data with service providers who
+          operate app infrastructure on our behalf (for example AWS services used for authentication, storage,
+          messaging, and push delivery), and when required by law or valid legal process.
+        </p>
+        <p>
+          When you choose address verification, the address you enter is sent to the United States Census
+          Bureau's public geocoding service to determine your congressional district. The Census Bureau's
+          handling of that request is governed by its own policies. In some configurations we may also send your
+          device's IP address (and nothing else) to a third-party IP geolocation provider to estimate the state
+          it is located in; this lookup is currently disabled.
+        </p>
+        <p>
+          Bill summaries shown in the app are generated by an AI model hosted on AWS from public legislative
+          text. No personal information is sent to that model.
+        </p>
+
+        <h2 class="heading">4. Data Retention</h2>
+        <p>
+          We retain information for as long as needed to provide the service, comply with legal obligations,
+          resolve disputes, and enforce agreements. Retention periods may vary by data type and operational need.
+        </p>
+        <p>
+          We keep short-lived backups so we can recover from outages and mistakes. Our databases can be restored to
+          any point in the previous 35 days. Each night we also back up the sign-in directory: your email address,
+          account identifier, state, and district (not your political party, other profile details, or password).
+          Each of those copies is deleted about two weeks after it is made. When you delete your account, your data
+          is removed from the live service right away, and its copies in these backups are deleted as the backups
+          expire, within about five weeks. If we ever restore from a backup, we do not restore accounts that were deleted after that
+          backup was taken.
+        </p>
+
+        <h2 class="heading">5. Security</h2>
+        <p>
+          We use reasonable technical and organizational safeguards designed to protect information. No system is
+          completely secure, and we cannot guarantee absolute security.
+        </p>
+
+        <h2 class="heading">6. Your Choices and Rights</h2>
+        <ul>
+          <li>You can update profile and preference information in the app.</li>
+          <li>You can manage push permissions through your device settings.</li>
+          <li>
+            You can delete your account and its data from within the app (Profile &rarr; Settings &rarr; Delete
+            account and data; in version 1.1 and earlier, Profile &rarr; Delete Account And Data).
+            Deletion removes your votes, preferences, device registrations, digests, and verification record,
+            including the email hashes described above and your account's links to the address hashes and to your app
+            installation.
+          </li>
+          <li>You may also request account or data assistance by contacting support.</li>
+        </ul>
+
+        <h2 class="heading">7. Children’s Privacy</h2>
+        <p>
+          Billboard is not directed to children under 13, and we do not knowingly collect personal information
+          from children under 13.
+        </p>
+
+        <h2 class="heading">8. Changes to This Policy</h2>
+        <p>
+          We may update this policy from time to time. If we make material changes, we will update the effective
+          date and may provide additional notice in the app or service.
+        </p>
+
+        <h2 class="heading">9. Contact</h2>
+        <p>
+          For privacy questions, account help, or data requests, contact:
+          <a href="mailto:contact@billboard-project.com">contact@billboard-project.com</a>
+        </p>
+
+        <p class="policy-back-link">
+          <a class="text-link" href="/">Back to Billboard</a>
+        </p>
+        </div>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <p>Billboard is an independent project and is not affiliated with Congress or any government agency.</p>
+      <ul class="footer-links">
+        <li><a href="/about.html">How Billboard works</a></li>
+        <li><a href="/support.html">Help</a></li>
+        <li><a href="/privacy.html" aria-current="page">Privacy</a></li>
+      </ul>
+    </footer>
+  </body>
+</html>

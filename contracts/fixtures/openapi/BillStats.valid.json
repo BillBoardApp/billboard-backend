@@ -1,0 +1,160 @@
+{
+  "billId": "BILLS-119hr1285ih",
+  "generatedAt": "2026-10-08T12:00:00.000Z",
+  "totals": {
+    "votes": 12,
+    "yea": 7,
+    "nay": 3,
+    "abstain": 2,
+    "decisionVotes": 10,
+    "yeaPct": 70,
+    "weightedVotes": 12,
+    "weightedYea": 7,
+    "weightedNay": 3,
+    "weightedAbstain": 2,
+    "weightedDecisionVotes": 10,
+    "weightedYeaPct": 70
+  },
+  "segments": {
+    "verified": {
+      "votes": 6,
+      "yea": 4,
+      "nay": 1,
+      "abstain": 1,
+      "decisionVotes": 5,
+      "yeaPct": 80,
+      "weightedVotes": 6,
+      "weightedYea": 4,
+      "weightedNay": 1,
+      "weightedAbstain": 1,
+      "weightedDecisionVotes": 5,
+      "weightedYeaPct": 80
+    },
+    "selfAttested": {
+      "votes": 6,
+      "yea": 3,
+      "nay": 2,
+      "abstain": 1,
+      "decisionVotes": 5,
+      "yeaPct": 60,
+      "weightedVotes": 6,
+      "weightedYea": 3,
+      "weightedNay": 2,
+      "weightedAbstain": 1,
+      "weightedDecisionVotes": 5,
+      "weightedYeaPct": 60
+    }
+  },
+  "comparison": {
+    "allUsers": { "votes": 12, "yea": 7, "nay": 3, "abstain": 2, "decisionVotes": 10, "yeaPct": 70 },
+    "verified": { "votes": 6, "yea": 4, "nay": 1, "abstain": 1, "decisionVotes": 5, "yeaPct": 80 },
+    "verifiedWithheld": false,
+    "minDecisionVotes": 5
+  },
+  "rollups": {
+    "byState": {
+      "CA": {
+        "state": "CA",
+        "totals": {
+          "votes": 6,
+          "yea": 4,
+          "nay": 1,
+          "abstain": 1,
+          "decisionVotes": 5,
+          "yeaPct": 80,
+          "weightedVotes": 6,
+          "weightedYea": 4,
+          "weightedNay": 1,
+          "weightedAbstain": 1,
+          "weightedDecisionVotes": 5,
+          "weightedYeaPct": 80
+        },
+        "segments": {
+          "verified": {
+            "votes": 6,
+            "yea": 4,
+            "nay": 1,
+            "abstain": 1,
+            "decisionVotes": 5,
+            "yeaPct": 80,
+            "weightedVotes": 6,
+            "weightedYea": 4,
+            "weightedNay": 1,
+            "weightedAbstain": 1,
+            "weightedDecisionVotes": 5,
+            "weightedYeaPct": 80
+          },
+          "selfAttested": {
+            "votes": 0,
+            "yea": 0,
+            "nay": 0,
+            "abstain": 0,
+            "decisionVotes": 0,
+            "yeaPct": null,
+            "weightedVotes": 0,
+            "weightedYea": 0,
+            "weightedNay": 0,
+            "weightedAbstain": 0,
+            "weightedDecisionVotes": 0,
+            "weightedYeaPct": null
+          }
+        }
+      }
+    },
+    "byDistrict": {
+      "CA-12": {
+        "state": "CA",
+        "district": "CA-12",
+        "totals": {
+          "votes": 6,
+          "yea": 4,
+          "nay": 1,
+          "abstain": 1,
+          "decisionVotes": 5,
+          "yeaPct": 80,
+          "weightedVotes": 6,
+          "weightedYea": 4,
+          "weightedNay": 1,
+          "weightedAbstain": 1,
+          "weightedDecisionVotes": 5,
+          "weightedYeaPct": 80
+        },
+        "segments": {
+          "verified": {
+            "votes": 6,
+            "yea": 4,
+            "nay": 1,
+            "abstain": 1,
+            "decisionVotes": 5,
+            "yeaPct": 80,
+            "weightedVotes": 6,
+            "weightedYea": 4,
+            "weightedNay": 1,
+            "weightedAbstain": 1,
+            "weightedDecisionVotes": 5,
+            "weightedYeaPct": 80
+          },
+          "selfAttested": {
+            "votes": 0,
+            "yea": 0,
+            "nay": 0,
+            "abstain": 0,
+            "decisionVotes": 0,
+            "yeaPct": null,
+            "weightedVotes": 0,
+            "weightedYea": 0,
+            "weightedNay": 0,
+            "weightedAbstain": 0,
+            "weightedDecisionVotes": 0,
+            "weightedYeaPct": null
+          }
+        }
+      }
+    }
+  },
+  "reasonBreakdown": {
+    "minCount": 3,
+    "yea": { "voteCount": 7, "reasons": [{ "reasonKey": "economic_impact", "count": 3, "pct": 42.8571 }] },
+    "nay": { "voteCount": 3, "reasons": [] }
+  }
+}

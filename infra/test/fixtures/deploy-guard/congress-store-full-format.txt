@@ -1,0 +1,293 @@
+
+Stack CongressStoreStack
+IAM Statement Changes
+┌───┬──────────────────────────────────┬────────┬──────────────────────────┬────────────────────────────────────────────────────────────────────────┬───────────┐
+│   │ Resource                         │ Effect │ Action                   │ Principal                                                              │ Condition │
+├───┼──────────────────────────────────┼────────┼──────────────────────────┼────────────────────────────────────────────────────────────────────────┼───────────┤
+│ + │ ${BillStoreBucket.Arn}           │ Allow  │ s3:PutBucketNotification │ AWS:${BucketNotificationsHandler050a0587b7544547bf325f094a3db834/Role} │           │
+├───┼──────────────────────────────────┼────────┼──────────────────────────┼────────────────────────────────────────────────────────────────────────┼───────────┤
+│ - │ ${BillStoreBucket.Arn}           │ Allow  │ s3:PutBucketNotification │ AWS:${BucketNotificationsHandler050a0587b7544547bf325f094a3db834/Role} │           │
+│   │ ${CongressMemberStoreBucket.Arn} │        │                          │                                                                        │           │
+├───┼──────────────────────────────────┼────────┼──────────────────────────┼────────────────────────────────────────────────────────────────────────┼───────────┤
+│ + │ ${CongressMemberStoreBucket.Arn} │ Allow  │ s3:PutBucketNotification │ AWS:${BucketNotificationsHandler050a0587b7544547bf325f094a3db834/Role} │           │
+├───┼──────────────────────────────────┼────────┼──────────────────────────┼────────────────────────────────────────────────────────────────────────┼───────────┤
+│ + │ *                                │ Allow  │ xray:PutTelemetryRecords │ AWS:${CreateBillsManifest/ServiceRole}                                 │           │
+│   │                                  │        │ xray:PutTraceSegments    │                                                                        │           │
+│ + │ *                                │ Allow  │ xray:PutTelemetryRecords │ AWS:${CreateCongressMembersManifest/ServiceRole}                       │           │
+│   │                                  │        │ xray:PutTraceSegments    │                                                                        │           │
+└───┴──────────────────────────────────┴────────┴──────────────────────────┴────────────────────────────────────────────────────────────────────────┴───────────┘
+(NOTE: There may be security-related changes not in this list. See https://github.com/aws/aws-cdk/issues/1299)
+
+Resources
+[-] AWS::CodeDeploy::DeploymentConfig CongressStoreDeploymentConfig CongressStoreDeploymentConfig4451EE3B destroy
+[-] AWS::Lambda::Version CreateBillsManifest/CurrentVersion CreateBillsManifestCurrentVersion74042E27e13d73d9990fe03bee8c4f48db51bece orphan
+[-] AWS::IAM::Policy BucketNotificationsHandler050a0587b7544547bf325f094a3db834/Role/DefaultPolicy BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleDefaultPolicy2CF63D36 destroy
+[-] AWS::Lambda::Version CreateCongressMembersManifest/CurrentVersion CreateCongressMembersManifestCurrentVersion334BB5491afcb06880c00126a2fd8f188b809ce7 orphan
+[+] AWS::IAM::Policy BillStoreBucket/Notifications/HandlerPolicy BillStoreBucketNotificationsHandlerPolicy5BD37E88
+[+] AWS::Lambda::Version CreateBillsManifest/CurrentVersion CreateBillsManifestCurrentVersion74042E27e7d16b505ae9a5f4bb5f7845f05dc856
+[+] AWS::SQS::Queue BillsManifestDLQ BillsManifestDLQ4AE06A6A
+[+] AWS::IAM::Policy CongressMemberStoreBucket/Notifications/HandlerPolicy CongressMemberStoreBucketNotificationsHandlerPolicy3125CAAB
+[+] AWS::Lambda::Version CreateCongressMembersManifest/CurrentVersion CreateCongressMembersManifestCurrentVersion334BB54912eaa746559bdb7c32a8f6ce44501401
+[+] AWS::SQS::Queue CongressMembersManifestDLQ CongressMembersManifestDLQ72213B97
+[~] AWS::CodeDeploy::Application CongressStoreApp CongressStoreAppE4E63DEE
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] AWS::S3::Bucket BillStoreBucket BillStoreBucket43246214
+ ├─ [~] LifecycleConfiguration
+ │   └─ [~] .Rules:
+ │       └─ @@ -1,11 +1,5 @@
+ │          [ ] [
+ │          [ ]   {
+ │          [-]     "ExpirationInDays": 365,
+ │          [-]     "Id": "RawBillsExpireAfter365Days",
+ │          [-]     "Prefix": "raw-bills/",
+ │          [-]     "Status": "Enabled"
+ │          [-]   },
+ │          [-]   {
+ │          [ ]     "Id": "RawBillsExpireNoncurrentVersionsAfter7Days",
+ │          [ ]     "NoncurrentVersionExpiration": {
+ │          [ ]       "NoncurrentDays": 7
+ │          @@ -14,15 +8,9 @@
+ │          [ ]   "Status": "Enabled"
+ │          [ ] },
+ │          [ ] {
+ │          [-]   "ExpirationInDays": 365,
+ │          [-]   "Id": "ProcessedBillsExpireAfter365Days",
+ │          [-]   "Prefix": "processed-bills/",
+ │          [-]   "Status": "Enabled"
+ │          [-] },
+ │          [-] {
+ │          [-]   "Id": "ProcessedBillsExpireNoncurrentVersionsAfter1Day",
+ │          [+]   "Id": "ProcessedBillsExpireNoncurrentVersionsAfter30Days",
+ │          [ ]   "NoncurrentVersionExpiration": {
+ │          [-]     "NoncurrentDays": 1
+ │          [+]     "NoncurrentDays": 30
+ │          [ ]   },
+ │          [ ]   "Prefix": "processed-bills/",
+ │          [ ]   "Status": "Enabled"
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] Custom::S3BucketNotifications BillStoreBucket/Notifications BillStoreBucketNotifications98F28B55
+ └─ [~] DependsOn
+     └─ @@ -1,4 +1,5 @@
+        [ ] [
+        [+]   "BillStoreBucketNotificationsHandlerPolicy5BD37E88",
+        [ ]   "BillStoreBucketPolicy68CF9841",
+        [ ]   "BillsManifestQueue8FD11A10",
+        [ ]   "BillsManifestQueuePolicy07E260D1",
+[~] AWS::DynamoDB::Table BillManifestTable BillManifestTable027DB807
+ ├─ [+] DeletionProtectionEnabled
+ │   └─ true
+ ├─ [+] PointInTimeRecoverySpecification
+ │   └─ {"PointInTimeRecoveryEnabled":true}
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] AWS::Logs::LogGroup CreateBillsManifestLogGroup CreateBillsManifestLogGroup119DDBDB
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] AWS::IAM::Role CreateBillsManifest/ServiceRole CreateBillsManifestServiceRoleA4E3D6D1
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] AWS::IAM::Policy CreateBillsManifest/ServiceRole/DefaultPolicy CreateBillsManifestServiceRoleDefaultPolicy4FFD0335
+ └─ [~] PolicyDocument
+     └─ [~] .Statement:
+         └─ @@ -1,6 +1,14 @@
+            [ ] [
+            [ ]   {
+            [ ]     "Action": [
+            [+]       "xray:PutTelemetryRecords",
+            [+]       "xray:PutTraceSegments"
+            [+]     ],
+            [+]     "Effect": "Allow",
+            [+]     "Resource": "*"
+            [+]   },
+            [+]   {
+            [+]     "Action": [
+            [ ]       "s3:GetBucket*",
+            [ ]       "s3:GetObject*",
+            [ ]       "s3:List*"
+[~] AWS::Lambda::Function CreateBillsManifest CreateBillsManifest21DECE8D
+ ├─ [~] Code
+ │   └─ [~] .S3Key:
+ │       ├─ [-] artifacts/createBillsManifest/072173f8d6e0a0b6064d10f649747dbc68245797df151ad9b9475bed28f02654.zip
+ │       └─ [+] createBillsManifest.zip
+ ├─ [+] MemorySize
+ │   └─ 256
+ ├─ [+] Tags
+ │   └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+ └─ [+] TracingConfig
+     └─ {"Mode":"Active"}
+[~] AWS::Lambda::Alias CreateBillsManifestProdAlias CreateBillsManifestProdAliasBE94287E
+ └─ [+] DependsOn
+     └─ ["CreateBillsManifestCurrentVersion74042E27e7d16b505ae9a5f4bb5f7845f05dc856"]
+[~] AWS::Lambda::EventSourceMapping CreateBillsManifestProdAlias/SqsEventSource:CongressStoreStackBillsManifestQueue0EF85448 CreateBillsManifestProdAliasSqsEventSourceCongressStoreStackBillsManifestQueue0EF854481B7024CE replace
+ ├─ [~] EventSourceArn (requires replacement)
+ │   └─ [~] .Fn::GetAtt:
+ │       └─ @@ -1,4 +1,4 @@
+ │          [ ] [
+ │          [-]   "BillsManifestQueue8FD11A10",
+ │          [+]   "BillsManifestQueue8FD11A10(replaced)",
+ │          [ ]   "Arn"
+ │          [ ] ]
+ ├─ [+] Tags
+ │   └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+ └─ [+] DependsOn
+     └─ ["CreateBillsManifestCurrentVersion74042E27e7d16b505ae9a5f4bb5f7845f05dc856"]
+[~] AWS::CloudWatch::Alarm CreateBillsManifestAliasErrorAlarm CreateBillsManifestAliasErrorAlarm4E64EA89
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] AWS::IAM::Role CreateBillsManifestDeploymentGroup/ServiceRole CreateBillsManifestDeploymentGroupServiceRole4522F018
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] AWS::CodeDeploy::DeploymentGroup CreateBillsManifestDeploymentGroup CreateBillsManifestDeploymentGroup419CA96D
+ ├─ [~] DeploymentConfigName
+ │   └─ @@ -1,3 +1,1 @@
+ │      [-] {
+ │      [-]   "Ref": "CongressStoreDeploymentConfig4451EE3B"
+ │      [-] }
+ │      [+] "CodeDeployDefault.LambdaAllAtOnce"
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] AWS::SQS::Queue BillsManifestQueue BillsManifestQueue8FD11A10 replace
+ ├─ [+] QueueName (requires replacement)
+ │   └─ BillsManifestQueue
+ ├─ [+] RedrivePolicy
+ │   └─ {"deadLetterTargetArn":{"Fn::GetAtt":["BillsManifestDLQ4AE06A6A","Arn"]},"maxReceiveCount":5}
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] AWS::IAM::Role BucketNotificationsHandler050a0587b7544547bf325f094a3db834/Role BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleB6FB88EC
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] AWS::Lambda::Function BucketNotificationsHandler050a0587b7544547bf325f094a3db834 BucketNotificationsHandler050a0587b7544547bf325f094a3db8347ECC3691
+ ├─ [+] Tags
+ │   └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+ └─ [~] DependsOn
+     └─ @@ -1,4 +1,3 @@
+        [ ] [
+        [-]   "BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleB6FB88EC",
+        [-]   "BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleDefaultPolicy2CF63D36"
+        [+]   "BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleB6FB88EC"
+        [ ] ]
+[~] AWS::S3::Bucket CongressMemberStoreBucket CongressMemberStoreBucketB351EF17
+ ├─ [~] LifecycleConfiguration
+ │   └─ [~] .Rules:
+ │       └─ @@ -1,14 +1,9 @@
+ │          [ ] [
+ │          [ ]   {
+ │          [-]     "ExpirationInDays": 365,
+ │          [-]     "Id": "RawCongressMembersExpireAfter365Days",
+ │          [-]     "Prefix": "raw-congress-members/",
+ │          [+]     "Id": "CongressMembersExpireNoncurrentVersionsAfter7Days",
+ │          [+]     "NoncurrentVersionExpiration": {
+ │          [+]       "NoncurrentDays": 7
+ │          [+]     },
+ │          [ ]     "Status": "Enabled"
+ │          [-]   },
+ │          [-]   {
+ │          [-]     "ExpirationInDays": 365,
+ │          [-]     "Id": "ProcessedCongressMembersExpireAfter365Days",
+ │          [-]     "Prefix": "processed-congress-members/",
+ │          [-]     "Status": "Enabled"
+ │          [ ]   }
+ │          [ ] ]
+ ├─ [+] Tags
+ │   └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+ └─ [+] VersioningConfiguration
+     └─ {"Status":"Enabled"}
+[~] Custom::S3BucketNotifications CongressMemberStoreBucket/Notifications CongressMemberStoreBucketNotificationsC5CB379A
+ └─ [~] DependsOn
+     └─ @@ -1,4 +1,5 @@
+        [ ] [
+        [+]   "CongressMemberStoreBucketNotificationsHandlerPolicy3125CAAB",
+        [ ]   "CongressMemberStoreBucketPolicy744B860A",
+        [ ]   "CongressMembersManifestQueueB11B857A",
+        [ ]   "CongressMembersManifestQueuePolicyC18671F7"
+[~] AWS::DynamoDB::Table CongressMembersManifestTable CongressMembersManifestTableF4E09947
+ ├─ [+] DeletionProtectionEnabled
+ │   └─ true
+ ├─ [+] PointInTimeRecoverySpecification
+ │   └─ {"PointInTimeRecoveryEnabled":true}
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] AWS::Logs::LogGroup CreateCongressMembersManifestLogGroup CreateCongressMembersManifestLogGroup626F1C7B
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] AWS::IAM::Role CreateCongressMembersManifest/ServiceRole CreateCongressMembersManifestServiceRole90C21DD3
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] AWS::IAM::Policy CreateCongressMembersManifest/ServiceRole/DefaultPolicy CreateCongressMembersManifestServiceRoleDefaultPolicy0067570D
+ └─ [~] PolicyDocument
+     └─ [~] .Statement:
+         └─ @@ -1,6 +1,14 @@
+            [ ] [
+            [ ]   {
+            [ ]     "Action": [
+            [+]       "xray:PutTelemetryRecords",
+            [+]       "xray:PutTraceSegments"
+            [+]     ],
+            [+]     "Effect": "Allow",
+            [+]     "Resource": "*"
+            [+]   },
+            [+]   {
+            [+]     "Action": [
+            [ ]       "s3:GetBucket*",
+            [ ]       "s3:GetObject*",
+            [ ]       "s3:List*"
+[~] AWS::Lambda::Function CreateCongressMembersManifest CreateCongressMembersManifestE9468045
+ ├─ [~] Code
+ │   └─ [~] .S3Key:
+ │       ├─ [-] artifacts/createCongressMembersManifest/b79277e94f3add0c41e3b2dd1935ea2b87cfdf1c1f4d9ab720600c10d85d01e7.zip
+ │       └─ [+] createCongressMembersManifest.zip
+ ├─ [+] MemorySize
+ │   └─ 256
+ ├─ [+] Tags
+ │   └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+ └─ [+] TracingConfig
+     └─ {"Mode":"Active"}
+[~] AWS::Lambda::Alias CreateCongressMembersManifestProdAlias CreateCongressMembersManifestProdAlias14CC273D
+ └─ [+] DependsOn
+     └─ ["CreateCongressMembersManifestCurrentVersion334BB54912eaa746559bdb7c32a8f6ce44501401"]
+[~] AWS::Lambda::EventSourceMapping CreateCongressMembersManifestProdAlias/SqsEventSource:CongressStoreStackCongressMembersManifestQueue99A91B98 CreateCongressMembersManifestProdAliasSqsEventSourceCongressStoreStackCongressMembersManifestQueue99A91B98954C8603 replace
+ ├─ [~] EventSourceArn (requires replacement)
+ │   └─ [~] .Fn::GetAtt:
+ │       └─ @@ -1,4 +1,4 @@
+ │          [ ] [
+ │          [-]   "CongressMembersManifestQueueB11B857A",
+ │          [+]   "CongressMembersManifestQueueB11B857A(replaced)",
+ │          [ ]   "Arn"
+ │          [ ] ]
+ ├─ [+] Tags
+ │   └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+ └─ [+] DependsOn
+     └─ ["CreateCongressMembersManifestCurrentVersion334BB54912eaa746559bdb7c32a8f6ce44501401"]
+[~] AWS::CloudWatch::Alarm CreateCongressMembersManifestAliasErrorAlarm CreateCongressMembersManifestAliasErrorAlarm83349F1A
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] AWS::IAM::Role CreateCongressMembersManifestDeploymentGroup/ServiceRole CreateCongressMembersManifestDeploymentGroupServiceRole0F6CD7A5
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] AWS::CodeDeploy::DeploymentGroup CreateCongressMembersManifestDeploymentGroup CreateCongressMembersManifestDeploymentGroup18964BF8
+ ├─ [~] DeploymentConfigName
+ │   └─ @@ -1,3 +1,1 @@
+ │      [-] {
+ │      [-]   "Ref": "CongressStoreDeploymentConfig4451EE3B"
+ │      [-] }
+ │      [+] "CodeDeployDefault.LambdaAllAtOnce"
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+[~] AWS::SQS::Queue CongressMembersManifestQueue CongressMembersManifestQueueB11B857A replace
+ ├─ [+] QueueName (requires replacement)
+ │   └─ CongressMembersManifestQueue
+ ├─ [+] RedrivePolicy
+ │   └─ {"deadLetterTargetArn":{"Fn::GetAtt":["CongressMembersManifestDLQ72213B97","Arn"]},"maxReceiveCount":5}
+ └─ [+] Tags
+     └─ [{"Key":"project","Value":"billboard"},{"Key":"service","Value":"CongressStoreStack"}]
+
+Outputs
+[~] Output CreateBillsManifestLambdaReleaseTarget CreateBillsManifestLambdaReleaseTarget: {"Value":{"Fn::Join":["",["{\"functionName\":\"",{"Ref":"CreateBillsManifest21DECE8D"},"\",\"aliasName\":\"prod\",\"targetVersion\":\"",{"Fn::GetAtt":["CreateBillsManifestCurrentVersion74042E27e13d73d9990fe03bee8c4f48db51bece","Version"]},"\",\"applicationName\":\"",{"Ref":"CongressStoreAppE4E63DEE"},"\",\"deploymentGroupName\":\"",{"Ref":"CreateBillsManifestDeploymentGroup419CA96D"},"\",\"aliasVersionParameterName\":\"/billboard/prod/lambda-alias-versions/",{"Ref":"CreateBillsManifest21DECE8D"},"/prod\"}"]]}} to {"Value":{"Fn::Join":["",["{\"functionName\":\"",{"Ref":"CreateBillsManifest21DECE8D"},"\",\"aliasName\":\"prod\",\"targetVersion\":\"",{"Fn::GetAtt":["CreateBillsManifestCurrentVersion74042E27e7d16b505ae9a5f4bb5f7845f05dc856","Version"]},"\",\"applicationName\":\"",{"Ref":"CongressStoreAppE4E63DEE"},"\",\"deploymentGroupName\":\"",{"Ref":"CreateBillsManifestDeploymentGroup419CA96D"},"\",\"aliasVersionParameterName\":\"/billboard/prod/lambda-alias-versions/",{"Ref":"CreateBillsManifest21DECE8D"},"/prod\"}"]]}}
+[~] Output CreateCongressMembersManifestLambdaReleaseTarget CreateCongressMembersManifestLambdaReleaseTarget: {"Value":{"Fn::Join":["",["{\"functionName\":\"",{"Ref":"CreateCongressMembersManifestE9468045"},"\",\"aliasName\":\"prod\",\"targetVersion\":\"",{"Fn::GetAtt":["CreateCongressMembersManifestCurrentVersion334BB5491afcb06880c00126a2fd8f188b809ce7","Version"]},"\",\"applicationName\":\"",{"Ref":"CongressStoreAppE4E63DEE"},"\",\"deploymentGroupName\":\"",{"Ref":"CreateCongressMembersManifestDeploymentGroup18964BF8"},"\",\"aliasVersionParameterName\":\"/billboard/prod/lambda-alias-versions/",{"Ref":"CreateCongressMembersManifestE9468045"},"/prod\"}"]]}} to {"Value":{"Fn::Join":["",["{\"functionName\":\"",{"Ref":"CreateCongressMembersManifestE9468045"},"\",\"aliasName\":\"prod\",\"targetVersion\":\"",{"Fn::GetAtt":["CreateCongressMembersManifestCurrentVersion334BB54912eaa746559bdb7c32a8f6ce44501401","Version"]},"\",\"applicationName\":\"",{"Ref":"CongressStoreAppE4E63DEE"},"\",\"deploymentGroupName\":\"",{"Ref":"CreateCongressMembersManifestDeploymentGroup18964BF8"},"\",\"aliasVersionParameterName\":\"/billboard/prod/lambda-alias-versions/",{"Ref":"CreateCongressMembersManifestE9468045"},"/prod\"}"]]}}
+
+
+
+✨  Number of stacks with differences: 1
+

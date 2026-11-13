@@ -1,0 +1,745 @@
+# U9-like cdk diff (2026-10-07): the remediation layer synthesized from billboard-platform, compared with the
+# live templates of the 12 production stacks read with get-template on 2026-10-07 (GitHubOidcStack and
+# SecurityBaselineStack do not exist yet). Recorded with: cdk diff --app <synth> --exclusively <stack> --template <live>.
+# Only the stack headers and resource lines are kept (Output, Parameter, property and IAM table lines removed);
+# the deploy guard reads only those. EmailStack (REL-54, 2026-10-29) is written as its first deploy shows it, in the
+# place cdk diff prints it (after SharedInfraStack), so the fixture still names every stack the app synthesizes.
+Stack SharedInfraStack
+[+] AWS::SQS::Queue NotificationTypeDLQ NotificationTypeDLQ1A6FDC32
+[+] AWS::SQS::Queue CongressMemberStatsDLQ CongressMemberStatsDLQCF198C9B
+[~] AWS::S3::Bucket LambdaArtifactsBucket LambdaArtifactsBucket8BCA8CC4
+[~] AWS::SQS::Queue NotificationTypeQueue NotificationTypeQueue96850C70
+[~] AWS::SQS::Queue CongressMemberStatsQueue CongressMemberStatsQueueC101C23E
+Stack EmailStack
+[+] AWS::SES::ConfigurationSet AccountEmailConfigurationSet AccountEmailConfigurationSet31CB700C
+[+] AWS::SES::ConfigurationSetEventDestination AccountEmailConfigurationSet/CloudWatchEvents AccountEmailConfigurationSetCloudWatchEvents35470440
+[+] AWS::SES::EmailIdentity EmailIdentity EmailIdentity7187767D
+[+] AWS::Route53::RecordSet DkimRecord1 DkimRecord1
+[+] AWS::Route53::RecordSet DkimRecord2 DkimRecord2
+[+] AWS::Route53::RecordSet DkimRecord3 DkimRecord3
+[+] AWS::Route53::RecordSet MailFromMxRecord MailFromMxRecord8EEC6CE6
+[+] AWS::Route53::RecordSet MailFromSpfRecord MailFromSpfRecordA9EAF20E
+[+] AWS::Route53::RecordSet DmarcRecord DmarcRecord17E400DB
+Stack CongressIntegrationServiceStack
+[-] AWS::CodeDeploy::DeploymentConfig CongressIntegrationDeploymentConfig CongressIntegrationDeploymentConfig6CE2A973 destroy
+[-] AWS::Lambda::Version BillsApiPoller/CurrentVersion BillsApiPollerCurrentVersion6C44BA98022c534830916e5e1ee2e81277f1bec9 orphan
+[-] AWS::Lambda::Version FetchRawBill/CurrentVersion FetchRawBillCurrentVersionBAA37734b8e7ea1ead656a2cb1a6ebbfb9df21d9 orphan
+[-] AWS::Lambda::Version EnrichOfficialVotes/CurrentVersion EnrichOfficialVotesCurrentVersion033BABFD7b4d0dfe5306482ec9fa9e86a1d47afe orphan
+[-] AWS::Lambda::Version FetchCongressMembersList/CurrentVersion FetchCongressMembersListCurrentVersion4E4D7BBC202f82025f0b537eb42672c005b91d29 orphan
+[-] AWS::Lambda::Version FetchRawCongressMembers/CurrentVersion FetchRawCongressMembersCurrentVersionD373E62F2fc3fb48eaada4f9ee72f42e7a6b66b1 orphan
+[+] AWS::Lambda::Version BillsApiPoller/CurrentVersion BillsApiPollerCurrentVersion6C44BA986431c5e980bcb06d5b73eff6eceb2720
+[+] AWS::Lambda::Version FetchRawBill/CurrentVersion FetchRawBillCurrentVersionBAA3773419dd562c47f993467189ac087e15cc1c
+[+] AWS::Lambda::Version EnrichOfficialVotes/CurrentVersion EnrichOfficialVotesCurrentVersion033BABFD38c78ec5d3475ff5228bf23c05c2dbbd
+[+] AWS::Lambda::Version FetchCongressMembersList/CurrentVersion FetchCongressMembersListCurrentVersion4E4D7BBCc8c156b42dc0cfef56a4817ff07177c9
+[+] AWS::Lambda::Version FetchRawCongressMembers/CurrentVersion FetchRawCongressMembersCurrentVersionD373E62F9abb1970c944e33ee58ef27fcfbdd9dc
+[~] AWS::CodeDeploy::Application CongressIntegrationApp CongressIntegrationApp9A665DF5
+[~] AWS::SQS::Queue BillDifferDLQ BillDifferDLQCFAC81DC
+[~] AWS::SQS::Queue BillDifferQueue BillDifferQueue93EBC76A
+[~] AWS::SQS::Queue UpdatedBillsDLQ UpdatedBillsDLQ7CDA7026
+[~] AWS::SQS::Queue UpdatedBillsQueue UpdatedBillsQueueA5E2B1CC
+[~] AWS::SQS::Queue BillVoteEnrichmentDLQ BillVoteEnrichmentDLQ213A73BE
+[~] AWS::SQS::Queue BillVoteEnrichmentQueue BillVoteEnrichmentQueue03B1EFC8
+[~] AWS::Logs::LogGroup BillsApiPollerLogGroup BillsApiPollerLogGroup351084AC
+[~] AWS::IAM::Role BillsApiPoller/ServiceRole BillsApiPollerServiceRoleECDA45D8
+[~] AWS::IAM::Policy BillsApiPoller/ServiceRole/DefaultPolicy BillsApiPollerServiceRoleDefaultPolicyCE733E9C
+[~] AWS::Lambda::Function BillsApiPoller BillsApiPollerDEBB5A09
+[~] AWS::Lambda::Alias BillsApiPollerProdAlias BillsApiPollerProdAlias0C9B586C
+[~] AWS::CloudWatch::Alarm BillsApiPollerAliasErrorAlarm BillsApiPollerAliasErrorAlarmDDC2E375
+[~] AWS::IAM::Role BillsApiPollerDeploymentGroup/ServiceRole BillsApiPollerDeploymentGroupServiceRole643B023E
+[~] AWS::CodeDeploy::DeploymentGroup BillsApiPollerDeploymentGroup BillsApiPollerDeploymentGroupBC466EA9
+[~] AWS::Events::Rule BillsApiPollerSchedule BillsApiPollerSchedule50F2F2DB
+[~] AWS::Logs::LogGroup FetchRawBillLogGroup FetchRawBillLogGroupF909F146
+[~] AWS::IAM::Role FetchRawBill/ServiceRole FetchRawBillServiceRoleE90E83F5
+[~] AWS::IAM::Policy FetchRawBill/ServiceRole/DefaultPolicy FetchRawBillServiceRoleDefaultPolicyEC1D4B85
+[~] AWS::Lambda::Function FetchRawBill FetchRawBill999A8494
+[~] AWS::Lambda::Alias FetchRawBillProdAlias FetchRawBillProdAlias8D99F0EE
+[~] AWS::Lambda::EventSourceMapping FetchRawBillProdAlias/UpdatedBillsSQSEventSource FetchRawBillProdAliasUpdatedBillsSQSEventSource0786FD07
+[~] AWS::CloudWatch::Alarm FetchRawBillAliasErrorAlarm FetchRawBillAliasErrorAlarm6226F171
+[~] AWS::IAM::Role FetchRawBillDeploymentGroup/ServiceRole FetchRawBillDeploymentGroupServiceRole7727DD6D
+[~] AWS::CodeDeploy::DeploymentGroup FetchRawBillDeploymentGroup FetchRawBillDeploymentGroup5DD82DD4
+[~] AWS::Logs::LogGroup EnrichOfficialVotesLogGroup EnrichOfficialVotesLogGroup2C0A5F70
+[~] AWS::IAM::Role EnrichOfficialVotes/ServiceRole EnrichOfficialVotesServiceRole7B412652
+[~] AWS::IAM::Policy EnrichOfficialVotes/ServiceRole/DefaultPolicy EnrichOfficialVotesServiceRoleDefaultPolicy0C26F2A5
+[~] AWS::Lambda::Function EnrichOfficialVotes EnrichOfficialVotes03437E8A
+[~] AWS::Lambda::Alias EnrichOfficialVotesProdAlias EnrichOfficialVotesProdAlias55D78FDC
+[~] AWS::Lambda::EventSourceMapping EnrichOfficialVotesProdAlias/BillVoteEnrichmentSQSEventSource EnrichOfficialVotesProdAliasBillVoteEnrichmentSQSEventSource96472FEB
+[~] AWS::CloudWatch::Alarm EnrichOfficialVotesAliasErrorAlarm EnrichOfficialVotesAliasErrorAlarmC8E1205B
+[~] AWS::IAM::Role EnrichOfficialVotesDeploymentGroup/ServiceRole EnrichOfficialVotesDeploymentGroupServiceRole37493BB0
+[~] AWS::CodeDeploy::DeploymentGroup EnrichOfficialVotesDeploymentGroup EnrichOfficialVotesDeploymentGroupC5597DD6
+[~] AWS::SQS::Queue CongressMemberSummarizerDLQ CongressMemberSummarizerDLQC954E54D
+[~] AWS::SQS::Queue CongressMemberSummarizerQueue CongressMemberSummarizerQueueECCEDD34
+[~] AWS::SQS::Queue UpdatedCongressMembersDLQ UpdatedCongressMembersDLQBE86FC96
+[~] AWS::SQS::Queue UpdatedCongressMembersQueue UpdatedCongressMembersQueue40C8ABFF
+[~] AWS::Logs::LogGroup FetchCongressMembersListLogGroup FetchCongressMembersListLogGroupD5E45891
+[~] AWS::IAM::Role FetchCongressMembersList/ServiceRole FetchCongressMembersListServiceRole059AD14D
+[~] AWS::IAM::Policy FetchCongressMembersList/ServiceRole/DefaultPolicy FetchCongressMembersListServiceRoleDefaultPolicy327FD5F3
+[~] AWS::Lambda::Function FetchCongressMembersList FetchCongressMembersList56EA64C1
+[~] AWS::Lambda::Alias FetchCongressMembersListProdAlias FetchCongressMembersListProdAlias21FB10D0
+[~] AWS::CloudWatch::Alarm FetchCongressMembersListAliasErrorAlarm FetchCongressMembersListAliasErrorAlarmB6D711DD
+[~] AWS::IAM::Role FetchCongressMembersListDeploymentGroup/ServiceRole FetchCongressMembersListDeploymentGroupServiceRole61A88A89
+[~] AWS::CodeDeploy::DeploymentGroup FetchCongressMembersListDeploymentGroup FetchCongressMembersListDeploymentGroup352AB42D
+[~] AWS::Events::Rule CongressMembersSchedule CongressMembersSchedule0D905E25
+[~] AWS::Logs::LogGroup FetchRawCongressMembersLogGroup FetchRawCongressMembersLogGroup3007DDF8
+[~] AWS::IAM::Role FetchRawCongressMembers/ServiceRole FetchRawCongressMembersServiceRole07DF460C
+[~] AWS::IAM::Policy FetchRawCongressMembers/ServiceRole/DefaultPolicy FetchRawCongressMembersServiceRoleDefaultPolicy8BFD3C42
+[~] AWS::Lambda::Function FetchRawCongressMembers FetchRawCongressMembersEA8EFB9B
+[~] AWS::Lambda::Alias FetchRawCongressMembersProdAlias FetchRawCongressMembersProdAliasCBAF6CCC
+[~] AWS::Lambda::EventSourceMapping FetchRawCongressMembersProdAlias/UpdatedCongressMemebersSQSEventSource FetchRawCongressMembersProdAliasUpdatedCongressMemebersSQSEventSource0D1F7081
+[~] AWS::CloudWatch::Alarm FetchRawCongressMembersAliasErrorAlarm FetchRawCongressMembersAliasErrorAlarmB2A02FC4
+[~] AWS::IAM::Role FetchRawCongressMembersDeploymentGroup/ServiceRole FetchRawCongressMembersDeploymentGroupServiceRole5AA3B3BE
+[~] AWS::CodeDeploy::DeploymentGroup FetchRawCongressMembersDeploymentGroup FetchRawCongressMembersDeploymentGroupD57B9C77
+Stack PriorityServiceStack
+[-] AWS::CodeDeploy::DeploymentConfig PriorityServiceDeploymentConfig PriorityServiceDeploymentConfig1B26996F destroy
+[-] AWS::Lambda::Version BillPriorityResolver/CurrentVersion BillPriorityResolverCurrentVersion344162DE79f2840ffa91b3cc53b13bb18f57eb50 orphan
+[+] AWS::Lambda::Version BillPriorityResolver/CurrentVersion BillPriorityResolverCurrentVersion344162DEcba3f2c072bb1ffb2893eda2af4d90a2
+[~] AWS::DynamoDB::Table BillPriorityTable BillPriorityTableAE226818
+[~] AWS::CodeDeploy::Application PriorityServiceApp PriorityServiceApp38BFB31A
+[~] AWS::Logs::LogGroup BillPriorityResolverLogGroup BillPriorityResolverLogGroup8431AAAC
+[~] AWS::IAM::Role BillPriorityResolver/ServiceRole BillPriorityResolverServiceRole9EB38EFD
+[~] AWS::IAM::Policy BillPriorityResolver/ServiceRole/DefaultPolicy BillPriorityResolverServiceRoleDefaultPolicy3549124F
+[~] AWS::Lambda::Function BillPriorityResolver BillPriorityResolver3F9F17F5
+[~] AWS::Lambda::Alias BillPriorityResolverProdAlias BillPriorityResolverProdAlias14AD326B
+[~] AWS::CloudWatch::Alarm BillPriorityResolverAliasErrorAlarm BillPriorityResolverAliasErrorAlarmF92102F4
+[~] AWS::IAM::Role BillPriorityResolverDeploymentGroup/ServiceRole BillPriorityResolverDeploymentGroupServiceRole28A3F8EE
+[~] AWS::CodeDeploy::DeploymentGroup BillPriorityResolverDeploymentGroup BillPriorityResolverDeploymentGroup1B3E222F
+[~] AWS::IAM::Role BillPriorityResolverSchedulerRole BillPriorityResolverSchedulerRole37D766FB
+Stack UserAPIServiceStack
+[-] AWS::Lambda::Version RegisterUserDevice/CurrentVersion RegisterUserDeviceCurrentVersionF024119C67fcf3fc4b092cc0acf1850959de5b17 orphan
+[-] AWS::Lambda::Version DeviceNotificationSettings/CurrentVersion DeviceNotificationSettingsCurrentVersion0A2C087Bc6138836fb80a85d47a099528e9d14bb orphan
+[-] AWS::Lambda::Version DeletePreferences/CurrentVersion DeletePreferencesCurrentVersion3E3891C2f931aa82444321ed53031c3cc230583a orphan
+[-] AWS::Lambda::Version FetchPreferences/CurrentVersion FetchPreferencesCurrentVersion24E27776b626b95f37127697f52fb556da8acd30 orphan
+[-] AWS::Lambda::Version SetPreferences/CurrentVersion SetPreferencesCurrentVersionE48DB1847092e216001dc906db98fe1956e981dc orphan
+[-] AWS::Lambda::Version FetchProcessedBill/CurrentVersion FetchProcessedBillCurrentVersionFA1ECD1Da10cc63072971e29980ed3f119991e01 orphan
+[-] AWS::Lambda::Version FetchFeedback/CurrentVersion FetchFeedbackCurrentVersion492667F684efa26125c26b8cec1e374d2cbcb5fa orphan
+[-] AWS::Lambda::Version SetFeedback/CurrentVersion SetFeedbackCurrentVersionA8D86467e649f5484d7d12745a20058853e3d8a7 orphan
+[-] AWS::Lambda::Version FetchBillStats/CurrentVersion FetchBillStatsCurrentVersion89D2AE93d92d574c7a46c4a085d72f849ef108cf orphan
+[-] AWS::Lambda::Version FetchCivicScore/CurrentVersion FetchCivicScoreCurrentVersion7828CBC448911c4e0271fce8b331aa56f50c98ed orphan
+[-] AWS::Lambda::Version FetchCivicProfile/CurrentVersion FetchCivicProfileCurrentVersionD85CE986e48d2695ceba4a5ecde01db54fd8efa3 orphan
+[-] AWS::Lambda::Version FetchCongressMemberCivicProfile/CurrentVersion FetchCongressMemberCivicProfileCurrentVersion5EC7E1590bdef222748988313334d97b426939e1 orphan
+[-] AWS::Lambda::Version DistrictVerification/CurrentVersion DistrictVerificationCurrentVersionDCA7548Cb20b62c58f00fde3a6778209cc9ce67b orphan
+[-] AWS::Lambda::Version AdultAttestation/CurrentVersion AdultAttestationCurrentVersionA36FD7C88202c583c76b2ee6a6ab42f67600814e orphan
+[-] AWS::Lambda::Version FetchMe/CurrentVersion FetchMeCurrentVersion940357BEe75d577e94c43e0501b901f7b650dfe5 orphan
+[-] AWS::Lambda::Version FetchLatestWeeklyDigest/CurrentVersion FetchLatestWeeklyDigestCurrentVersionE49904A12500110157c447e722d1add6f0bd56f2 orphan
+[-] AWS::Lambda::Version GenerateWeeklyDigests/CurrentVersion GenerateWeeklyDigestsCurrentVersionE70B82078d10cdb2c7be9ef0de1edb649c978fd5 orphan
+[-] AWS::Lambda::Version AccountData/CurrentVersion AccountDataCurrentVersion5840A84Ed34315c483950c31c665dd3d6c92d0a3 orphan
+[-] AWS::Lambda::Version AccountDataStatus/CurrentVersion AccountDataStatusCurrentVersionFA3C6FA6013ae5044f7f167992e090f994e872f7 orphan
+[-] AWS::Lambda::Version CleanupOrphanedUsers/CurrentVersion CleanupOrphanedUsersCurrentVersionFAF5853E1fc8129712ca3c2f69f41e91f3920349 orphan
+[-] AWS::Lambda::Version FetchProcessedCongressMembers/CurrentVersion FetchProcessedCongressMembersCurrentVersion960BF60B6d61c9691dd2eb7cfbc048152f62a327 orphan
+[-] AWS::Lambda::Version FetchCongressMembersManifest/CurrentVersion FetchCongressMembersManifestCurrentVersion293B2B0F93d4126a0f8cfdaffce5593ff6b9aa83 orphan
+[-] AWS::Lambda::Version FetchBillsManifest/CurrentVersion FetchBillsManifestCurrentVersion2368C09B2fc17bb87f7be466feeaea29b70df1ef orphan
+[-] AWS::ApiGateway::Deployment UserApi/Deployment UserApiDeployment24839811626b267f029059a51c5249f26868a2db destroy
+[+] AWS::Cognito::UserPoolClient BillboardUserPool/BillboardCanaryClient BillboardUserPoolBillboardCanaryClient2EACA7EB
+[+] AWS::Lambda::Version RegisterUserDevice/CurrentVersion RegisterUserDeviceCurrentVersionF024119C0a28e58c3982c32949e878d574147a99
+[+] AWS::Lambda::Version DeviceNotificationSettings/CurrentVersion DeviceNotificationSettingsCurrentVersion0A2C087Bba223142120a2af1ddd6080a2a2cc99e
+[+] AWS::Lambda::Version DeletePreferences/CurrentVersion DeletePreferencesCurrentVersion3E3891C20c323027c4965d93e8b3348029a8d92e
+[+] AWS::Lambda::Version FetchPreferences/CurrentVersion FetchPreferencesCurrentVersion24E27776db4d88819318fad80298d872530d5004
+[+] AWS::Lambda::Version SetPreferences/CurrentVersion SetPreferencesCurrentVersionE48DB18430b62590e86fd7db8494a14d50ff8a82
+[+] AWS::Lambda::Version FetchProcessedBill/CurrentVersion FetchProcessedBillCurrentVersionFA1ECD1D46a42c69e30659d7d53e89194f4be3a3
+[+] AWS::Lambda::Version FetchFeedback/CurrentVersion FetchFeedbackCurrentVersion492667F6199a40ef5ff294f7ca408be99fdd5354
+[+] AWS::Lambda::Version SetFeedback/CurrentVersion SetFeedbackCurrentVersionA8D86467c48f2e092f383aa63f8bfba4e54f8e31
+[+] AWS::Lambda::Version FetchBillStats/CurrentVersion FetchBillStatsCurrentVersion89D2AE93d3342d8f6739d0db396cb0bce8237b20
+[+] AWS::Lambda::Version FetchCivicScore/CurrentVersion FetchCivicScoreCurrentVersion7828CBC4be23b6a4252803abb23635750798da0d
+[+] AWS::Lambda::Version FetchCivicProfile/CurrentVersion FetchCivicProfileCurrentVersionD85CE9866372a60ef5059e0b486cade5853bb7b2
+[+] AWS::Lambda::Version FetchCongressMemberCivicProfile/CurrentVersion FetchCongressMemberCivicProfileCurrentVersion5EC7E1598c509e733040c28cd04f0ea0d9eeb8b7
+[+] AWS::Lambda::Version DistrictVerification/CurrentVersion DistrictVerificationCurrentVersionDCA7548Cce9d47833e072b5b5b792ebd8a9a48bd
+[+] AWS::Lambda::Version AdultAttestation/CurrentVersion AdultAttestationCurrentVersionA36FD7C878b5d607a782c7d88c617531561a4299
+[+] AWS::Lambda::Version FetchMe/CurrentVersion FetchMeCurrentVersion940357BE1143d1c1665a41e49b596a86bd45a699
+[+] AWS::Lambda::Version FetchLatestWeeklyDigest/CurrentVersion FetchLatestWeeklyDigestCurrentVersionE49904A13f7492a020a14eb0b8eab1e1ba6425b0
+[+] AWS::SQS::Queue WeeklyDigestDLQ WeeklyDigestDLQ1AB921D5
+[+] AWS::SQS::Queue WeeklyDigestQueue WeeklyDigestQueue6C348914
+[+] AWS::Lambda::Version GenerateWeeklyDigests/CurrentVersion GenerateWeeklyDigestsCurrentVersionE70B8207ed832a0c6f7a6e963dfc4ada8f09de45
+[+] AWS::Logs::LogGroup WeeklyDigestWorkerLogGroup WeeklyDigestWorkerLogGroupDA379F31
+[+] AWS::IAM::Role WeeklyDigestWorker/ServiceRole WeeklyDigestWorkerServiceRole68BA5D6F
+[+] AWS::IAM::Policy WeeklyDigestWorker/ServiceRole/DefaultPolicy WeeklyDigestWorkerServiceRoleDefaultPolicyBD8281D5
+[+] AWS::Lambda::Function WeeklyDigestWorker WeeklyDigestWorkerDFD69403
+[+] AWS::Lambda::Version WeeklyDigestWorker/CurrentVersion WeeklyDigestWorkerCurrentVersionE339B15Aca76251d765d3f71a36bcf0244076bf3
+[+] AWS::Lambda::Alias WeeklyDigestWorkerProdAlias WeeklyDigestWorkerProdAlias77DA496D
+[+] AWS::Lambda::EventSourceMapping WeeklyDigestWorkerProdAlias/SqsEventSource:UserAPIServiceStackWeeklyDigestQueueB9ECEAEE WeeklyDigestWorkerProdAliasSqsEventSourceUserAPIServiceStackWeeklyDigestQueueB9ECEAEE573D7F4F
+[+] AWS::CloudWatch::Alarm WeeklyDigestWorkerAliasErrorAlarm WeeklyDigestWorkerAliasErrorAlarm5EA52015
+[+] AWS::IAM::Role WeeklyDigestWorkerDeploymentGroup/ServiceRole WeeklyDigestWorkerDeploymentGroupServiceRole86A9B1E1
+[+] AWS::CodeDeploy::DeploymentGroup WeeklyDigestWorkerDeploymentGroup WeeklyDigestWorkerDeploymentGroupA2661CC7
+[+] AWS::Lambda::Version AccountData/CurrentVersion AccountDataCurrentVersion5840A84Ec23b7f87190803469f56f199d029f415
+[+] AWS::Lambda::Version AccountDataStatus/CurrentVersion AccountDataStatusCurrentVersionFA3C6FA6ce7caf9baaac323625b488c56b812f22
+[+] AWS::Lambda::Version CleanupOrphanedUsers/CurrentVersion CleanupOrphanedUsersCurrentVersionFAF5853Ebd3a5f7e87c9e0289997e5c351a96473
+[+] AWS::Lambda::EventInvokeConfig CleanupOrphanedUsersProdAlias/EventInvokeConfig CleanupOrphanedUsersProdAliasEventInvokeConfig86ED2E32
+[+] AWS::S3::Bucket CognitoUserExportBucket CognitoUserExportBucketD6331DDE
+[+] AWS::S3::BucketPolicy CognitoUserExportBucket/Policy CognitoUserExportBucketPolicyF38E33DF
+[+] AWS::Logs::LogGroup ExportCognitoUsersLogGroup ExportCognitoUsersLogGroup2CE0E8BE
+[+] AWS::IAM::Role ExportCognitoUsers/ServiceRole ExportCognitoUsersServiceRoleC1BF85F2
+[+] AWS::IAM::Policy ExportCognitoUsers/ServiceRole/DefaultPolicy ExportCognitoUsersServiceRoleDefaultPolicy016127E2
+[+] AWS::Lambda::Function ExportCognitoUsers ExportCognitoUsersD14DC337
+[+] AWS::Lambda::Version ExportCognitoUsers/CurrentVersion ExportCognitoUsersCurrentVersion1DC793470f950539075940015af52c43282a2318
+[+] AWS::Lambda::Alias ExportCognitoUsersProdAlias ExportCognitoUsersProdAlias711CA744
+[+] AWS::Lambda::EventInvokeConfig ExportCognitoUsersProdAlias/EventInvokeConfig ExportCognitoUsersProdAliasEventInvokeConfig8D3A4E17
+[+] AWS::CloudWatch::Alarm ExportCognitoUsersAliasErrorAlarm ExportCognitoUsersAliasErrorAlarm3AB99F51
+[+] AWS::IAM::Role ExportCognitoUsersDeploymentGroup/ServiceRole ExportCognitoUsersDeploymentGroupServiceRole54E55C61
+[+] AWS::CodeDeploy::DeploymentGroup ExportCognitoUsersDeploymentGroup ExportCognitoUsersDeploymentGroup5395FA8F
+[+] AWS::Events::Rule ExportCognitoUsersSchedule ExportCognitoUsersScheduleD961E43D
+[+] AWS::Lambda::Permission ExportCognitoUsersSchedule/AllowEventRuleUserAPIServiceStackExportCognitoUsersProdAliasC6415AD4 ExportCognitoUsersScheduleAllowEventRuleUserAPIServiceStackExportCognitoUsersProdAliasC6415AD49E8B0311
+[+] AWS::Lambda::Version FetchProcessedCongressMembers/CurrentVersion FetchProcessedCongressMembersCurrentVersion960BF60Ba08c8c77746aa2cbf49674dcee392b73
+[+] AWS::Lambda::Version FetchCongressMembersManifest/CurrentVersion FetchCongressMembersManifestCurrentVersion293B2B0Fb32e560b58eeaefa23c580d7365d41e3
+[+] AWS::S3::Bucket BillsManifestSnapshotBucket BillsManifestSnapshotBucketDD018F1A
+[+] AWS::S3::BucketPolicy BillsManifestSnapshotBucket/Policy BillsManifestSnapshotBucketPolicy641E5B89
+[+] AWS::Lambda::Version FetchBillsManifest/CurrentVersion FetchBillsManifestCurrentVersion2368C09B031c6544e4c9c23b74a3817c6827f256
+[+] AWS::Logs::LogGroup PublishBillsManifestLogGroup PublishBillsManifestLogGroup23CC8659
+[+] AWS::IAM::Role PublishBillsManifest/ServiceRole PublishBillsManifestServiceRole69D88EAF
+[+] AWS::IAM::Policy PublishBillsManifest/ServiceRole/DefaultPolicy PublishBillsManifestServiceRoleDefaultPolicy7BA3301F
+[+] AWS::Lambda::Function PublishBillsManifest PublishBillsManifest1DA8745D
+[+] AWS::Lambda::Version PublishBillsManifest/CurrentVersion PublishBillsManifestCurrentVersion25FFC0EB39d15f50dfc78d65250cae6f4b6c50dd
+[+] AWS::Lambda::Alias PublishBillsManifestProdAlias PublishBillsManifestProdAliasFCF2F731
+[+] AWS::Lambda::EventInvokeConfig PublishBillsManifestProdAlias/EventInvokeConfig PublishBillsManifestProdAliasEventInvokeConfig28573292
+[+] AWS::CloudWatch::Alarm PublishBillsManifestAliasErrorAlarm PublishBillsManifestAliasErrorAlarm89F18BDF
+[+] AWS::IAM::Role PublishBillsManifestDeploymentGroup/ServiceRole PublishBillsManifestDeploymentGroupServiceRole281BD941
+[+] AWS::CodeDeploy::DeploymentGroup PublishBillsManifestDeploymentGroup PublishBillsManifestDeploymentGroup434DA5B6
+[+] AWS::IAM::Role PublishBillsManifestSchedulerRole PublishBillsManifestSchedulerRoleE105ABD0
+[+] AWS::IAM::Policy PublishBillsManifestSchedulerRole/DefaultPolicy PublishBillsManifestSchedulerRoleDefaultPolicyCA430C26
+[+] AWS::Scheduler::Schedule PublishBillsManifestSchedule PublishBillsManifestSchedule
+[+] AWS::ApiGateway::Deployment UserApi/Deployment UserApiDeployment24839811629843a3a6fe53a312254e38628487b1
+[+] AWS::IAM::Role UserApiCanaryLogRetentionRole UserApiCanaryLogRetentionRole325AE498
+[+] Custom::LogRetention UserApiCanaryLogRetention UserApiCanaryLogRetentionE647598A
+[+] AWS::Lambda::Function LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8a LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aFD4BFC8A
+[~] AWS::CodeDeploy::Application UserApiServiceApp UserApiServiceApp5F287F42
+[~] AWS::CloudWatch::Alarm ApiGw5xxAlarm ApiGw5xxAlarm87FB544D
+[~] AWS::Cognito::UserPool BillboardUserPool BillboardUserPoolC41FE3DD
+[~] AWS::Cognito::UserPoolClient BillboardUserPool/UserPoolClient BillboardUserPoolUserPoolClient61DEF7CD
+[~] AWS::SecretsManager::Secret DistrictVerificationHashSaltSecret DistrictVerificationHashSaltSecret54008A38
+[~] AWS::Logs::LogGroup RegisterUserDeviceLogGroup RegisterUserDeviceLogGroupC3CD9D86
+[~] AWS::IAM::Role RegisterUserDevice/ServiceRole RegisterUserDeviceServiceRole2BDBA1E8
+[~] AWS::IAM::Policy RegisterUserDevice/ServiceRole/DefaultPolicy RegisterUserDeviceServiceRoleDefaultPolicyE7344F57
+[~] AWS::Lambda::Function RegisterUserDevice RegisterUserDevice5BCB739B
+[~] AWS::Lambda::Alias RegisterUserDeviceProdAlias RegisterUserDeviceProdAliasB9D787F6
+[~] AWS::CloudWatch::Alarm RegisterUserDeviceAliasErrorAlarm RegisterUserDeviceAliasErrorAlarm80C930A8
+[~] AWS::IAM::Role RegisterUserDeviceDeploymentGroup/ServiceRole RegisterUserDeviceDeploymentGroupServiceRole0964AB9E
+[~] AWS::CodeDeploy::DeploymentGroup RegisterUserDeviceDeploymentGroup RegisterUserDeviceDeploymentGroup43935D09
+[~] AWS::Logs::LogGroup DeviceNotificationSettingsLogGroup DeviceNotificationSettingsLogGroup08E6969F
+[~] AWS::IAM::Role DeviceNotificationSettings/ServiceRole DeviceNotificationSettingsServiceRoleDD3B6BC3
+[~] AWS::IAM::Policy DeviceNotificationSettings/ServiceRole/DefaultPolicy DeviceNotificationSettingsServiceRoleDefaultPolicyB5C69D6A
+[~] AWS::Lambda::Function DeviceNotificationSettings DeviceNotificationSettingsF7B8D4BE
+[~] AWS::Lambda::Alias DeviceNotificationSettingsProdAlias DeviceNotificationSettingsProdAliasAA183B91
+[~] AWS::CloudWatch::Alarm DeviceNotificationSettingsAliasErrorAlarm DeviceNotificationSettingsAliasErrorAlarmF34509C5
+[~] AWS::IAM::Role DeviceNotificationSettingsDeploymentGroup/ServiceRole DeviceNotificationSettingsDeploymentGroupServiceRole2BAF8C08
+[~] AWS::CodeDeploy::DeploymentGroup DeviceNotificationSettingsDeploymentGroup DeviceNotificationSettingsDeploymentGroup0D2BCCE9
+[~] AWS::Logs::LogGroup DeletePreferencesLogGroup DeletePreferencesLogGroupF83506E3
+[~] AWS::IAM::Role DeletePreferences/ServiceRole DeletePreferencesServiceRoleEF4EEFEE
+[~] AWS::IAM::Policy DeletePreferences/ServiceRole/DefaultPolicy DeletePreferencesServiceRoleDefaultPolicy9B663CDD
+[~] AWS::Lambda::Function DeletePreferences DeletePreferencesA653103D
+[~] AWS::Lambda::Alias DeletePreferencesProdAlias DeletePreferencesProdAlias138C50B7
+[~] AWS::CloudWatch::Alarm DeletePreferencesAliasErrorAlarm DeletePreferencesAliasErrorAlarm0C25F3EE
+[~] AWS::IAM::Role DeletePreferencesDeploymentGroup/ServiceRole DeletePreferencesDeploymentGroupServiceRole12F1BFF4
+[~] AWS::CodeDeploy::DeploymentGroup DeletePreferencesDeploymentGroup DeletePreferencesDeploymentGroupA1D03B43
+[~] AWS::Logs::LogGroup FetchPreferencesLogGroup FetchPreferencesLogGroup12790407
+[~] AWS::IAM::Role FetchPreferences/ServiceRole FetchPreferencesServiceRole69137743
+[~] AWS::IAM::Policy FetchPreferences/ServiceRole/DefaultPolicy FetchPreferencesServiceRoleDefaultPolicy3B8B83AC
+[~] AWS::Lambda::Function FetchPreferences FetchPreferences6C6FBDA1
+[~] AWS::Lambda::Alias FetchPreferencesProdAlias FetchPreferencesProdAlias3426BBBB
+[~] AWS::CloudWatch::Alarm FetchPreferencesAliasErrorAlarm FetchPreferencesAliasErrorAlarm6275066E
+[~] AWS::IAM::Role FetchPreferencesDeploymentGroup/ServiceRole FetchPreferencesDeploymentGroupServiceRole95D4D56F
+[~] AWS::CodeDeploy::DeploymentGroup FetchPreferencesDeploymentGroup FetchPreferencesDeploymentGroupB2EAAD18
+[~] AWS::Logs::LogGroup SetPreferencesLogGroup SetPreferencesLogGroupA0453880
+[~] AWS::IAM::Role SetPreferences/ServiceRole SetPreferencesServiceRoleBB025A03
+[~] AWS::IAM::Policy SetPreferences/ServiceRole/DefaultPolicy SetPreferencesServiceRoleDefaultPolicy40263640
+[~] AWS::Lambda::Function SetPreferences SetPreferences7E57A95A
+[~] AWS::Lambda::Alias SetPreferencesProdAlias SetPreferencesProdAliasEDD79DDE
+[~] AWS::CloudWatch::Alarm SetPreferencesAliasErrorAlarm SetPreferencesAliasErrorAlarm69671A26
+[~] AWS::IAM::Role SetPreferencesDeploymentGroup/ServiceRole SetPreferencesDeploymentGroupServiceRoleEC7E2EBB
+[~] AWS::CodeDeploy::DeploymentGroup SetPreferencesDeploymentGroup SetPreferencesDeploymentGroupC646F91A
+[~] AWS::Logs::LogGroup FetchProcessedBillLogGroup FetchProcessedBillLogGroup30E2555B
+[~] AWS::IAM::Role FetchProcessedBill/ServiceRole FetchProcessedBillServiceRoleB3E8AE22
+[~] AWS::IAM::Policy FetchProcessedBill/ServiceRole/DefaultPolicy FetchProcessedBillServiceRoleDefaultPolicy38994AB1
+[~] AWS::Lambda::Function FetchProcessedBill FetchProcessedBill2EE052DC
+[~] AWS::Lambda::Alias FetchProcessedBillProdAlias FetchProcessedBillProdAlias2C7682BB
+[~] AWS::CloudWatch::Alarm FetchProcessedBillAliasErrorAlarm FetchProcessedBillAliasErrorAlarmBE545B83
+[~] AWS::IAM::Role FetchProcessedBillDeploymentGroup/ServiceRole FetchProcessedBillDeploymentGroupServiceRole50EDF4A5
+[~] AWS::CodeDeploy::DeploymentGroup FetchProcessedBillDeploymentGroup FetchProcessedBillDeploymentGroupA88677A4
+[~] AWS::Logs::LogGroup FetchFeedbackLogGroup FetchFeedbackLogGroupEE642F10
+[~] AWS::IAM::Role FetchFeedback/ServiceRole FetchFeedbackServiceRole00728523
+[~] AWS::IAM::Policy FetchFeedback/ServiceRole/DefaultPolicy FetchFeedbackServiceRoleDefaultPolicy73D92012
+[~] AWS::Lambda::Function FetchFeedback FetchFeedback0479ECE1
+[~] AWS::Lambda::Alias FetchFeedbackProdAlias FetchFeedbackProdAlias8FF60195
+[~] AWS::CloudWatch::Alarm FetchFeedbackAliasErrorAlarm FetchFeedbackAliasErrorAlarmB24A61D4
+[~] AWS::IAM::Role FetchFeedbackDeploymentGroup/ServiceRole FetchFeedbackDeploymentGroupServiceRole8B027663
+[~] AWS::CodeDeploy::DeploymentGroup FetchFeedbackDeploymentGroup FetchFeedbackDeploymentGroupCE508982
+[~] AWS::Logs::LogGroup SetFeedbackLogGroup SetFeedbackLogGroup4B1867D5
+[~] AWS::IAM::Role SetFeedback/ServiceRole SetFeedbackServiceRoleD2AFCDE5
+[~] AWS::IAM::Policy SetFeedback/ServiceRole/DefaultPolicy SetFeedbackServiceRoleDefaultPolicy95A5AAF2
+[~] AWS::Lambda::Function SetFeedback SetFeedback9D0B9B71
+[~] AWS::Lambda::Alias SetFeedbackProdAlias SetFeedbackProdAlias625B55F5
+[~] AWS::CloudWatch::Alarm SetFeedbackAliasErrorAlarm SetFeedbackAliasErrorAlarm40F4608B
+[~] AWS::IAM::Role SetFeedbackDeploymentGroup/ServiceRole SetFeedbackDeploymentGroupServiceRoleB360E76A
+[~] AWS::CodeDeploy::DeploymentGroup SetFeedbackDeploymentGroup SetFeedbackDeploymentGroup7FAFBF05
+[~] AWS::Logs::LogGroup FetchBillStatsLogGroup FetchBillStatsLogGroup0E19F8A2
+[~] AWS::IAM::Role FetchBillStats/ServiceRole FetchBillStatsServiceRole139420F3
+[~] AWS::IAM::Policy FetchBillStats/ServiceRole/DefaultPolicy FetchBillStatsServiceRoleDefaultPolicyC4E3C15A
+[~] AWS::Lambda::Function FetchBillStats FetchBillStats766CCE9F
+[~] AWS::Lambda::Alias FetchBillStatsProdAlias FetchBillStatsProdAlias334B0D0A
+[~] AWS::CloudWatch::Alarm FetchBillStatsAliasErrorAlarm FetchBillStatsAliasErrorAlarmC5308C82
+[~] AWS::IAM::Role FetchBillStatsDeploymentGroup/ServiceRole FetchBillStatsDeploymentGroupServiceRole4AB501BF
+[~] AWS::CodeDeploy::DeploymentGroup FetchBillStatsDeploymentGroup FetchBillStatsDeploymentGroupCF41B308
+[~] AWS::Logs::LogGroup FetchCivicScoreLogGroup FetchCivicScoreLogGroupFD662666
+[~] AWS::IAM::Role FetchCivicScore/ServiceRole FetchCivicScoreServiceRoleF8FBBDEE
+[~] AWS::IAM::Policy FetchCivicScore/ServiceRole/DefaultPolicy FetchCivicScoreServiceRoleDefaultPolicyB0A50A96
+[~] AWS::Lambda::Function FetchCivicScore FetchCivicScore6369782E
+[~] AWS::Lambda::Alias FetchCivicScoreProdAlias FetchCivicScoreProdAlias7BB88372
+[~] AWS::CloudWatch::Alarm FetchCivicScoreAliasErrorAlarm FetchCivicScoreAliasErrorAlarm016C83C8
+[~] AWS::IAM::Role FetchCivicScoreDeploymentGroup/ServiceRole FetchCivicScoreDeploymentGroupServiceRole947B9404
+[~] AWS::CodeDeploy::DeploymentGroup FetchCivicScoreDeploymentGroup FetchCivicScoreDeploymentGroup0EF91B5E
+[~] AWS::Logs::LogGroup FetchCivicProfileLogGroup FetchCivicProfileLogGroup0DE3830B
+[~] AWS::IAM::Role FetchCivicProfile/ServiceRole FetchCivicProfileServiceRole5AD35DEA
+[~] AWS::IAM::Policy FetchCivicProfile/ServiceRole/DefaultPolicy FetchCivicProfileServiceRoleDefaultPolicy929DFC8D
+[~] AWS::Lambda::Function FetchCivicProfile FetchCivicProfileEBF237D3
+[~] AWS::Lambda::Alias FetchCivicProfileProdAlias FetchCivicProfileProdAliasBA8D80AA
+[~] AWS::CloudWatch::Alarm FetchCivicProfileAliasErrorAlarm FetchCivicProfileAliasErrorAlarm790175A6
+[~] AWS::IAM::Role FetchCivicProfileDeploymentGroup/ServiceRole FetchCivicProfileDeploymentGroupServiceRoleBFBEB5F1
+[~] AWS::CodeDeploy::DeploymentGroup FetchCivicProfileDeploymentGroup FetchCivicProfileDeploymentGroupB61CAF46
+[~] AWS::Logs::LogGroup FetchCongressMemberCivicProfileLogGroup FetchCongressMemberCivicProfileLogGroup29D6A0B3
+[~] AWS::IAM::Role FetchCongressMemberCivicProfile/ServiceRole FetchCongressMemberCivicProfileServiceRole06A06280
+[~] AWS::IAM::Policy FetchCongressMemberCivicProfile/ServiceRole/DefaultPolicy FetchCongressMemberCivicProfileServiceRoleDefaultPolicy814D1811
+[~] AWS::Lambda::Function FetchCongressMemberCivicProfile FetchCongressMemberCivicProfileA4AFB546
+[~] AWS::Lambda::Alias FetchCongressMemberCivicProfileProdAlias FetchCongressMemberCivicProfileProdAlias3A4BADF4
+[~] AWS::CloudWatch::Alarm FetchCongressMemberCivicProfileAliasErrorAlarm FetchCongressMemberCivicProfileAliasErrorAlarmD9B01FE7
+[~] AWS::IAM::Role FetchCongressMemberCivicProfileDeploymentGroup/ServiceRole FetchCongressMemberCivicProfileDeploymentGroupServiceRole455091BA
+[~] AWS::CodeDeploy::DeploymentGroup FetchCongressMemberCivicProfileDeploymentGroup FetchCongressMemberCivicProfileDeploymentGroup1733965E
+[~] AWS::Logs::LogGroup DistrictVerificationLogGroup DistrictVerificationLogGroupB7ECAC6A
+[~] AWS::IAM::Role DistrictVerification/ServiceRole DistrictVerificationServiceRoleEAB65274
+[~] AWS::IAM::Policy DistrictVerification/ServiceRole/DefaultPolicy DistrictVerificationServiceRoleDefaultPolicyE014423B
+[~] AWS::Lambda::Function DistrictVerification DistrictVerification29F92DD7
+[~] AWS::Lambda::Alias DistrictVerificationProdAlias DistrictVerificationProdAlias188C0BF4
+[~] AWS::CloudWatch::Alarm DistrictVerificationAliasErrorAlarm DistrictVerificationAliasErrorAlarm816A5946
+[~] AWS::IAM::Role DistrictVerificationDeploymentGroup/ServiceRole DistrictVerificationDeploymentGroupServiceRole9938F511
+[~] AWS::CodeDeploy::DeploymentGroup DistrictVerificationDeploymentGroup DistrictVerificationDeploymentGroupBC133B3B
+[~] AWS::Logs::LogGroup AdultAttestationLogGroup AdultAttestationLogGroup56EB2BEC
+[~] AWS::IAM::Role AdultAttestation/ServiceRole AdultAttestationServiceRoleD3D06B66
+[~] AWS::IAM::Policy AdultAttestation/ServiceRole/DefaultPolicy AdultAttestationServiceRoleDefaultPolicyBD2C1260
+[~] AWS::Lambda::Function AdultAttestation AdultAttestation3CFA0ED7
+[~] AWS::Lambda::Alias AdultAttestationProdAlias AdultAttestationProdAlias8F36844B
+[~] AWS::CloudWatch::Alarm AdultAttestationAliasErrorAlarm AdultAttestationAliasErrorAlarm26B7F6F8
+[~] AWS::IAM::Role AdultAttestationDeploymentGroup/ServiceRole AdultAttestationDeploymentGroupServiceRole0BDEFAEE
+[~] AWS::CodeDeploy::DeploymentGroup AdultAttestationDeploymentGroup AdultAttestationDeploymentGroup8EBE0309
+[~] AWS::Logs::LogGroup FetchMeLogGroup FetchMeLogGroupBAC40045
+[~] AWS::IAM::Role FetchMe/ServiceRole FetchMeServiceRole62C2169B
+[~] AWS::IAM::Policy FetchMe/ServiceRole/DefaultPolicy FetchMeServiceRoleDefaultPolicy9078AF1F
+[~] AWS::Lambda::Function FetchMe FetchMeD4C801AB
+[~] AWS::Lambda::Alias FetchMeProdAlias FetchMeProdAlias2F070CF0
+[~] AWS::CloudWatch::Alarm FetchMeAliasErrorAlarm FetchMeAliasErrorAlarmDA7AC7ED
+[~] AWS::IAM::Role FetchMeDeploymentGroup/ServiceRole FetchMeDeploymentGroupServiceRoleBAA18CB9
+[~] AWS::CodeDeploy::DeploymentGroup FetchMeDeploymentGroup FetchMeDeploymentGroupABB6D05F
+[~] AWS::Logs::LogGroup FetchLatestWeeklyDigestLogGroup FetchLatestWeeklyDigestLogGroupA9FCFFEB
+[~] AWS::IAM::Role FetchLatestWeeklyDigest/ServiceRole FetchLatestWeeklyDigestServiceRole24456FD5
+[~] AWS::IAM::Policy FetchLatestWeeklyDigest/ServiceRole/DefaultPolicy FetchLatestWeeklyDigestServiceRoleDefaultPolicy6AB1D7E2
+[~] AWS::Lambda::Function FetchLatestWeeklyDigest FetchLatestWeeklyDigest1D92DF08
+[~] AWS::Lambda::Alias FetchLatestWeeklyDigestProdAlias FetchLatestWeeklyDigestProdAlias482C4798
+[~] AWS::CloudWatch::Alarm FetchLatestWeeklyDigestAliasErrorAlarm FetchLatestWeeklyDigestAliasErrorAlarm93574902
+[~] AWS::IAM::Role FetchLatestWeeklyDigestDeploymentGroup/ServiceRole FetchLatestWeeklyDigestDeploymentGroupServiceRoleA98FA2E3
+[~] AWS::CodeDeploy::DeploymentGroup FetchLatestWeeklyDigestDeploymentGroup FetchLatestWeeklyDigestDeploymentGroupD6EE57BF
+[~] AWS::Logs::LogGroup GenerateWeeklyDigestsLogGroup GenerateWeeklyDigestsLogGroupDBDDBFDA
+[~] AWS::IAM::Role GenerateWeeklyDigests/ServiceRole GenerateWeeklyDigestsServiceRole4E2FCDF3
+[~] AWS::IAM::Policy GenerateWeeklyDigests/ServiceRole/DefaultPolicy GenerateWeeklyDigestsServiceRoleDefaultPolicyD78F8BAD
+[~] AWS::Lambda::Function GenerateWeeklyDigests GenerateWeeklyDigests2C686A01
+[~] AWS::Lambda::Alias GenerateWeeklyDigestsProdAlias GenerateWeeklyDigestsProdAliasC1F7FE4B
+[~] AWS::CloudWatch::Alarm GenerateWeeklyDigestsAliasErrorAlarm GenerateWeeklyDigestsAliasErrorAlarm8EDE3BE5
+[~] AWS::IAM::Role GenerateWeeklyDigestsDeploymentGroup/ServiceRole GenerateWeeklyDigestsDeploymentGroupServiceRole3926B254
+[~] AWS::CodeDeploy::DeploymentGroup GenerateWeeklyDigestsDeploymentGroup GenerateWeeklyDigestsDeploymentGroupB09E5138
+[~] AWS::Logs::LogGroup AccountDataLogGroup AccountDataLogGroup2A51FBD6
+[~] AWS::IAM::Role AccountData/ServiceRole AccountDataServiceRole0BEF644A
+[~] AWS::IAM::Policy AccountData/ServiceRole/DefaultPolicy AccountDataServiceRoleDefaultPolicyB95B9346
+[~] AWS::Lambda::Function AccountData AccountDataCD641E44
+[~] AWS::Lambda::Alias AccountDataProdAlias AccountDataProdAlias02309B2B
+[~] AWS::CloudWatch::Alarm AccountDataAliasErrorAlarm AccountDataAliasErrorAlarm3181A4C1
+[~] AWS::IAM::Role AccountDataDeploymentGroup/ServiceRole AccountDataDeploymentGroupServiceRole0AA75906
+[~] AWS::CodeDeploy::DeploymentGroup AccountDataDeploymentGroup AccountDataDeploymentGroup4AF74930
+[~] AWS::Logs::LogGroup AccountDataStatusLogGroup AccountDataStatusLogGroup7168767A
+[~] AWS::IAM::Role AccountDataStatus/ServiceRole AccountDataStatusServiceRole42F8AE62
+[~] AWS::IAM::Policy AccountDataStatus/ServiceRole/DefaultPolicy AccountDataStatusServiceRoleDefaultPolicy902D2405
+[~] AWS::Lambda::Function AccountDataStatus AccountDataStatus59C73359
+[~] AWS::Lambda::Alias AccountDataStatusProdAlias AccountDataStatusProdAlias0359CCE6
+[~] AWS::CloudWatch::Alarm AccountDataStatusAliasErrorAlarm AccountDataStatusAliasErrorAlarm4F5B75B8
+[~] AWS::IAM::Role AccountDataStatusDeploymentGroup/ServiceRole AccountDataStatusDeploymentGroupServiceRoleE8D8BFED
+[~] AWS::CodeDeploy::DeploymentGroup AccountDataStatusDeploymentGroup AccountDataStatusDeploymentGroup201349FE
+[~] AWS::Logs::LogGroup CleanupOrphanedUsersLogGroup CleanupOrphanedUsersLogGroup1A226942
+[~] AWS::IAM::Role CleanupOrphanedUsers/ServiceRole CleanupOrphanedUsersServiceRoleCF68541E
+[~] AWS::IAM::Policy CleanupOrphanedUsers/ServiceRole/DefaultPolicy CleanupOrphanedUsersServiceRoleDefaultPolicyF4924337
+[~] AWS::Lambda::Function CleanupOrphanedUsers CleanupOrphanedUsers47FB90BE
+[~] AWS::Lambda::Alias CleanupOrphanedUsersProdAlias CleanupOrphanedUsersProdAliasFBE84F31
+[~] AWS::CloudWatch::Alarm CleanupOrphanedUsersAliasErrorAlarm CleanupOrphanedUsersAliasErrorAlarmBB324D85
+[~] AWS::IAM::Role CleanupOrphanedUsersDeploymentGroup/ServiceRole CleanupOrphanedUsersDeploymentGroupServiceRole9F035813
+[~] AWS::CodeDeploy::DeploymentGroup CleanupOrphanedUsersDeploymentGroup CleanupOrphanedUsersDeploymentGroup375B1E71
+[~] AWS::Events::Rule CleanupOrphanedUsersSchedule CleanupOrphanedUsersScheduleEF548FBC
+[~] AWS::IAM::Role WeeklyDigestSchedulerRole WeeklyDigestSchedulerRole5C7C9E2A
+[~] AWS::Logs::LogGroup FetchProcessedCongressMembersLogGroup FetchProcessedCongressMembersLogGroup954B310F
+[~] AWS::IAM::Role FetchProcessedCongressMembers/ServiceRole FetchProcessedCongressMembersServiceRole0E65AF08
+[~] AWS::IAM::Policy FetchProcessedCongressMembers/ServiceRole/DefaultPolicy FetchProcessedCongressMembersServiceRoleDefaultPolicy38159461
+[~] AWS::Lambda::Function FetchProcessedCongressMembers FetchProcessedCongressMembers0B615422
+[~] AWS::Lambda::Alias FetchProcessedCongressMembersProdAlias FetchProcessedCongressMembersProdAlias63A95A7B
+[~] AWS::CloudWatch::Alarm FetchProcessedCongressMembersAliasErrorAlarm FetchProcessedCongressMembersAliasErrorAlarmCA4A38D4
+[~] AWS::IAM::Role FetchProcessedCongressMembersDeploymentGroup/ServiceRole FetchProcessedCongressMembersDeploymentGroupServiceRole4D15BEDF
+[~] AWS::CodeDeploy::DeploymentGroup FetchProcessedCongressMembersDeploymentGroup FetchProcessedCongressMembersDeploymentGroup667889CB
+[~] AWS::Logs::LogGroup FetchCongressMembersManifestLogGroup FetchCongressMembersManifestLogGroupF5F84DCD
+[~] AWS::IAM::Role FetchCongressMembersManifest/ServiceRole FetchCongressMembersManifestServiceRole65C402B4
+[~] AWS::IAM::Policy FetchCongressMembersManifest/ServiceRole/DefaultPolicy FetchCongressMembersManifestServiceRoleDefaultPolicyE0DE2043
+[~] AWS::Lambda::Function FetchCongressMembersManifest FetchCongressMembersManifestBF8B47BD
+[~] AWS::Lambda::Alias FetchCongressMembersManifestProdAlias FetchCongressMembersManifestProdAliasB9E3ABDA
+[~] AWS::CloudWatch::Alarm FetchCongressMembersManifestAliasErrorAlarm FetchCongressMembersManifestAliasErrorAlarm22C920F1
+[~] AWS::IAM::Role FetchCongressMembersManifestDeploymentGroup/ServiceRole FetchCongressMembersManifestDeploymentGroupServiceRole1A1B5176
+[~] AWS::CodeDeploy::DeploymentGroup FetchCongressMembersManifestDeploymentGroup FetchCongressMembersManifestDeploymentGroup15A1825E
+[~] AWS::Logs::LogGroup FetchBillsManifestLogGroup FetchBillsManifestLogGroup80BF3C23
+[~] AWS::IAM::Role FetchBillsManifest/ServiceRole FetchBillsManifestServiceRole25766751
+[~] AWS::IAM::Policy FetchBillsManifest/ServiceRole/DefaultPolicy FetchBillsManifestServiceRoleDefaultPolicyFD032F47
+[~] AWS::Lambda::Function FetchBillsManifest FetchBillsManifest527B9DDD
+[~] AWS::Lambda::Alias FetchBillsManifestProdAlias FetchBillsManifestProdAliasDCD53CEE
+[~] AWS::CloudWatch::Alarm FetchBillsManifestAliasErrorAlarm FetchBillsManifestAliasErrorAlarm6E9689B4
+[~] AWS::IAM::Role FetchBillsManifestDeploymentGroup/ServiceRole FetchBillsManifestDeploymentGroupServiceRole8FA6BCC3
+[~] AWS::CodeDeploy::DeploymentGroup FetchBillsManifestDeploymentGroup FetchBillsManifestDeploymentGroup29D15E9A
+[~] AWS::Logs::LogGroup UserApiAccessLogs UserApiAccessLogs44175256
+[~] AWS::IAM::Role ApiGatewayCloudWatchRole ApiGatewayCloudWatchRole86F22A4D
+[~] AWS::ApiGateway::RestApi UserApi UserApiB6C12381
+[~] AWS::ApiGateway::Stage UserApi/DeploymentStage.prod UserApiDeploymentStageprod08A07725
+[~] AWS::ApiGateway::UsagePlan UserApi/SharePublicUsagePlan UserApiSharePublicUsagePlanCC76E5EB
+[~] AWS::ApiGateway::ApiKey UserApi/SharePublicApiKey UserApiSharePublicApiKey56C6C2DF
+[~] AWS::WAFv2::WebACL UserApiWebAcl UserApiWebAcl
+[~] AWS::S3::Bucket SyntheticsArtifactsBucket SyntheticsArtifactsBucketD0DC82F9
+[~] AWS::IAM::Role SyntheticsCanaryRole SyntheticsCanaryRole6CD70554
+[~] AWS::Synthetics::Canary UserApiCanary UserApiCanary
+[~] AWS::CloudWatch::Alarm SyntheticsCanaryAlarm SyntheticsCanaryAlarm13707164
+Stack ShareSiteStack
+[-] AWS::IAM::Role Custom::CDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C/ServiceRole CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756CServiceRole89A01265 destroy
+[-] AWS::IAM::Policy Custom::CDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C/ServiceRole/DefaultPolicy CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756CServiceRoleDefaultPolicy88902FDF destroy
+[+] AWS::CloudFront::ResponseHeadersPolicy ShareSiteResponseHeadersPolicy ShareSiteResponseHeadersPolicy48F54809
+[+] AWS::IAM::Role ShareSiteDeploymentRole ShareSiteDeploymentRole1D8C93B9
+[+] AWS::IAM::Policy ShareSiteDeploymentRole/DefaultPolicy ShareSiteDeploymentRoleDefaultPolicyA92B9970
+[~] AWS::CertificateManager::Certificate ShareSiteCertificate ShareSiteCertificate267CA525
+[~] AWS::S3::Bucket ShareSiteBucket ShareSiteBucket464212A5
+[~] AWS::S3::Bucket ShareSiteAccessLogsBucket ShareSiteAccessLogsBucket05F6CC72
+[~] AWS::WAFv2::WebACL ShareSiteWebAcl ShareSiteWebAcl
+[~] AWS::CloudFront::Function ShareSpaRewriteFunction ShareSpaRewriteFunction72B32D2E
+[~] AWS::CloudFront::CachePolicy SharePublicApiCachePolicy SharePublicApiCachePolicyA943D0D1
+[~] AWS::CloudFront::OriginRequestPolicy SharePublicApiOriginRequestPolicy SharePublicApiOriginRequestPolicy5607B0BD
+[~] AWS::CloudFront::Distribution ShareSiteDistribution ShareSiteDistribution3E82184E
+[~] AWS::Lambda::LayerVersion ShareSiteDeployment/AwsCliLayer ShareSiteDeploymentAwsCliLayerADDC45D4 replace
+[~] Custom::CDKBucketDeployment ShareSiteDeployment/CustomResource ShareSiteDeploymentCustomResource03FB7576
+[~] AWS::Lambda::Function Custom::CDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C81C01536
+Stack NotificationServiceStack
+[-] AWS::CodeDeploy::DeploymentConfig NotificationServiceDeploymentConfig NotificationServiceDeploymentConfigB9385939 destroy
+[-] AWS::Lambda::Version NotificationType/CurrentVersion NotificationTypeCurrentVersion4BD455802f6112ebdd7f9f6f0e5654ef27a97ece orphan
+[-] AWS::Lambda::Version UserMatcher/CurrentVersion UserMatcherCurrentVersionD964CCBCf66aa3ccfa12f09f539e280c41fef57e orphan
+[-] AWS::Lambda::Version NotificationDispatcher/CurrentVersion NotificationDispatcherCurrentVersionF5FF0C536ed9a971a0dee53d097b2d98e51ac055 orphan
+[-] AWS::Lambda::Version UserNotifier/CurrentVersion UserNotifierCurrentVersion8B5F68184ab0b74d48b308de24cbb14a8a570ac5 orphan
+[+] AWS::SQS::Queue userMatcherDLQ userMatcherDLQ18BC11CE
+[+] AWS::SQS::Queue userNotifierDLQ userNotifierDLQB206C006
+[+] AWS::SQS::Queue notificationFanoutDLQ notificationFanoutDLQB65A9D35
+[+] AWS::SQS::Queue notificationFanoutQueue notificationFanoutQueue2DE32A7A
+[+] AWS::Lambda::Version NotificationType/CurrentVersion NotificationTypeCurrentVersion4BD455808e680af657ebacc93abd162160ee72db
+[+] AWS::Lambda::Version UserMatcher/CurrentVersion UserMatcherCurrentVersionD964CCBCf762c023aece3c74d849793d3af162d4
+[+] AWS::Logs::LogGroup NotificationFanoutLogGroup NotificationFanoutLogGroupC9112454
+[+] AWS::IAM::Role NotificationFanout/ServiceRole NotificationFanoutServiceRole0D4F79E6
+[+] AWS::IAM::Policy NotificationFanout/ServiceRole/DefaultPolicy NotificationFanoutServiceRoleDefaultPolicy957B2EF8
+[+] AWS::Lambda::Function NotificationFanout NotificationFanoutD43B0935
+[+] AWS::Lambda::Version NotificationFanout/CurrentVersion NotificationFanoutCurrentVersionD19777644194a4b66713c171d6158eef11e6b6f0
+[+] AWS::Lambda::Alias NotificationFanoutProdAlias NotificationFanoutProdAlias75EC12AA
+[+] AWS::Lambda::EventSourceMapping NotificationFanoutProdAlias/NotificationFanoutSQSEventSource NotificationFanoutProdAliasNotificationFanoutSQSEventSourceC349CB6A
+[+] AWS::CloudWatch::Alarm NotificationFanoutAliasErrorAlarm NotificationFanoutAliasErrorAlarmA5543059
+[+] AWS::IAM::Role NotificationFanoutDeploymentGroup/ServiceRole NotificationFanoutDeploymentGroupServiceRoleC0FA9312
+[+] AWS::CodeDeploy::DeploymentGroup NotificationFanoutDeploymentGroup NotificationFanoutDeploymentGroupDCDD7FB0
+[+] AWS::Lambda::Version NotificationDispatcher/CurrentVersion NotificationDispatcherCurrentVersionF5FF0C53cecb99f9fd9cf19f4d0e0ae0becfb7ff
+[+] AWS::Lambda::Version UserNotifier/CurrentVersion UserNotifierCurrentVersion8B5F681824c14f8786c0fa04fe0eefc8ba77f42f
+[~] AWS::CodeDeploy::Application NotificationServiceApp NotificationServiceApp9004C98D
+[~] AWS::SQS::Queue userMatcherQueue userMatcherQueue943C108F
+[~] AWS::SQS::Queue userNotifierQueue userNotifierQueue0001A786
+[~] AWS::DynamoDB::Table PendingNotificationsTable PendingNotificationsTable421DB260
+[~] AWS::Logs::LogGroup ApnsPlatformApplicationOnEventLogGroup ApnsPlatformApplicationOnEventLogGroup77D6DAA9
+[~] AWS::IAM::Role ApnsPlatformApplicationOnEvent/ServiceRole ApnsPlatformApplicationOnEventServiceRole95A0401D
+[~] AWS::Lambda::Function ApnsPlatformApplicationOnEvent ApnsPlatformApplicationOnEvent5368A51B
+[~] AWS::IAM::Role ApnsPlatformApplicationProvider/framework-onEvent/ServiceRole ApnsPlatformApplicationProviderframeworkonEventServiceRole58E90CAF
+[~] AWS::Lambda::Function ApnsPlatformApplicationProvider/framework-onEvent ApnsPlatformApplicationProviderframeworkonEvent9B2DF33A
+[~] AWS::Logs::LogGroup NotificationTypeLogGroup NotificationTypeLogGroup00B70EF9
+[~] AWS::IAM::Role NotificationType/ServiceRole NotificationTypeServiceRoleE122CF9E
+[~] AWS::IAM::Policy NotificationType/ServiceRole/DefaultPolicy NotificationTypeServiceRoleDefaultPolicyCC1D1991
+[~] AWS::Lambda::Function NotificationType NotificationType9703760E
+[~] AWS::Lambda::Alias NotificationTypeProdAlias NotificationTypeProdAlias57276BF0
+[~] AWS::Lambda::EventSourceMapping NotificationTypeProdAlias/UserMatcherSQSEventSource NotificationTypeProdAliasUserMatcherSQSEventSource5F440852
+[~] AWS::CloudWatch::Alarm NotificationTypeAliasErrorAlarm NotificationTypeAliasErrorAlarm37A35FE6
+[~] AWS::IAM::Role NotificationTypeDeploymentGroup/ServiceRole NotificationTypeDeploymentGroupServiceRole3120B4DD
+[~] AWS::CodeDeploy::DeploymentGroup NotificationTypeDeploymentGroup NotificationTypeDeploymentGroupF12A18F7
+[~] AWS::Logs::LogGroup UserMatcherLogGroup UserMatcherLogGroup57F6B82B
+[~] AWS::IAM::Role UserMatcher/ServiceRole UserMatcherServiceRole3D4D8ACE
+[~] AWS::IAM::Policy UserMatcher/ServiceRole/DefaultPolicy UserMatcherServiceRoleDefaultPolicy1755E9B9
+[~] AWS::Lambda::Function UserMatcher UserMatcherC93D17A3
+[~] AWS::Lambda::Alias UserMatcherProdAlias UserMatcherProdAlias707F10D3
+[~] AWS::Lambda::EventSourceMapping UserMatcherProdAlias/UserMatcherSQSEventSource UserMatcherProdAliasUserMatcherSQSEventSource8A8D1BC6
+[~] AWS::CloudWatch::Alarm UserMatcherAliasErrorAlarm UserMatcherAliasErrorAlarmC2A58FB1
+[~] AWS::IAM::Role UserMatcherDeploymentGroup/ServiceRole UserMatcherDeploymentGroupServiceRoleD1F6D9DE
+[~] AWS::CodeDeploy::DeploymentGroup UserMatcherDeploymentGroup UserMatcherDeploymentGroup30D34BFA
+[~] AWS::Logs::LogGroup NotificationDispatcherLogGroup NotificationDispatcherLogGroupF57B0D37
+[~] AWS::IAM::Role NotificationDispatcher/ServiceRole NotificationDispatcherServiceRole38654935
+[~] AWS::IAM::Policy NotificationDispatcher/ServiceRole/DefaultPolicy NotificationDispatcherServiceRoleDefaultPolicy40B7A815
+[~] AWS::Lambda::Function NotificationDispatcher NotificationDispatcher73013BC0
+[~] AWS::Lambda::Alias NotificationDispatcherProdAlias NotificationDispatcherProdAliasAFA4C4F4
+[~] AWS::CloudWatch::Alarm NotificationDispatcherAliasErrorAlarm NotificationDispatcherAliasErrorAlarm39A3CF64
+[~] AWS::IAM::Role NotificationDispatcherDeploymentGroup/ServiceRole NotificationDispatcherDeploymentGroupServiceRole9347C734
+[~] AWS::CodeDeploy::DeploymentGroup NotificationDispatcherDeploymentGroup NotificationDispatcherDeploymentGroupB342C2A9
+[~] AWS::Events::Rule NotificationDispatcherSchedule NotificationDispatcherScheduleBB9F4332
+[~] AWS::Logs::LogGroup UserNotifierLogGroup UserNotifierLogGroup4C05C525
+[~] AWS::IAM::Role UserNotifier/ServiceRole UserNotifierServiceRole4299E023
+[~] AWS::IAM::Policy UserNotifier/ServiceRole/DefaultPolicy UserNotifierServiceRoleDefaultPolicyD3110399
+[~] AWS::Lambda::Function UserNotifier UserNotifierF53BCF8B
+[~] AWS::Lambda::Alias UserNotifierProdAlias UserNotifierProdAliasC7009249
+[~] AWS::Lambda::EventSourceMapping UserNotifierProdAlias/UserNotifierSQSEventSource UserNotifierProdAliasUserNotifierSQSEventSource3BAA5903
+[~] AWS::CloudWatch::Alarm UserNotifierAliasErrorAlarm UserNotifierAliasErrorAlarm1D7F2199
+[~] AWS::IAM::Role UserNotifierDeploymentGroup/ServiceRole UserNotifierDeploymentGroupServiceRoleEC88F004
+[~] AWS::CodeDeploy::DeploymentGroup UserNotifierDeploymentGroup UserNotifierDeploymentGroup083AE7CB
+Stack SummarizerServiceStack
+[-] AWS::CodeDeploy::DeploymentConfig SummarizerServiceDeploymentConfig SummarizerServiceDeploymentConfig4F080F45 destroy
+[-] AWS::Lambda::Version BillDiffer/CurrentVersion BillDifferCurrentVersion7755AA74d90d46d00be45c0cc4d80698b35c04e6 orphan
+[-] AWS::Lambda::Version BillSummarizer/CurrentVersion BillSummarizerCurrentVersion78C5D655619eba735ba384dc60e8279d65421e92 orphan
+[-] AWS::Lambda::Version CongressMemberSummarizer/CurrentVersion CongressMemberSummarizerCurrentVersionF9AE817E16047ad8bc2e7bb0c26744bc5a3bc66b orphan
+[+] AWS::Lambda::Version BillDiffer/CurrentVersion BillDifferCurrentVersion7755AA74461d4855fb77fe037f4a079c0badd100
+[+] AWS::Lambda::Version BillSummarizer/CurrentVersion BillSummarizerCurrentVersion78C5D655217bb87db3d489734505df3a2f627283
+[+] AWS::Lambda::Version CongressMemberSummarizer/CurrentVersion CongressMemberSummarizerCurrentVersionF9AE817Ec8cb98dbd7311a5fafbea7fe0b0185c8
+[~] AWS::CodeDeploy::Application SummarizerServiceApp SummarizerServiceApp8222CC8A
+[~] AWS::SQS::Queue BillSummarizerDLQ BillSummarizerDLQ34C98483
+[~] AWS::SQS::Queue BillSummarizerQueue BillSummarizerQueue4C91AC36
+[~] AWS::Logs::LogGroup BillDifferLogGroup BillDifferLogGroup56CEC0C5
+[~] AWS::IAM::Role BillDiffer/ServiceRole BillDifferServiceRoleE92F2B65
+[~] AWS::IAM::Policy BillDiffer/ServiceRole/DefaultPolicy BillDifferServiceRoleDefaultPolicy554C8B67
+[~] AWS::Lambda::Function BillDiffer BillDiffer44DF472C
+[~] AWS::Lambda::Alias BillDifferProdAlias BillDifferProdAlias5AABC275
+[~] AWS::Lambda::EventSourceMapping BillDifferProdAlias/BillDifferSQSEventSource BillDifferProdAliasBillDifferSQSEventSourceB0199932
+[~] AWS::CloudWatch::Alarm BillDifferAliasErrorAlarm BillDifferAliasErrorAlarm84CB720A
+[~] AWS::IAM::Role BillDifferDeploymentGroup/ServiceRole BillDifferDeploymentGroupServiceRoleEEE7B3A7
+[~] AWS::CodeDeploy::DeploymentGroup BillDifferDeploymentGroup BillDifferDeploymentGroupE31A613F
+[~] AWS::Logs::LogGroup BillSummarizerLogGroup BillSummarizerLogGroup7EEA2ED5
+[~] AWS::IAM::Role BillSummarizer/ServiceRole BillSummarizerServiceRoleAB2DA370
+[~] AWS::IAM::Policy BillSummarizer/ServiceRole/DefaultPolicy BillSummarizerServiceRoleDefaultPolicy35BDCEF9
+[~] AWS::Lambda::Function BillSummarizer BillSummarizer27E64C6F
+[~] AWS::Lambda::Alias BillSummarizerProdAlias BillSummarizerProdAliasF9169532
+[~] AWS::Lambda::EventSourceMapping BillSummarizerProdAlias/BillSummarizerSQSEventSource BillSummarizerProdAliasBillSummarizerSQSEventSource7D56F8E7
+[~] AWS::CloudWatch::Alarm BillSummarizerAliasErrorAlarm BillSummarizerAliasErrorAlarmDAC1330B
+[~] AWS::IAM::Role BillSummarizerDeploymentGroup/ServiceRole BillSummarizerDeploymentGroupServiceRole83B62718
+[~] AWS::CodeDeploy::DeploymentGroup BillSummarizerDeploymentGroup BillSummarizerDeploymentGroup1A40B17D
+[~] AWS::Logs::LogGroup CongressMemberSummarizerLogGroup CongressMemberSummarizerLogGroup65E14E3A
+[~] AWS::IAM::Role CongressMemberSummarizer/ServiceRole CongressMemberSummarizerServiceRoleF8FD33CD
+[~] AWS::IAM::Policy CongressMemberSummarizer/ServiceRole/DefaultPolicy CongressMemberSummarizerServiceRoleDefaultPolicy90D2441F
+[~] AWS::Lambda::Function CongressMemberSummarizer CongressMemberSummarizerEF865645
+[~] AWS::Lambda::Alias CongressMemberSummarizerProdAlias CongressMemberSummarizerProdAlias50D82E6E
+[~] AWS::Lambda::EventSourceMapping CongressMemberSummarizerProdAlias/CongressMemberSummarizerSQSEventSource CongressMemberSummarizerProdAliasCongressMemberSummarizerSQSEventSourceFAE47E16
+[~] AWS::CloudWatch::Alarm CongressMemberSummarizerAliasErrorAlarm CongressMemberSummarizerAliasErrorAlarm4C8697AF
+[~] AWS::IAM::Role CongressMemberSummarizerDeploymentGroup/ServiceRole CongressMemberSummarizerDeploymentGroupServiceRoleC2877B8D
+[~] AWS::CodeDeploy::DeploymentGroup CongressMemberSummarizerDeploymentGroup CongressMemberSummarizerDeploymentGroup4AAAC54D
+Stack UserStoreStack
+[~] AWS::DynamoDB::Table UserPreferencesTable UserPreferencesTableA0B50479
+[~] AWS::DynamoDB::Table DevicesTable DevicesTableD0A940EE
+[~] AWS::DynamoDB::Table UserFeedbackTable UserFeedbackTableAC038F20
+[~] AWS::DynamoDB::Table BillStatsTable BillStatsTable962804D0
+[~] AWS::DynamoDB::Table PIITable PIITable00A17D2A
+[~] AWS::DynamoDB::Table UserWeeklyDigestsTable UserWeeklyDigestsTableBDF2AA8E
+Stack AnalyticsServiceStack
+[-] AWS::CodeDeploy::DeploymentConfig AnalyticsServiceDeploymentConfig AnalyticsServiceDeploymentConfig9A584A8A destroy
+[-] AWS::Lambda::Version CongressMemberStats/CurrentVersion CongressMemberStatsCurrentVersion2E111D6F725c012f9b42562b2a9fb0cc58422ab3 orphan
+[-] AWS::Lambda::Version BillStatsAggregator/CurrentVersion BillStatsAggregatorCurrentVersion165CA6FF8ee6f24c8ce9cf7d85518a9bd37049b9 orphan
+[+] AWS::Lambda::Version CongressMemberStats/CurrentVersion CongressMemberStatsCurrentVersion2E111D6Fc4e06cd04193b3929670b141cb813f6e
+[+] AWS::Lambda::Version BillStatsAggregator/CurrentVersion BillStatsAggregatorCurrentVersion165CA6FF63ba9621ba92fdbb45a47b6b20256fbf
+[+] AWS::SQS::Queue BillStatsAggregatorStreamDLQ BillStatsAggregatorStreamDLQ70E2023E
+[~] AWS::CodeDeploy::Application AnalyticsServiceApp AnalyticsServiceAppE45E2387
+[~] AWS::Logs::LogGroup CongressMemberStatsLogGroup CongressMemberStatsLogGroup14323120
+[~] AWS::IAM::Role CongressMemberStats/ServiceRole CongressMemberStatsServiceRoleE239A1FE
+[~] AWS::IAM::Policy CongressMemberStats/ServiceRole/DefaultPolicy CongressMemberStatsServiceRoleDefaultPolicyDECAA1C2
+[~] AWS::Lambda::Function CongressMemberStats CongressMemberStatsB75B0847
+[~] AWS::Lambda::Alias CongressMemberStatsProdAlias CongressMemberStatsProdAlias7B36C49D
+[~] AWS::Lambda::EventSourceMapping CongressMemberStatsProdAlias/SqsEventSource:SharedInfraStackCongressMemberStatsQueue25C52392 CongressMemberStatsProdAliasSqsEventSourceSharedInfraStackCongressMemberStatsQueue25C523924D8F16DC
+[~] AWS::CloudWatch::Alarm CongressMemberStatsAliasErrorAlarm CongressMemberStatsAliasErrorAlarm91582686
+[~] AWS::IAM::Role CongressMemberStatsDeploymentGroup/ServiceRole CongressMemberStatsDeploymentGroupServiceRoleD7AF6C00
+[~] AWS::CodeDeploy::DeploymentGroup CongressMemberStatsDeploymentGroup CongressMemberStatsDeploymentGroup80E2F426
+[~] AWS::Logs::LogGroup BillStatsAggregatorLogGroup BillStatsAggregatorLogGroupC294DBB8
+[~] AWS::IAM::Role BillStatsAggregator/ServiceRole BillStatsAggregatorServiceRole6B643628
+[~] AWS::IAM::Policy BillStatsAggregator/ServiceRole/DefaultPolicy BillStatsAggregatorServiceRoleDefaultPolicy16A7213D
+[~] AWS::Lambda::Function BillStatsAggregator BillStatsAggregator30524F9A
+[~] AWS::Lambda::Alias BillStatsAggregatorProdAlias BillStatsAggregatorProdAlias9CF6CF56
+[~] AWS::CloudWatch::Alarm BillStatsAggregatorAliasErrorAlarm BillStatsAggregatorAliasErrorAlarm7564554F
+[~] AWS::IAM::Role BillStatsAggregatorDeploymentGroup/ServiceRole BillStatsAggregatorDeploymentGroupServiceRole6F9D8487
+[~] AWS::CodeDeploy::DeploymentGroup BillStatsAggregatorDeploymentGroup BillStatsAggregatorDeploymentGroupA8FAE244
+[~] AWS::Lambda::EventSourceMapping BillStatsAggregatorFeedbackStream BillStatsAggregatorFeedbackStream05D8A0E8
+Stack CongressStoreStack
+[-] AWS::CodeDeploy::DeploymentConfig CongressStoreDeploymentConfig CongressStoreDeploymentConfig4451EE3B destroy
+[-] AWS::Lambda::Version CreateBillsManifest/CurrentVersion CreateBillsManifestCurrentVersion74042E27e13d73d9990fe03bee8c4f48db51bece orphan
+[-] AWS::IAM::Policy BucketNotificationsHandler050a0587b7544547bf325f094a3db834/Role/DefaultPolicy BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleDefaultPolicy2CF63D36 destroy
+[-] AWS::Lambda::Version CreateCongressMembersManifest/CurrentVersion CreateCongressMembersManifestCurrentVersion334BB5491afcb06880c00126a2fd8f188b809ce7 orphan
+[+] AWS::IAM::Policy BillStoreBucket/Notifications/HandlerPolicy BillStoreBucketNotificationsHandlerPolicy5BD37E88
+[+] AWS::Lambda::Version CreateBillsManifest/CurrentVersion CreateBillsManifestCurrentVersion74042E27e7d16b505ae9a5f4bb5f7845f05dc856
+[+] AWS::SQS::Queue BillsManifestDLQ BillsManifestDLQ4AE06A6A
+[+] AWS::IAM::Policy CongressMemberStoreBucket/Notifications/HandlerPolicy CongressMemberStoreBucketNotificationsHandlerPolicy3125CAAB
+[+] AWS::Lambda::Version CreateCongressMembersManifest/CurrentVersion CreateCongressMembersManifestCurrentVersion334BB54912eaa746559bdb7c32a8f6ce44501401
+[+] AWS::SQS::Queue CongressMembersManifestDLQ CongressMembersManifestDLQ72213B97
+[~] AWS::CodeDeploy::Application CongressStoreApp CongressStoreAppE4E63DEE
+[~] AWS::S3::Bucket BillStoreBucket BillStoreBucket43246214
+[~] Custom::S3BucketNotifications BillStoreBucket/Notifications BillStoreBucketNotifications98F28B55
+[~] AWS::DynamoDB::Table BillManifestTable BillManifestTable027DB807
+[~] AWS::Logs::LogGroup CreateBillsManifestLogGroup CreateBillsManifestLogGroup119DDBDB
+[~] AWS::IAM::Role CreateBillsManifest/ServiceRole CreateBillsManifestServiceRoleA4E3D6D1
+[~] AWS::IAM::Policy CreateBillsManifest/ServiceRole/DefaultPolicy CreateBillsManifestServiceRoleDefaultPolicy4FFD0335
+[~] AWS::Lambda::Function CreateBillsManifest CreateBillsManifest21DECE8D
+[~] AWS::Lambda::Alias CreateBillsManifestProdAlias CreateBillsManifestProdAliasBE94287E
+[~] AWS::Lambda::EventSourceMapping CreateBillsManifestProdAlias/SqsEventSource:CongressStoreStackBillsManifestQueue0EF85448 CreateBillsManifestProdAliasSqsEventSourceCongressStoreStackBillsManifestQueue0EF854481B7024CE replace
+[~] AWS::CloudWatch::Alarm CreateBillsManifestAliasErrorAlarm CreateBillsManifestAliasErrorAlarm4E64EA89
+[~] AWS::IAM::Role CreateBillsManifestDeploymentGroup/ServiceRole CreateBillsManifestDeploymentGroupServiceRole4522F018
+[~] AWS::CodeDeploy::DeploymentGroup CreateBillsManifestDeploymentGroup CreateBillsManifestDeploymentGroup419CA96D
+[~] AWS::SQS::Queue BillsManifestQueue BillsManifestQueue8FD11A10 replace
+[~] AWS::IAM::Role BucketNotificationsHandler050a0587b7544547bf325f094a3db834/Role BucketNotificationsHandler050a0587b7544547bf325f094a3db834RoleB6FB88EC
+[~] AWS::Lambda::Function BucketNotificationsHandler050a0587b7544547bf325f094a3db834 BucketNotificationsHandler050a0587b7544547bf325f094a3db8347ECC3691
+[~] AWS::S3::Bucket CongressMemberStoreBucket CongressMemberStoreBucketB351EF17
+[~] Custom::S3BucketNotifications CongressMemberStoreBucket/Notifications CongressMemberStoreBucketNotificationsC5CB379A
+[~] AWS::DynamoDB::Table CongressMembersManifestTable CongressMembersManifestTableF4E09947
+[~] AWS::Logs::LogGroup CreateCongressMembersManifestLogGroup CreateCongressMembersManifestLogGroup626F1C7B
+[~] AWS::IAM::Role CreateCongressMembersManifest/ServiceRole CreateCongressMembersManifestServiceRole90C21DD3
+[~] AWS::IAM::Policy CreateCongressMembersManifest/ServiceRole/DefaultPolicy CreateCongressMembersManifestServiceRoleDefaultPolicy0067570D
+[~] AWS::Lambda::Function CreateCongressMembersManifest CreateCongressMembersManifestE9468045
+[~] AWS::Lambda::Alias CreateCongressMembersManifestProdAlias CreateCongressMembersManifestProdAlias14CC273D
+[~] AWS::Lambda::EventSourceMapping CreateCongressMembersManifestProdAlias/SqsEventSource:CongressStoreStackCongressMembersManifestQueue99A91B98 CreateCongressMembersManifestProdAliasSqsEventSourceCongressStoreStackCongressMembersManifestQueue99A91B98954C8603 replace
+[~] AWS::CloudWatch::Alarm CreateCongressMembersManifestAliasErrorAlarm CreateCongressMembersManifestAliasErrorAlarm83349F1A
+[~] AWS::IAM::Role CreateCongressMembersManifestDeploymentGroup/ServiceRole CreateCongressMembersManifestDeploymentGroupServiceRole0F6CD7A5
+[~] AWS::CodeDeploy::DeploymentGroup CreateCongressMembersManifestDeploymentGroup CreateCongressMembersManifestDeploymentGroup18964BF8
+[~] AWS::SQS::Queue CongressMembersManifestQueue CongressMembersManifestQueueB11B857A replace
+Stack AggregateDataStoreStack
+[~] AWS::DynamoDB::Table CongressMemberStatsTable CongressMemberStatsTable1AFA8034
+[~] AWS::DynamoDB::Table CongressMemberVoteProfilesTable CongressMemberVoteProfilesTableD57B5FCC
+[~] AWS::DynamoDB::Table CongressMemberLegislativeProfilesTable CongressMemberLegislativeProfilesTableE4034564
+Stack MonitoringStack
+[-] AWS::CloudWatch::Alarm LambdaSingleFailureAlarm LambdaSingleFailureAlarm1FFE278D destroy
+[-] AWS::CloudWatch::Alarm LambdaMultipleFailureAlarm LambdaMultipleFailureAlarm1A3AEF6F destroy
+[-] AWS::CloudWatch::Alarm AnyDlqVisibleAlarm AnyDlqVisibleAlarm473B3A46 destroy
+[+] AWS::SNS::TopicPolicy AlarmTopic/Policy AlarmTopicPolicy309DB5F8
+[+] AWS::CloudWatch::Alarm UserApi5xxAlarm UserApi5xxAlarmD5F95CB5
+[+] AWS::CloudWatch::Alarm UserApiLatencyP99Alarm UserApiLatencyP99AlarmB845175B
+[+] AWS::CloudWatch::Alarm UserApiCanaryAlarm UserApiCanaryAlarm11A354E6
+[+] AWS::CloudWatch::Alarm BillsManifestWriterFreshnessAlarm BillsManifestWriterFreshnessAlarm6B589AEE
+[+] AWS::CloudWatch::Alarm CognitoUserExportFreshnessAlarm CognitoUserExportFreshnessAlarmDC15EF8D
+[+] AWS::CloudWatch::Alarm BillsManifestSnapshotFreshnessAlarm BillsManifestSnapshotFreshnessAlarm89CFA5BD
+[+] AWS::CloudWatch::Alarm BillsManifestCompanionResolveFailedAlarm BillsManifestCompanionResolveFailedAlarmA3DE18CF
+[+] AWS::CloudWatch::Alarm ApnsDeliveryFailuresAlarm ApnsDeliveryFailuresAlarm46FC548E
+[+] AWS::CloudWatch::Alarm ApnsCertificateExpiryAlarm ApnsCertificateExpiryAlarm782EAABA
+[+] AWS::CloudWatch::Alarm WeeklyDigestUsersFailedAlarm WeeklyDigestUsersFailedAlarm35B440F8
+[+] AWS::CloudWatch::Alarm CongressApiAuthFailureAlarm CongressApiAuthFailureAlarm25D6D292
+[+] AWS::CloudWatch::Alarm BedrockInvocationThrottlesAlarm BedrockInvocationThrottlesAlarm1FA961F8
+[+] AWS::CloudWatch::Alarm BillStatsAggregatorDurationAlarm BillStatsAggregatorDurationAlarm1A763B1D
+[+] AWS::CloudWatch::Alarm RegisterUserDeviceErrorsAlarm RegisterUserDeviceErrorsAlarmAB5788B3
+[+] AWS::CloudWatch::Alarm DeviceNotificationSettingsErrorsAlarm DeviceNotificationSettingsErrorsAlarm36EC6118
+[+] AWS::CloudWatch::Alarm DeletePreferencesErrorsAlarm DeletePreferencesErrorsAlarm8BD0D499
+[+] AWS::CloudWatch::Alarm FetchPreferencesErrorsAlarm FetchPreferencesErrorsAlarm9D5DA1ED
+[+] AWS::CloudWatch::Alarm SetPreferencesErrorsAlarm SetPreferencesErrorsAlarmC99801BB
+[+] AWS::CloudWatch::Alarm FetchProcessedBillErrorsAlarm FetchProcessedBillErrorsAlarm40DF0EA4
+[+] AWS::CloudWatch::Alarm FetchFeedbackErrorsAlarm FetchFeedbackErrorsAlarm3E51C331
+[+] AWS::CloudWatch::Alarm SetFeedbackErrorsAlarm SetFeedbackErrorsAlarmF4D70BBC
+[+] AWS::CloudWatch::Alarm FetchBillStatsErrorsAlarm FetchBillStatsErrorsAlarmB8DE15AC
+[+] AWS::CloudWatch::Alarm FetchCivicScoreErrorsAlarm FetchCivicScoreErrorsAlarm31C62C9B
+[+] AWS::CloudWatch::Alarm FetchCivicProfileErrorsAlarm FetchCivicProfileErrorsAlarmAFCE230D
+[+] AWS::CloudWatch::Alarm FetchCongressMemberCivicProfileErrorsAlarm FetchCongressMemberCivicProfileErrorsAlarm06433D20
+[+] AWS::CloudWatch::Alarm DistrictVerificationErrorsAlarm DistrictVerificationErrorsAlarmEF3ABBAA
+[+] AWS::CloudWatch::Alarm AdultAttestationErrorsAlarm AdultAttestationErrorsAlarmF2005DD7
+[+] AWS::CloudWatch::Alarm FetchMeErrorsAlarm FetchMeErrorsAlarmC2712BBF
+[+] AWS::CloudWatch::Alarm FetchLatestWeeklyDigestErrorsAlarm FetchLatestWeeklyDigestErrorsAlarmB459A4F0
+[+] AWS::CloudWatch::Alarm GenerateWeeklyDigestsErrorsAlarm GenerateWeeklyDigestsErrorsAlarmD8A64C2F
+[+] AWS::CloudWatch::Alarm AccountDataErrorsAlarm AccountDataErrorsAlarmFB26EE83
+[+] AWS::CloudWatch::Alarm AccountDataStatusErrorsAlarm AccountDataStatusErrorsAlarm283F11FD
+[+] AWS::CloudWatch::Alarm CleanupOrphanedUsersErrorsAlarm CleanupOrphanedUsersErrorsAlarmEE10D4D3
+[+] AWS::CloudWatch::Alarm ExportCognitoUsersErrorsAlarm ExportCognitoUsersErrorsAlarmFFD30CA1
+[+] AWS::CloudWatch::Alarm FetchProcessedCongressMembersErrorsAlarm FetchProcessedCongressMembersErrorsAlarm4544741D
+[+] AWS::CloudWatch::Alarm FetchCongressMembersManifestErrorsAlarm FetchCongressMembersManifestErrorsAlarm1930947D
+[+] AWS::CloudWatch::Alarm FetchBillsManifestErrorsAlarm FetchBillsManifestErrorsAlarmBB1684C8
+[+] AWS::CloudWatch::Alarm PublishBillsManifestErrorsAlarm PublishBillsManifestErrorsAlarm03ADCFB5
+[+] AWS::CloudWatch::Alarm WeeklyDigestWorkerErrorsAlarm WeeklyDigestWorkerErrorsAlarmAFD0D05D
+[+] AWS::CloudWatch::Alarm BillPriorityResolverErrorsAlarm BillPriorityResolverErrorsAlarm7A64A4A2
+[+] AWS::CloudWatch::Alarm BillsApiPollerErrorsAlarm BillsApiPollerErrorsAlarmE5208603
+[+] AWS::CloudWatch::Alarm FetchRawBillErrorsAlarm FetchRawBillErrorsAlarm96CAD4B2
+[+] AWS::CloudWatch::Alarm EnrichOfficialVotesErrorsAlarm EnrichOfficialVotesErrorsAlarm690E1E04
+[+] AWS::CloudWatch::Alarm FetchCongressMembersListErrorsAlarm FetchCongressMembersListErrorsAlarm42AED284
+[+] AWS::CloudWatch::Alarm FetchRawCongressMembersErrorsAlarm FetchRawCongressMembersErrorsAlarm2B28B542
+[+] AWS::CloudWatch::Alarm BillDifferErrorsAlarm BillDifferErrorsAlarmD3C8CC70
+[+] AWS::CloudWatch::Alarm BillSummarizerErrorsAlarm BillSummarizerErrorsAlarm787C3B8D
+[+] AWS::CloudWatch::Alarm CongressMemberSummarizerErrorsAlarm CongressMemberSummarizerErrorsAlarmFEF0477E
+[+] AWS::CloudWatch::Alarm CreateBillsManifestErrorsAlarm CreateBillsManifestErrorsAlarmA3B76074
+[+] AWS::CloudWatch::Alarm CreateCongressMembersManifestErrorsAlarm CreateCongressMembersManifestErrorsAlarmA99CB294
+[+] AWS::CloudWatch::Alarm NotificationTypeErrorsAlarm NotificationTypeErrorsAlarm6B83F605
+[+] AWS::CloudWatch::Alarm UserMatcherErrorsAlarm UserMatcherErrorsAlarm71473B16
+[+] AWS::CloudWatch::Alarm NotificationFanoutErrorsAlarm NotificationFanoutErrorsAlarmD07423A9
+[+] AWS::CloudWatch::Alarm NotificationDispatcherErrorsAlarm NotificationDispatcherErrorsAlarm26D19F46
+[+] AWS::CloudWatch::Alarm UserNotifierErrorsAlarm UserNotifierErrorsAlarmDD4A5947
+[+] AWS::CloudWatch::Alarm CongressMemberStatsErrorsAlarm CongressMemberStatsErrorsAlarm5D5A6C4E
+[+] AWS::CloudWatch::Alarm BillStatsAggregatorErrorsAlarm BillStatsAggregatorErrorsAlarm06F8F062
+[+] AWS::CloudWatch::Alarm BillsApiPollerThrottlesAlarm BillsApiPollerThrottlesAlarm87E0F656
+[+] AWS::CloudWatch::Alarm FetchRawBillThrottlesAlarm FetchRawBillThrottlesAlarmF7442738
+[+] AWS::CloudWatch::Alarm EnrichOfficialVotesThrottlesAlarm EnrichOfficialVotesThrottlesAlarm13514916
+[+] AWS::CloudWatch::Alarm BillSummarizerThrottlesAlarm BillSummarizerThrottlesAlarmFC9896C8
+[+] AWS::CloudWatch::Alarm notificationFanoutQueueBacklogAlarm notificationFanoutQueueBacklogAlarm72A3320E
+[+] AWS::CloudWatch::Alarm notificationFanoutQueueQueueAgeAlarm notificationFanoutQueueQueueAgeAlarm7B8601F0
+[+] AWS::CloudWatch::Alarm WeeklyDigestQueueQueueAgeAlarm WeeklyDigestQueueQueueAgeAlarm9C1436CC
+[+] AWS::CloudWatch::Alarm NotificationTypeDLQVisibleAlarm NotificationTypeDLQVisibleAlarmC1383E0C
+[+] AWS::CloudWatch::Alarm CongressMemberStatsDLQVisibleAlarm CongressMemberStatsDLQVisibleAlarmE85617D5
+[+] AWS::CloudWatch::Alarm userMatcherDLQVisibleAlarm userMatcherDLQVisibleAlarm9DD5E887
+[+] AWS::CloudWatch::Alarm notificationFanoutDLQVisibleAlarm notificationFanoutDLQVisibleAlarmA60B5640
+[+] AWS::CloudWatch::Alarm userNotifierDLQVisibleAlarm userNotifierDLQVisibleAlarmC96A9057
+[+] AWS::CloudWatch::Alarm WeeklyDigestDLQVisibleAlarm WeeklyDigestDLQVisibleAlarm32D3FB8F
+[+] AWS::CloudWatch::Alarm BillsManifestDLQVisibleAlarm BillsManifestDLQVisibleAlarm75642AA1
+[+] AWS::CloudWatch::Alarm CongressMembersManifestDLQVisibleAlarm CongressMembersManifestDLQVisibleAlarm13F0D13A
+[+] AWS::CloudWatch::Alarm BillStatsAggregatorStreamDLQVisibleAlarm BillStatsAggregatorStreamDLQVisibleAlarm5E8FC7F2
+[+] AWS::CloudWatch::CompositeAlarm IngestUnhealthyAlarm IngestUnhealthyAlarm37D8B33D
+[+] AWS::CloudWatch::Alarm BillsManifestSystemErrorsAlarm BillsManifestSystemErrorsAlarm72CB8DDB
+[+] AWS::CloudWatch::Alarm CongressMembersManifestSystemErrorsAlarm CongressMembersManifestSystemErrorsAlarm52532ACA
+[+] AWS::CloudWatch::Alarm UserPreferencesSystemErrorsAlarm UserPreferencesSystemErrorsAlarm0C0A27AE
+[+] AWS::CloudWatch::Alarm UserDevicesSystemErrorsAlarm UserDevicesSystemErrorsAlarm67924F7B
+[+] AWS::CloudWatch::Alarm UserFeedbackSystemErrorsAlarm UserFeedbackSystemErrorsAlarmF45996AC
+[+] AWS::CloudWatch::Alarm BillStatsSystemErrorsAlarm BillStatsSystemErrorsAlarm2F6576FB
+[+] AWS::CloudWatch::Alarm UserPIISystemErrorsAlarm UserPIISystemErrorsAlarmC6867299
+[+] AWS::CloudWatch::Alarm UserWeeklyDigestsSystemErrorsAlarm UserWeeklyDigestsSystemErrorsAlarm30169BEC
+[+] AWS::CloudWatch::Alarm PendingNotificationsTableSystemErrorsAlarm PendingNotificationsTableSystemErrorsAlarm39497EF3
+[+] AWS::CloudWatch::Alarm CongressMembersStatsSystemErrorsAlarm CongressMembersStatsSystemErrorsAlarmAD04AD82
+[+] AWS::CloudWatch::Alarm CongressMemberVoteProfilesSystemErrorsAlarm CongressMemberVoteProfilesSystemErrorsAlarm1D1136CC
+[+] AWS::CloudWatch::Alarm CongressMemberLegislativeProfilesSystemErrorsAlarm CongressMemberLegislativeProfilesSystemErrorsAlarmDAFDCF16
+[+] AWS::CloudWatch::Alarm BillPrioritySystemErrorsAlarm BillPrioritySystemErrorsAlarm41F0A658
+[+] AWS::CloudWatch::Alarm PendingNotificationsWriteThrottleAlarm PendingNotificationsWriteThrottleAlarm026160DD
+[+] AWS::Budgets::Budget MonthlyCostBudget MonthlyCostBudget
+[~] AWS::SNS::Topic AlarmTopic AlarmTopicD01E77F9
+[~] AWS::IAM::Role SlackAlarmChannel/ConfigurationRole SlackAlarmChannelConfigurationRoleE7FE91BC
+[~] AWS::Chatbot::SlackChannelConfiguration SlackAlarmChannel SlackAlarmChannelDF992D64
+[~] AWS::CloudWatch::Dashboard BillboardOpsDashboard BillboardOpsDashboard58ADE1DE
+[~] AWS::CloudWatch::Alarm UpdatedBillsQueueBacklogAlarm UpdatedBillsQueueBacklogAlarmB86D6EB9
+[~] AWS::CloudWatch::Alarm UpdatedBillsQueueQueueAgeAlarm UpdatedBillsQueueQueueAgeAlarmA8E1E626
+[~] AWS::CloudWatch::Alarm BillVoteEnrichmentQueueBacklogAlarm BillVoteEnrichmentQueueBacklogAlarm13E53328
+[~] AWS::CloudWatch::Alarm BillVoteEnrichmentQueueQueueAgeAlarm BillVoteEnrichmentQueueQueueAgeAlarm62DCBF99
+[~] AWS::CloudWatch::Alarm BillDifferQueueBacklogAlarm BillDifferQueueBacklogAlarm882FFE45
+[~] AWS::CloudWatch::Alarm BillDifferQueueQueueAgeAlarm BillDifferQueueQueueAgeAlarmA91F1D5B
+[~] AWS::CloudWatch::Alarm UpdatedCongressMembersQueueBacklogAlarm UpdatedCongressMembersQueueBacklogAlarm214490E4
+[~] AWS::CloudWatch::Alarm UpdatedCongressMembersQueueQueueAgeAlarm UpdatedCongressMembersQueueQueueAgeAlarmB9CCCF21
+[~] AWS::CloudWatch::Alarm CongressMemberSummarizerQueueBacklogAlarm CongressMemberSummarizerQueueBacklogAlarmDA6B6FC7
+[~] AWS::CloudWatch::Alarm CongressMemberSummarizerQueueQueueAgeAlarm CongressMemberSummarizerQueueQueueAgeAlarm06964634
+[~] AWS::CloudWatch::Alarm BillSummarizerQueueBacklogAlarm BillSummarizerQueueBacklogAlarmC3866A13
+[~] AWS::CloudWatch::Alarm BillSummarizerQueueQueueAgeAlarm BillSummarizerQueueQueueAgeAlarm9BA2C751
+[~] AWS::CloudWatch::Alarm NotificationTypeQueueBacklogAlarm NotificationTypeQueueBacklogAlarm443EA839
+[~] AWS::CloudWatch::Alarm NotificationTypeQueueQueueAgeAlarm NotificationTypeQueueQueueAgeAlarmC242A2FA
+[~] AWS::CloudWatch::Alarm userMatcherQueueBacklogAlarm userMatcherQueueBacklogAlarm62A39028
+[~] AWS::CloudWatch::Alarm userMatcherQueueQueueAgeAlarm userMatcherQueueQueueAgeAlarm3BF8CAF9
+[~] AWS::CloudWatch::Alarm userNotifierQueueBacklogAlarm userNotifierQueueBacklogAlarmAE8375A4
+[~] AWS::CloudWatch::Alarm userNotifierQueueQueueAgeAlarm userNotifierQueueQueueAgeAlarm956B067F
+[~] AWS::CloudWatch::Alarm CongressMemberStatsQueueBacklogAlarm CongressMemberStatsQueueBacklogAlarmE9F37D66
+[~] AWS::CloudWatch::Alarm CongressMemberStatsQueueQueueAgeAlarm CongressMemberStatsQueueQueueAgeAlarmF720595D
+[~] AWS::CloudWatch::Alarm BillsManifestQueueBacklogAlarm BillsManifestQueueBacklogAlarm54FCBCD3
+[~] AWS::CloudWatch::Alarm BillsManifestQueueQueueAgeAlarm BillsManifestQueueQueueAgeAlarmC1773654
+[~] AWS::CloudWatch::Alarm CongressMembersManifestQueueBacklogAlarm CongressMembersManifestQueueBacklogAlarm6031AF2C
+[~] AWS::CloudWatch::Alarm CongressMembersManifestQueueQueueAgeAlarm CongressMembersManifestQueueQueueAgeAlarm01AF7DCC
+[~] AWS::CloudWatch::Alarm UpdatedBillsDLQVisibleAlarm UpdatedBillsDLQVisibleAlarmFCD3870F
+[~] AWS::CloudWatch::Alarm BillVoteEnrichmentDLQVisibleAlarm BillVoteEnrichmentDLQVisibleAlarmF33840A4
+[~] AWS::CloudWatch::Alarm BillDifferDLQVisibleAlarm BillDifferDLQVisibleAlarm64A71045
+[~] AWS::CloudWatch::Alarm UpdatedCongressMembersDLQVisibleAlarm UpdatedCongressMembersDLQVisibleAlarm98A96EB8
+[~] AWS::CloudWatch::Alarm CongressMemberSummarizerDLQVisibleAlarm CongressMemberSummarizerDLQVisibleAlarmE7CB4B31
+[~] AWS::CloudWatch::Alarm BillSummarizerDLQVisibleAlarm BillSummarizerDLQVisibleAlarm57E83104
+[~] AWS::CloudWatch::Alarm BillXmlFetchFailureAlarm BillXmlFetchFailureAlarm8E306FC5
+[~] AWS::CloudWatch::Alarm CongressApi429Alarm CongressApi429AlarmBCC87ED6
+[~] AWS::CloudWatch::Alarm BillPollerLagAlarm BillPollerLagAlarm6426F802
+[~] AWS::CloudWatch::Alarm BillsManifestFreshnessAlarm BillsManifestFreshnessAlarmC16B8049
+[~] AWS::CloudWatch::Alarm CongressMembersManifestFreshnessAlarm CongressMembersManifestFreshnessAlarm372DDA5C
+[~] AWS::CloudWatch::Alarm WeeklyDigestFreshnessAlarm WeeklyDigestFreshnessAlarm83FBB1B3
+[~] AWS::CloudWatch::Alarm BillStatsAggregatorIteratorAgeAlarm BillStatsAggregatorIteratorAgeAlarm8DBCD310
+Stack GitHubOidcStack
+[+] AWS::IAM::Role GitHubServicesReleaseRole GitHubServicesReleaseRoleAB510C5D
+[+] AWS::IAM::Role GitHubInfraDeployRole GitHubInfraDeployRoleB365D51C
+Stack SecurityBaselineStack
+[+] AWS::S3::Bucket CloudTrailLogsBucket CloudTrailLogsBucketF4E95F70
+[+] AWS::S3::BucketPolicy CloudTrailLogsBucket/Policy CloudTrailLogsBucketPolicyF40858DB
+[+] AWS::CloudTrail::Trail ManagementEventsTrail ManagementEventsTrail024170A2

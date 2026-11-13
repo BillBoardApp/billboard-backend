@@ -1,0 +1,35 @@
+name: Bug
+description: Something in the service, the API contracts, the infrastructure or the website does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues are public. Never post your email address, street address, votes, tokens, keys or logs from a real
+        account. A security problem goes to the Security tab instead (SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: where
+    attributes:
+      label: Where
+      description: The file and line, API route, web page or bill (for example BILLS-119hr1), and when it happened.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: Steps, or a failing test. Use the synthetic test data in the repository.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Before you submit
+      options:
+        - label: This issue holds no personal data, credentials or production logs.
+          required: true

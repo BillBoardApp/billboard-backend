@@ -1,0 +1,36 @@
+{
+  "name": "billboard-infra",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "bin": {
+    "billboard-infra": "bin/billboard-infra.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "jest",
+    "typecheck": "tsc --noEmit",
+    "synth": "cdk synth --quiet --no-lookups --no-notices",
+    "cdk": "cdk",
+    "release:sync-prod-alias-versions": "node -r ts-node/register/transpile-only scripts/syncLambdaAliasVersionParameters.ts",
+    "release:deploy-lambdas": "node -r ts-node/register/transpile-only scripts/deployLambdaRelease.ts",
+    "release:check-deploy-guard": "node -r ts-node/register/transpile-only scripts/checkDeployGuard.ts"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "22.7.9",
+    "aws-cdk": "^2.1136.0",
+    "esbuild": "^0.25.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.6.3"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.758.0",
+    "@aws-sdk/client-sns": "^3.758.0",
+    "aws-cdk-lib": "^2.265.0",
+    "constructs": "^10.0.0"
+  }
+}

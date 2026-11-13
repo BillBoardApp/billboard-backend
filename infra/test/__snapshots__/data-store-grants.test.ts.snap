@@ -1,0 +1,3152 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`data store grants (CQ-15) every role keeps the same normalized permissions 1`] = `
+{
+  "CongressStoreStack/BucketNotificationsHandler050a0587b7544547bf325f094a3db8347ECC3691": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}": [
+      "s3:PutBucketNotification",
+    ],
+    "arn:aws:s3:::\${CongressMemberStoreBucket}": [
+      "s3:PutBucketNotification",
+    ],
+  },
+  "NotificationServiceStack/ApnsPlatformApplicationOnEvent5368A51B": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "sns:CreatePlatformApplication",
+    ],
+    "<NotificationServiceStack/ApnsCredentialsSecret39B7B81F>": [
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:GetSecretValue",
+    ],
+    "arn:aws:sns:\${Region}:\${Account}:app/APNS/BillboardApnsProduction": [
+      "sns:DeletePlatformApplication",
+      "sns:SetPlatformApplicationAttributes",
+    ],
+  },
+  "NotificationServiceStack/ApnsPlatformApplicationProviderframeworkonEvent9B2DF33A": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "<NotificationServiceStack/ApnsPlatformApplicationOnEvent5368A51B.Arn>": [
+      "lambda:GetFunction",
+      "lambda:InvokeFunction",
+    ],
+    "<NotificationServiceStack/ApnsPlatformApplicationOnEvent5368A51B.Arn>:*": [
+      "lambda:InvokeFunction",
+    ],
+  },
+  "ShareSiteStack/CustomCDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C81C01536": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "<ShareSiteStack/ShareSiteBucket464212A5.Arn>": [
+      "s3:Abort*",
+      "s3:DeleteObject*",
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+      "s3:PutObject",
+      "s3:PutObjectLegalHold",
+      "s3:PutObjectRetention",
+      "s3:PutObjectTagging",
+      "s3:PutObjectVersionTagging",
+    ],
+    "<ShareSiteStack/ShareSiteBucket464212A5.Arn>/*": [
+      "s3:Abort*",
+      "s3:DeleteObject*",
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+      "s3:PutObject",
+      "s3:PutObjectLegalHold",
+      "s3:PutObjectRetention",
+      "s3:PutObjectTagging",
+      "s3:PutObjectVersionTagging",
+    ],
+    "arn:aws:cloudfront::\${Account}:distribution/<ShareSiteStack/ShareSiteDistribution3E82184E>": [
+      "cloudfront:CreateInvalidation",
+      "cloudfront:GetInvalidation",
+    ],
+    "arn:aws:s3:::cdk-hnb659fds-assets-\${Account}-\${Region}": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:s3:::cdk-hnb659fds-assets-\${Account}-\${Region}/*": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+  },
+  "UserAPIServiceStack/LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8aFD4BFC8A": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "arn:aws:logs:\${Region}:\${Account}:log-group:/aws/lambda/*": [
+      "logs:DeleteRetentionPolicy",
+      "logs:PutRetentionPolicy",
+    ],
+  },
+  "canary:billboard-api": {
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "s3:ListAllMyBuckets",
+      "xray:PutTraceSegments",
+    ],
+    "* if {"StringEquals":{"cloudwatch:namespace":"BillBoard/ProductHealth"}}": [
+      "cloudwatch:PutMetricData",
+    ],
+    "* if {"StringEquals":{"cloudwatch:namespace":"CloudWatchSynthetics"}}": [
+      "cloudwatch:PutMetricData",
+    ],
+    "<UserAPIServiceStack/SyntheticsArtifactsBucketD0DC82F9.Arn>": [
+      "s3:GetBucketLocation",
+    ],
+    "<UserAPIServiceStack/SyntheticsArtifactsBucketD0DC82F9.Arn>/*": [
+      "s3:GetObject",
+      "s3:PutObject",
+    ],
+    "arn:aws:logs:*:*:log-group:/aws/lambda/cwsyn-*": [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+    ],
+    "arn:aws:secretsmanager:\${Region}:\${Account}:secret:Billboard/CanarySmokeTestCredentials-??????": [
+      "secretsmanager:GetSecretValue",
+    ],
+  },
+  "fn:AccountData": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "<UserAPIServiceStack/BillboardUserPoolC41FE3DD.Arn>": [
+      "cognito-idp:AdminDeleteUser",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/AppAttest": [
+      "dynamodb:BatchWriteItem",
+      "dynamodb:Query",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillStats": [
+      "dynamodb:BatchWriteItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/SignUpEmailClaims": [
+      "dynamodb:DeleteItem",
+      "dynamodb:GetItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserDevices": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserDevices/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserWeeklyDigests": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/VerifiedAddressClaims": [
+      "dynamodb:DeleteItem",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:sns:\${Region}:\${Account}:endpoint/APNS/BillboardApnsProduction/*": [
+      "sns:DeleteEndpoint",
+    ],
+  },
+  "fn:AccountDataStatus": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+  },
+  "fn:AdultAttestation": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+  },
+  "fn:AppAttest": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/AppAttest": [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ],
+  },
+  "fn:BillDiffer": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL_COMPANION_DECL"]}}": [
+      "dynamodb:DeleteItem",
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}": [
+      "s3:Abort*",
+      "s3:DeleteObject*",
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+      "s3:PutObject",
+      "s3:PutObjectLegalHold",
+      "s3:PutObjectRetention",
+      "s3:PutObjectTagging",
+      "s3:PutObjectVersionTagging",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}/*": [
+      "s3:Abort*",
+      "s3:DeleteObject*",
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+      "s3:PutObject",
+      "s3:PutObjectLegalHold",
+      "s3:PutObjectRetention",
+      "s3:PutObjectTagging",
+      "s3:PutObjectVersionTagging",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:BillDifferQueue": [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ReceiveMessage",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:BillSummarizerQueue": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+  },
+  "fn:BillPriorityResolver": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:bedrock:\${Region}:\${Account}:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0": [
+      "bedrock:InvokeModel",
+    ],
+    "arn:aws:bedrock:\${Region}:\${Account}:inference-profile/us.anthropic.claude-haiku-5-5": [
+      "bedrock:InvokeModel",
+    ],
+    "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0": [
+      "bedrock:InvokeModel",
+    ],
+    "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-5-5": [
+      "bedrock:InvokeModel",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillPriority": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillPriority/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}/raw-bills/*": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+  },
+  "fn:BillStatsAggregator": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillStats": [
+      "dynamodb:BatchWriteItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback/stream/<label>": [
+      "dynamodb:DescribeStream",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:ListStreams",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:BillStatsAggregatorStreamDLQ": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+  },
+  "fn:BillSummarizer": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:bedrock:\${Region}:\${Account}:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0": [
+      "bedrock:InvokeModel",
+    ],
+    "arn:aws:bedrock:\${Region}:\${Account}:inference-profile/us.anthropic.claude-haiku-5-5": [
+      "bedrock:InvokeModel",
+    ],
+    "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0": [
+      "bedrock:InvokeModel",
+    ],
+    "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-5-5": [
+      "bedrock:InvokeModel",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}": [
+      "s3:Abort*",
+      "s3:DeleteObject*",
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+      "s3:PutObject",
+      "s3:PutObjectLegalHold",
+      "s3:PutObjectRetention",
+      "s3:PutObjectTagging",
+      "s3:PutObjectVersionTagging",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}/*": [
+      "s3:Abort*",
+      "s3:DeleteObject*",
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+      "s3:PutObject",
+      "s3:PutObjectLegalHold",
+      "s3:PutObjectRetention",
+      "s3:PutObjectTagging",
+      "s3:PutObjectVersionTagging",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:BillSummarizerQueue": [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ReceiveMessage",
+    ],
+  },
+  "fn:BillsApiPoller": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "* if {"StringEquals":{"cloudwatch:namespace":"BillBoard/BillIngestion"}}": [
+      "cloudwatch:PutMetricData",
+    ],
+    "arn:aws:secretsmanager:\${Region}:\${Account}:secret:CongressAPIKey-??????": [
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:GetSecretValue",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:UpdatedBillsQueue": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+    "arn:aws:ssm:\${Region}:\${Account}:parameter<CongressIntegrationServiceStack/BillsApiPollerStateParameter1206B406681>": [
+      "ssm:DescribeParameters",
+      "ssm:GetParameter",
+      "ssm:GetParameterHistory",
+      "ssm:GetParameters",
+      "ssm:PutParameter",
+    ],
+    "arn:aws:ssm:\${Region}:\${Account}:parameter<CongressIntegrationServiceStack/BillsApiPollerStateParameterC64331E8>": [
+      "ssm:DescribeParameters",
+      "ssm:GetParameter",
+      "ssm:GetParameterHistory",
+      "ssm:GetParameters",
+      "ssm:PutParameter",
+    ],
+  },
+  "fn:CleanupOrphanedUsers": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "<UserAPIServiceStack/BillboardUserPoolC41FE3DD.Arn>": [
+      "cognito-idp:AdminGetUser",
+      "cognito-idp:ListUsers",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/AppAttest": [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillStats": [
+      "dynamodb:BatchWriteItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/SignUpEmailClaims": [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserDevices": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserDevices/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserWeeklyDigests": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/VerifiedAddressClaims": [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:ScheduledJobFailures": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+  },
+  "fn:CongressMemberStats": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMemberLegislativeProfiles": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMemberLegislativeProfiles/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMemberVoteProfiles": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMemberVoteProfiles/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMembersManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMembersStats": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}/*": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:CongressMemberStatsQueue": [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ReceiveMessage",
+    ],
+  },
+  "fn:CongressMemberSummarizer": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:s3:::\${CongressMemberStoreBucket}": [
+      "s3:Abort*",
+      "s3:DeleteObject*",
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+      "s3:PutObject",
+      "s3:PutObjectLegalHold",
+      "s3:PutObjectRetention",
+      "s3:PutObjectTagging",
+      "s3:PutObjectVersionTagging",
+    ],
+    "arn:aws:s3:::\${CongressMemberStoreBucket}/*": [
+      "s3:Abort*",
+      "s3:DeleteObject*",
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+      "s3:PutObject",
+      "s3:PutObjectLegalHold",
+      "s3:PutObjectRetention",
+      "s3:PutObjectTagging",
+      "s3:PutObjectVersionTagging",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:CongressMemberSummarizerQueue": [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ReceiveMessage",
+    ],
+  },
+  "fn:CreateBillsManifest": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}/*": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:BillsManifestQueue": [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ReceiveMessage",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:CongressMemberStatsQueue": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:NotificationTypeQueue": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+  },
+  "fn:CreateCongressMembersManifest": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMembersManifest": [
+      "dynamodb:BatchWriteItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:s3:::\${CongressMemberStoreBucket}": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:s3:::\${CongressMemberStoreBucket}/*": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:CongressMembersManifestQueue": [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ReceiveMessage",
+    ],
+  },
+  "fn:DeletePreferences": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences": [
+      "dynamodb:BatchWriteItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences/index/*": [
+      "dynamodb:BatchWriteItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ],
+  },
+  "fn:DeviceNotificationSettings": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserDevices": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserDevices/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+  },
+  "fn:DistrictVerification": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "<UserAPIServiceStack/DistrictVerificationHashSaltSecret54008A38>": [
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:GetSecretValue",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/VerifiedAddressClaims": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:RestampUserVotesQueue": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+  },
+  "fn:EnrichOfficialVotes": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "* if {"StringEquals":{"cloudwatch:namespace":"BillBoard/BillIngestion"}}": [
+      "cloudwatch:PutMetricData",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMembersManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}": [
+      "s3:Abort*",
+      "s3:DeleteObject*",
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+      "s3:PutObject",
+      "s3:PutObjectLegalHold",
+      "s3:PutObjectRetention",
+      "s3:PutObjectTagging",
+      "s3:PutObjectVersionTagging",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}/*": [
+      "s3:Abort*",
+      "s3:DeleteObject*",
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+      "s3:PutObject",
+      "s3:PutObjectLegalHold",
+      "s3:PutObjectRetention",
+      "s3:PutObjectTagging",
+      "s3:PutObjectVersionTagging",
+    ],
+    "arn:aws:secretsmanager:\${Region}:\${Account}:secret:CongressAPIKey-??????": [
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:GetSecretValue",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:BillDifferQueue": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:BillVoteEnrichmentQueue": [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ReceiveMessage",
+      "sqs:SendMessage",
+    ],
+  },
+  "fn:ExportCognitoUsers": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "<UserAPIServiceStack/BillboardUserPoolC41FE3DD.Arn>": [
+      "cognito-idp:AdminDeleteUserAttributes",
+      "cognito-idp:ListUsers",
+    ],
+    "<UserAPIServiceStack/CognitoUserExportBucketD6331DDE.Arn>/cognito-users/*": [
+      "s3:PutObject",
+    ],
+  },
+  "fn:FetchBillStats": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillStats": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL_COMPANION_GROUPS"]}}": [
+      "dynamodb:GetItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback": [
+      "dynamodb:BatchGetItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback/index/GSIBillIdIndex": [
+      "dynamodb:Query",
+    ],
+  },
+  "fn:FetchBillsManifest": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "<UserAPIServiceStack/BillsManifestSnapshotBucketDD018F1A.Arn>": [
+      "s3:ListBucket",
+    ],
+    "<UserAPIServiceStack/BillsManifestSnapshotBucketDD018F1A.Arn>/bills/manifest-v1.json": [
+      "s3:GetObject",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillPriority": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillPriority/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+  },
+  "fn:FetchCivicProfile": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+  },
+  "fn:FetchCivicScore": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL_COMPANION_GROUPS"]}}": [
+      "dynamodb:GetItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:GetItem",
+      "dynamodb:UpdateItem",
+    ],
+  },
+  "fn:FetchCongressMemberCivicProfile": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMemberLegislativeProfiles": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMemberLegislativeProfiles/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMemberVoteProfiles": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMemberVoteProfiles/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+  },
+  "fn:FetchCongressMembersList": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "* if {"StringEquals":{"cloudwatch:namespace":"BillBoard/BillIngestion"}}": [
+      "cloudwatch:PutMetricData",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMembersManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:secretsmanager:\${Region}:\${Account}:secret:CongressAPIKey-??????": [
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:GetSecretValue",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:ScheduledJobFailures": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:UpdatedCongressMembersQueue": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+  },
+  "fn:FetchCongressMembersManifest": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMembersManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMembersStats": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+  },
+  "fn:FetchFeedback": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+  },
+  "fn:FetchLatestWeeklyDigest": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserWeeklyDigests": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+  },
+  "fn:FetchMe": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+  },
+  "fn:FetchPreferences": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+  },
+  "fn:FetchProcessedBill": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillPriority": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillPriority/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL_COMPANION_GROUPS"]}}": [
+      "dynamodb:GetItem",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}/*": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+  },
+  "fn:FetchProcessedCongressMembers": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMembersStats": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:s3:::\${CongressMemberStoreBucket}": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:s3:::\${CongressMemberStoreBucket}/*": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+  },
+  "fn:FetchRawBill": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "* if {"StringEquals":{"cloudwatch:namespace":"BillBoard/BillIngestion"}}": [
+      "cloudwatch:PutMetricData",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}": [
+      "s3:Abort*",
+      "s3:DeleteObject*",
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+      "s3:PutObject",
+      "s3:PutObjectLegalHold",
+      "s3:PutObjectRetention",
+      "s3:PutObjectTagging",
+      "s3:PutObjectVersionTagging",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}/*": [
+      "s3:Abort*",
+      "s3:DeleteObject*",
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+      "s3:PutObject",
+      "s3:PutObjectLegalHold",
+      "s3:PutObjectRetention",
+      "s3:PutObjectTagging",
+      "s3:PutObjectVersionTagging",
+    ],
+    "arn:aws:secretsmanager:\${Region}:\${Account}:secret:CongressAPIKey-??????": [
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:GetSecretValue",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:BillDifferQueue": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:BillVoteEnrichmentQueue": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:UpdatedBillsQueue": [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ReceiveMessage",
+      "sqs:SendMessage",
+    ],
+  },
+  "fn:FetchRawCongressMembers": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "* if {"StringEquals":{"cloudwatch:namespace":"BillBoard/BillIngestion"}}": [
+      "cloudwatch:PutMetricData",
+    ],
+    "arn:aws:s3:::\${CongressMemberStoreBucket}": [
+      "s3:Abort*",
+      "s3:DeleteObject*",
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+      "s3:PutObject",
+      "s3:PutObjectLegalHold",
+      "s3:PutObjectRetention",
+      "s3:PutObjectTagging",
+      "s3:PutObjectVersionTagging",
+    ],
+    "arn:aws:s3:::\${CongressMemberStoreBucket}/*": [
+      "s3:Abort*",
+      "s3:DeleteObject*",
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+      "s3:PutObject",
+      "s3:PutObjectLegalHold",
+      "s3:PutObjectRetention",
+      "s3:PutObjectTagging",
+      "s3:PutObjectVersionTagging",
+    ],
+    "arn:aws:secretsmanager:\${Region}:\${Account}:secret:CongressAPIKey-??????": [
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:GetSecretValue",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:CongressMemberSummarizerQueue": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:UpdatedCongressMembersQueue": [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ReceiveMessage",
+    ],
+  },
+  "fn:GenerateWeeklyDigests": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "* if {"StringEquals":{"cloudwatch:namespace":"BillBoard/WeeklyDigest"}}": [
+      "cloudwatch:PutMetricData",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMembersManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserWeeklyDigests": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}/*": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:ScheduledJobFailures": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:WeeklyDigestQueue": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+  },
+  "fn:NotificationDispatcher": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "* if {"StringEquals":{"cloudwatch:namespace":"BillBoard/Notifications"}}": [
+      "cloudwatch:PutMetricData",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/PendingNotificationsTable": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:sns:\${Region}:\${Account}:app/APNS/BillboardApnsProduction": [
+      "sns:GetPlatformApplicationAttributes",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:userNotifierQueue": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+  },
+  "fn:NotificationFanout": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/PendingNotificationsTable": [
+      "dynamodb:PutItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences": [
+      "dynamodb:Query",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:notificationFanoutQueue": [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ReceiveMessage",
+    ],
+  },
+  "fn:NotificationType": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}/*": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:NotificationTypeQueue": [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ReceiveMessage",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:userMatcherQueue": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+  },
+  "fn:PreSignUpCheck": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "<UserAPIServiceStack/BillboardUserPoolC41FE3DD.Arn>": [
+      "cognito-idp:AdminGetUser",
+    ],
+    "<UserAPIServiceStack/DistrictVerificationHashSaltSecret54008A38>": [
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:GetSecretValue",
+    ],
+    "<UserAPIServiceStack/SignUpProbeTokenSecret20E910CF>": [
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:GetSecretValue",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/AppAttest": [
+      "dynamodb:GetItem",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/SignUpEmailClaims": [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+    ],
+    "arn:aws:secretsmanager:\${Region}:\${Account}:secret:Billboard/AppleDeviceCheckKey-??????": [
+      "secretsmanager:GetSecretValue",
+    ],
+  },
+  "fn:PublishBillsManifest": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "* if {"StringEquals":{"cloudwatch:namespace":"BillBoard/BillsManifest"}}": [
+      "cloudwatch:PutMetricData",
+    ],
+    "<UserAPIServiceStack/BillsManifestSnapshotBucketDD018F1A.Arn>": [
+      "s3:ListBucket",
+    ],
+    "<UserAPIServiceStack/BillsManifestSnapshotBucketDD018F1A.Arn>/bills/manifest-v1.json": [
+      "s3:GetObject",
+      "s3:PutObject",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillPriority": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillPriority/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL_COMPANION_GROUPS"]}}": [
+      "dynamodb:PutItem",
+    ],
+  },
+  "fn:RegisterUserDevice": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserDevices": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserDevices/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:sns:\${Region}:\${Account}:app/APNS/BillboardApnsProduction": [
+      "sns:CreatePlatformEndpoint",
+    ],
+    "arn:aws:sns:\${Region}:\${Account}:endpoint/APNS/BillboardApnsProduction/*": [
+      "sns:SetEndpointAttributes",
+    ],
+  },
+  "fn:RestampUserVotes": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback": [
+      "dynamodb:Query",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:GetItem",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:RestampUserVotesQueue": [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ReceiveMessage",
+    ],
+  },
+  "fn:SetFeedback": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/AppAttest": [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback": [
+      "dynamodb:BatchWriteItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback/index/*": [
+      "dynamodb:BatchWriteItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+  },
+  "fn:SetPreferences": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences": [
+      "dynamodb:BatchWriteItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences/index/*": [
+      "dynamodb:BatchWriteItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ],
+  },
+  "fn:SignUpFilterCheck": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "<UserAPIServiceStack/BillboardUserPoolC41FE3DD.Arn>": [
+      "cognito-idp:AdminDeleteUser",
+      "cognito-idp:AdminGetUser",
+      "cognito-idp:ListUsers",
+    ],
+    "<UserAPIServiceStack/SignUpProbeTokenSecret20E910CF>": [
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:GetSecretValue",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/SignUpEmailClaims": [
+      "dynamodb:DeleteItem",
+      "dynamodb:GetItem",
+    ],
+  },
+  "fn:UserMatcher": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillPriority": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillPriority/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL_COMPANION_DECL"]}}": [
+      "dynamodb:Query",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL_COMPANION_GROUPS","BILL_GUID"]}}": [
+      "dynamodb:GetItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL_GUID"]}}": [
+      "dynamodb:BatchGetItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/PendingNotificationsTable": [
+      "dynamodb:BatchWriteItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}/*": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:notificationFanoutQueue": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:userMatcherQueue": [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ReceiveMessage",
+    ],
+  },
+  "fn:UserNotifier": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL_COMPANION_GROUPS"]}}": [
+      "dynamodb:GetItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/PendingNotificationsTable": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserDevices": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserDevices/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback": [
+      "dynamodb:GetItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:GetItem",
+    ],
+    "arn:aws:sns:\${Region}:\${Account}:app/APNS/BillboardApnsProduction": [
+      "sns:Publish",
+    ],
+    "arn:aws:sns:\${Region}:\${Account}:endpoint/APNS/BillboardApnsProduction/*": [
+      "sns:Publish",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:userNotifierQueue": [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ReceiveMessage",
+    ],
+  },
+  "fn:WeeklyDigestWorker": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "* if {"StringEquals":{"cloudwatch:namespace":"BillBoard/WeeklyDigest"}}": [
+      "cloudwatch:PutMetricData",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMembersManifest": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPreferences/index/*": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserWeeklyDigests": [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:s3:::\${BillStoreBucket}/*": [
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:WeeklyDigestQueue": [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ReceiveMessage",
+    ],
+  },
+  "role:AnalyticsServiceStack/BillStatsAggregatorDeploymentGroupServiceRole6F9D8487": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:AnalyticsServiceStack/CongressMemberStatsDeploymentGroupServiceRoleD7AF6C00": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:CongressIntegrationServiceStack/BillsApiPollerDeploymentGroupServiceRole643B023E": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:CongressIntegrationServiceStack/EnrichOfficialVotesDeploymentGroupServiceRole37493BB0": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:CongressIntegrationServiceStack/FetchCongressMembersListDeploymentGroupServiceRole61A88A89": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:CongressIntegrationServiceStack/FetchRawBillDeploymentGroupServiceRole7727DD6D": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:CongressIntegrationServiceStack/FetchRawCongressMembersDeploymentGroupServiceRole5AA3B3BE": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:CongressStoreStack/CreateBillsManifestDeploymentGroupServiceRole4522F018": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:CongressStoreStack/CreateCongressMembersManifestDeploymentGroupServiceRole0F6CD7A5": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:GitHubOidcStack/GitHubInfraDeployRoleB365D51C": {
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com","token.actions.githubusercontent.com:sub":["\${GitHubPlatformMainSubject}","\${GitHubPublicProductionSubject}"]}},"Effect":"Allow","Principal":{"Federated":"arn:aws:iam::\${Account}:oidc-provider/token.actions.githubusercontent.com"}}],"Version":"2012-10-17"}",
+    ],
+    "arn:aws:cloudwatch:\${Region}:\${Account}:alarm:*": [
+      "cloudwatch:DescribeAlarms",
+    ],
+    "arn:aws:codedeploy:\${Region}:\${Account}:application:AnalyticsService": [
+      "codedeploy:GetApplicationRevision",
+      "codedeploy:RegisterApplicationRevision",
+    ],
+    "arn:aws:codedeploy:\${Region}:\${Account}:application:CongressIntegrationService": [
+      "codedeploy:GetApplicationRevision",
+      "codedeploy:RegisterApplicationRevision",
+    ],
+    "arn:aws:codedeploy:\${Region}:\${Account}:application:CongressStore": [
+      "codedeploy:GetApplicationRevision",
+      "codedeploy:RegisterApplicationRevision",
+    ],
+    "arn:aws:codedeploy:\${Region}:\${Account}:application:NotificationService": [
+      "codedeploy:GetApplicationRevision",
+      "codedeploy:RegisterApplicationRevision",
+    ],
+    "arn:aws:codedeploy:\${Region}:\${Account}:application:PriorityService": [
+      "codedeploy:GetApplicationRevision",
+      "codedeploy:RegisterApplicationRevision",
+    ],
+    "arn:aws:codedeploy:\${Region}:\${Account}:application:SummarizerService": [
+      "codedeploy:GetApplicationRevision",
+      "codedeploy:RegisterApplicationRevision",
+    ],
+    "arn:aws:codedeploy:\${Region}:\${Account}:application:UserApiService": [
+      "codedeploy:GetApplicationRevision",
+      "codedeploy:RegisterApplicationRevision",
+    ],
+    "arn:aws:codedeploy:\${Region}:\${Account}:deploymentconfig:*": [
+      "codedeploy:GetDeploymentConfig",
+    ],
+    "arn:aws:codedeploy:\${Region}:\${Account}:deploymentgroup:AnalyticsService/*": [
+      "codedeploy:CreateDeployment",
+      "codedeploy:GetDeployment",
+      "codedeploy:GetDeploymentGroup",
+    ],
+    "arn:aws:codedeploy:\${Region}:\${Account}:deploymentgroup:CongressIntegrationService/*": [
+      "codedeploy:CreateDeployment",
+      "codedeploy:GetDeployment",
+      "codedeploy:GetDeploymentGroup",
+    ],
+    "arn:aws:codedeploy:\${Region}:\${Account}:deploymentgroup:CongressStore/*": [
+      "codedeploy:CreateDeployment",
+      "codedeploy:GetDeployment",
+      "codedeploy:GetDeploymentGroup",
+    ],
+    "arn:aws:codedeploy:\${Region}:\${Account}:deploymentgroup:NotificationService/*": [
+      "codedeploy:CreateDeployment",
+      "codedeploy:GetDeployment",
+      "codedeploy:GetDeploymentGroup",
+    ],
+    "arn:aws:codedeploy:\${Region}:\${Account}:deploymentgroup:PriorityService/*": [
+      "codedeploy:CreateDeployment",
+      "codedeploy:GetDeployment",
+      "codedeploy:GetDeploymentGroup",
+    ],
+    "arn:aws:codedeploy:\${Region}:\${Account}:deploymentgroup:SummarizerService/*": [
+      "codedeploy:CreateDeployment",
+      "codedeploy:GetDeployment",
+      "codedeploy:GetDeploymentGroup",
+    ],
+    "arn:aws:codedeploy:\${Region}:\${Account}:deploymentgroup:UserApiService/*": [
+      "codedeploy:CreateDeployment",
+      "codedeploy:GetDeployment",
+      "codedeploy:GetDeploymentGroup",
+    ],
+    "arn:aws:iam::\${Account}:role/cdk-hnb659fds-*": [
+      "sts:AssumeRole",
+    ],
+    "arn:aws:lambda:\${Region}:\${Account}:function:*": [
+      "lambda:GetAlias",
+    ],
+    "arn:aws:s3:::\${LambdaArtifactsBucket}/releases/*": [
+      "s3:GetObject",
+    ],
+    "arn:aws:ssm:\${Region}:\${Account}:parameter/billboard/prod/lambda-alias-versions/*": [
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+      "ssm:PutParameter",
+    ],
+  },
+  "role:GitHubOidcStack/GitHubServicesReleaseRoleAB510C5D": {
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com","token.actions.githubusercontent.com:sub":["\${GitHubPlatformMainSubject}","\${GitHubPublicProductionSubject}"]}},"Effect":"Allow","Principal":{"Federated":"arn:aws:iam::\${Account}:oidc-provider/token.actions.githubusercontent.com"}}],"Version":"2012-10-17"}",
+    ],
+    "arn:aws:s3:::\${LambdaArtifactsBucket}": [
+      "s3:ListBucket",
+    ],
+    "arn:aws:s3:::\${LambdaArtifactsBucket}/*": [
+      "s3:GetObject",
+      "s3:PutObject",
+    ],
+  },
+  "role:MonitoringStack/SlackAlarmChannelConfigurationRoleE7FE91BC": {
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"chatbot.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:NotificationServiceStack/NotificationDispatcherDeploymentGroupServiceRole9347C734": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:NotificationServiceStack/NotificationFanoutDeploymentGroupServiceRoleC0FA9312": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:NotificationServiceStack/NotificationTypeDeploymentGroupServiceRole3120B4DD": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:NotificationServiceStack/UserMatcherDeploymentGroupServiceRoleD1F6D9DE": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:NotificationServiceStack/UserNotifierDeploymentGroupServiceRoleEC88F004": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:PriorityServiceStack/BillPriorityResolverDeploymentGroupServiceRole28A3F8EE": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:PriorityServiceStack/BillPriorityResolverSchedulerRole37D766FB": {
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"scheduler.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "arn:aws:lambda:\${Region}:\${Account}:function:BillPriorityResolver:prod": [
+      "lambda:InvokeFunction",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:ScheduledJobFailures": [
+      "sqs:SendMessage",
+    ],
+  },
+  "role:SummarizerServiceStack/BillDifferDeploymentGroupServiceRoleEEE7B3A7": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:SummarizerServiceStack/BillSummarizerDeploymentGroupServiceRole83B62718": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:SummarizerServiceStack/CongressMemberSummarizerDeploymentGroupServiceRoleC2877B8D": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/AccountDataDeploymentGroupServiceRole0AA75906": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/AccountDataStatusDeploymentGroupServiceRoleE8D8BFED": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/AdultAttestationDeploymentGroupServiceRole0BDEFAEE": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/ApiGatewayCloudWatchRole86F22A4D": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"apigateway.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/AppAttestDeploymentGroupServiceRoleCE68E37E": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/CleanupOrphanedUsersDeploymentGroupServiceRole9F035813": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/DeletePreferencesDeploymentGroupServiceRole12F1BFF4": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/DeviceNotificationSettingsDeploymentGroupServiceRole2BAF8C08": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/DistrictVerificationDeploymentGroupServiceRole9938F511": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/ExportCognitoUsersDeploymentGroupServiceRole54E55C61": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/FetchBillStatsDeploymentGroupServiceRole4AB501BF": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/FetchBillsManifestDeploymentGroupServiceRole8FA6BCC3": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/FetchCivicProfileDeploymentGroupServiceRoleBFBEB5F1": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/FetchCivicScoreDeploymentGroupServiceRole947B9404": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/FetchCongressMemberCivicProfileDeploymentGroupServiceRole455091BA": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/FetchCongressMembersManifestDeploymentGroupServiceRole1A1B5176": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/FetchFeedbackDeploymentGroupServiceRole8B027663": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/FetchLatestWeeklyDigestDeploymentGroupServiceRoleA98FA2E3": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/FetchMeDeploymentGroupServiceRoleBAA18CB9": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/FetchPreferencesDeploymentGroupServiceRole95D4D56F": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/FetchProcessedBillDeploymentGroupServiceRole50EDF4A5": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/FetchProcessedCongressMembersDeploymentGroupServiceRole4D15BEDF": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/GenerateWeeklyDigestsDeploymentGroupServiceRole3926B254": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/PreSignUpCheckDeploymentGroupServiceRole6808527C": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/PublishBillsManifestDeploymentGroupServiceRole281BD941": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/PublishBillsManifestSchedulerRoleE105ABD0": {
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"scheduler.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "arn:aws:lambda:\${Region}:\${Account}:function:PublishBillsManifest:prod": [
+      "lambda:InvokeFunction",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:ScheduledJobFailures": [
+      "sqs:SendMessage",
+    ],
+  },
+  "role:UserAPIServiceStack/RegisterUserDeviceDeploymentGroupServiceRole0964AB9E": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/RestampUserVotesDeploymentGroupServiceRoleA4F59638": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/SetFeedbackDeploymentGroupServiceRoleB360E76A": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/SetPreferencesDeploymentGroupServiceRoleEC7E2EBB": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/SignUpFilterCheckDeploymentGroupServiceRoleD5535C89": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/WeeklyDigestSchedulerRole5C7C9E2A": {
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"scheduler.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "arn:aws:lambda:\${Region}:\${Account}:function:GenerateWeeklyDigests:prod": [
+      "lambda:InvokeFunction",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:ScheduledJobFailures": [
+      "sqs:SendMessage",
+    ],
+  },
+  "role:UserAPIServiceStack/WeeklyDigestWorkerDeploymentGroupServiceRole86A9B1E1": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+}
+`;

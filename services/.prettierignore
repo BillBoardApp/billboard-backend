@@ -1,0 +1,2 @@
+# Written by scripts/updateDisposableDomains.ts (npm run update:disposable-domains); never formatted by hand.
+src/handlers/preSignUp/disposableDomains.generated.ts

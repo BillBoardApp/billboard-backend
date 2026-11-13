@@ -1,0 +1,70 @@
+name: PR checks
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Read-only token, no secrets and no cloud credentials: the checks run offline on a GitHub-hosted runner. Pull
+# requests from forks run only after one of the project's maintainers approves them.
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AWS_CONFIG_FILE: /dev/null
+      AWS_SHARED_CREDENTIALS_FILE: /dev/null
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            contracts/package-lock.json
+            services/package-lock.json
+            infra/package-lock.json
+      - name: Install (npm ci in contracts, services and infra)
+        run: npm run setup
+      - name: Contracts, layout, typecheck, lint, tests (services with the coverage gate), esbuild, synth, strict synth of a fresh release
+        run: npm run verify
+
+  # The new commits must carry no secret and only allowed addresses: they become public history the moment they are
+  # pushed. CONTRIBUTING.md, "Licence of contributions", says which addresses pass.
+  commit-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install gitleaks (pinned release, SHA-256 checked)
+        run: bash scripts/ci/install-gitleaks.sh "$RUNNER_TEMP/bin"
+      - name: The commits to check
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          # A pull request: its own commits. A manual run: every commit on the branch.
+          if [ -n "$BASE_SHA" ]; then range="$BASE_SHA..$HEAD_SHA"; else range="$HEAD_SHA"; fi
+          echo "RANGE=$range" >> "$GITHUB_ENV"
+          echo "Commits checked: $(git rev-list --count "$range")" >> "$GITHUB_STEP_SUMMARY"
+      # -m: a merge commit is scanned as its diff against each parent, so content that exists only in its conflict
+      # resolution is scanned too (without it, git log shows a merge with no diff).
+      - name: No secrets in the new commits (gitleaks)
+        run: >-
+          "$RUNNER_TEMP/bin/gitleaks" git . --log-opts="-m $RANGE" --config .gitleaks.toml
+          --no-banner --redact --exit-code 1
+      - name: Only allowed author, committer and trailer addresses
+        run: bash scripts/ci/check-commit-identities.sh "$RANGE"

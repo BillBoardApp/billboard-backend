@@ -1,0 +1,1476 @@
+/*
+ * Billboard website, set in Civic Record, the design app 1.2 shipped with.
+ *
+ * The values come from the app's Theme/BillboardTheme.swift (BillboardPalette) and the Civic Record spec
+ * (sections 1 and 2): paper below and ink on it, navy only for the masthead, and brand teal only in the
+ * wordmark and the current page on navy. Colour carries meaning only: the status stamps (Updated, Passed,
+ * Failed, Became law) and the Yea and Nay column heads of the sealed Results sheet. Everything else is ink.
+ *
+ * Faces are the reader's own system fonts (the CSP allows no font files): a condensed sans for headlines,
+ * a serif for reading text, a monospace for the docket (bill numbers, dates, stamps), and the system sans
+ * for everything else. Nothing animates.
+ *
+ * Contrast (WCAG 2.2) for every text and background pair here was computed with the maths of
+ * civic-record-contrast.py; the pairs and ratios are listed in the pull request.
+ */
+
+/* ---------- Tokens ---------- */
+
+:root {
+  color-scheme: light dark;
+
+  /* Surfaces */
+  --paper: #f3f2ee; /* ground of the landing page and the roadmap */
+  --document: #ffffff; /* ground of the shared bill and the privacy policy */
+  --sheet: #ffffff;
+  --well: #ecebe6; /* disabled button fill */
+  --navy: #0b1d3a; /* the masthead, in both appearances */
+
+  /* Ink and text */
+  --ink: #0e1a2e;
+  --ink-2: #3d4250;
+  --ink-3: #5c6270;
+  --on-fill: #ffffff; /* text on an ink fill */
+  --on-navy: #ffffff;
+  --on-navy-dim: rgb(255 255 255 / 0.74);
+  --brand-teal: #00bfa6; /* only on navy */
+
+  /* Meaning: always with the word */
+  --vote-yea: #036c7e;
+  --vote-nay: #a84a0a;
+  --status-updated: #7d6200;
+  --status-passed: #18794e;
+  --danger: #b42318;
+
+  /* Rules (lines) */
+  --rule: rgb(11 29 58 / 0.13); /* hairlines */
+  --rule-2: rgb(11 29 58 / 0.3); /* dotted ledger rules, tag borders, blank cells */
+  --control-rule: rgb(11 29 58 / 0.5); /* a line that marks a control: at least 3:1 */
+  --rule-heavy: var(--ink);
+
+  --focus: var(--ink);
+  --focus-on-navy: #ffffff;
+
+  /* Faces */
+  --font-text: -apple-system, BlinkMacSystemFont, ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --font-headline: -apple-system, BlinkMacSystemFont, "Roboto Condensed", sans-serif-condensed, "Arial Narrow",
+    ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: ui-serif, "New York", Charter, "Bitstream Charter", "Iowan Old Style", Georgia, Cambria,
+    "Times New Roman", serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Roboto Mono", "Liberation Mono",
+    monospace;
+
+  /* Spacing (the app's 4 pt grid) */
+  --space-xs: 0.25rem;
+  --space-s: 0.5rem;
+  --space-m: 0.75rem;
+  --space-l: 1rem;
+  --space-xl: 1.25rem;
+  --space-xxl: 1.75rem;
+  --space-xxxl: 2.5rem;
+  --gutter: 1rem;
+
+  --radius-mark: 4px;
+  --radius-slip: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0b1220;
+    --document: #0b1220;
+    --sheet: #151d2c;
+    --well: #1c2536;
+
+    --ink: #eef0f4;
+    --ink-2: #c5cad3;
+    --ink-3: #9aa2af;
+    --on-fill: #0b0f17;
+
+    --vote-yea: #3cc3d6;
+    --vote-nay: #f2994a;
+    --status-updated: #e8c547;
+    --status-passed: #3dd68c;
+    --danger: #f97066;
+
+    --rule: rgb(255 255 255 / 0.12);
+    --rule-2: rgb(255 255 255 / 0.28);
+    --control-rule: rgb(255 255 255 / 0.45);
+  }
+}
+
+/* Increase Contrast: each text colour at least 7:1 on every ground it sits on (spec 2.1). */
+@media (prefers-contrast: more) and (prefers-color-scheme: light) {
+  :root {
+    --ink-3: #3d4250;
+    --on-navy-dim: rgb(255 255 255 / 0.85);
+    --vote-yea: #025564;
+    --vote-nay: #803908;
+    --status-updated: #604b00;
+    --status-passed: #125839;
+    --danger: #971d14;
+    --rule: rgb(11 29 58 / 0.3);
+    --rule-2: rgb(11 29 58 / 0.5);
+    --control-rule: var(--ink);
+  }
+}
+
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root {
+    --ink-3: #c5cad3;
+    --on-navy-dim: rgb(255 255 255 / 0.85);
+    --danger: #fb9a92;
+    --rule: rgb(255 255 255 / 0.3);
+    --rule-2: rgb(255 255 255 / 0.45);
+    --control-rule: var(--ink);
+  }
+}
+
+@media (min-width: 600px) {
+  :root {
+    --gutter: 1.5rem;
+  }
+}
+
+/* ---------- Base ---------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 1rem/1.5 var(--font-text);
+  -webkit-font-smoothing: antialiased;
+  /* A word longer than its line (at a large text size, on a narrow phone) breaks rather than overflowing. */
+  overflow-wrap: break-word;
+}
+
+/* The shared bill (app.js sets data-view) and the privacy policy are documents, like the app's bill page. */
+body[data-view="share"],
+body.document-page {
+  background: var(--document);
+}
+
+h1,
+h2,
+h3,
+p,
+ul,
+ol,
+dl,
+dd {
+  margin: 0;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+a {
+  color: var(--ink);
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.masthead a:focus-visible {
+  outline-color: var(--focus-on-navy);
+}
+
+/* Single-column grids: the column never grows wider than the page, so at a large text size a long word breaks
+   (overflow-wrap) instead of pushing the page sideways. The wider layouts below set their own columns. */
+.landing-hero,
+.landing-hero-copy,
+.landing-panel,
+.landing-section-head,
+.info-grid,
+.get-app-copy,
+.invite,
+.page-front,
+.roadmap-note,
+.roadmap-timeline,
+.roadmap-stage,
+.roadmap-stage-header,
+.roadmap-list {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.hidden {
+  display: none !important;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- Type roles (spec 2.5) ---------- */
+
+.display,
+.page-title,
+.bill-title,
+.title,
+.heading,
+.section-title,
+.name,
+.wordmark {
+  font-family: var(--font-headline);
+  /* The app's condensed width: measured against the 1.2 App Store screenshots, the system face at 62.5%
+     sets the wordmark and slip titles within 1% of the app's widths. */
+  font-stretch: 62.5%;
+  color: var(--ink);
+  overflow-wrap: break-word;
+  text-wrap: balance;
+}
+
+/* display: page titles. On the landing page it grows with the window. */
+.display,
+.page-title {
+  font-size: clamp(2.5rem, 1.9rem + 2.4vw, 3.5rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+
+.display {
+  font-size: clamp(2.5rem, 1.6rem + 3.6vw, 4.5rem);
+  line-height: 0.98;
+}
+
+/* billTitle: the shared bill's title. */
+.bill-title {
+  font-size: clamp(2.125rem, 1.8rem + 1.2vw, 2.75rem);
+  font-weight: 700;
+  line-height: 1.04;
+  letter-spacing: -0.01em;
+}
+
+/* title: section titles on the landing page and the roadmap. */
+.title {
+  font-size: clamp(1.625rem, 1.4rem + 0.9vw, 1.875rem);
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -0.005em;
+}
+
+/* heading: section titles in documents. */
+.heading,
+.section-title {
+  font-size: 1.375rem;
+  font-weight: 700;
+  line-height: 1.12;
+}
+
+/* name: titles of list items. */
+.name {
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.12;
+}
+
+/* lead: the reading text that matters most (Why it matters, the landing page's first paragraph). */
+.lead {
+  font: 400 1.25rem/1.42 var(--font-serif);
+  letter-spacing: -0.004em;
+  color: var(--ink);
+  text-wrap: pretty;
+}
+
+/* prose: other reading text (Breakdown answers, the summary, the policy). */
+.prose {
+  font: 400 1.0625rem/1.5 var(--font-serif);
+  color: var(--ink);
+  text-wrap: pretty;
+}
+
+/* docket: bill numbers, chambers, dates, deck lines. Capitals are a style; the words stay normal. */
+.docket {
+  font: 500 0.71875rem/1.5 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* label: words over a section or a page title ("Why Billboard"). The system sans, like the app's column heads:
+   the docket face stays for docket data. */
+.kicker {
+  font: 600 0.71875rem/1.5 var(--font-text);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+/* ---------- Rules (spec 2.7) ---------- */
+
+/* Thick over thin, under front matter. */
+.double-rule {
+  height: 5px;
+  border-top: 2px solid var(--rule-heavy);
+  border-bottom: 1px solid var(--rule-heavy);
+}
+
+/* A 2 pt ink rule over a section head. */
+.section-head {
+  padding-top: var(--space-s);
+  border-top: 2px solid var(--rule-heavy);
+}
+
+/* ---------- Masthead (spec 3.21, 3.24) ---------- */
+
+.masthead {
+  background: var(--navy);
+  color: var(--on-navy);
+}
+
+.masthead-inner {
+  width: min(100% - 2 * var(--gutter), 1080px);
+  margin-inline: auto;
+  padding: var(--space-m) 0 var(--space-m);
+}
+
+.masthead-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-s);
+}
+
+/* BILL in white, BOARD in brand teal, black condensed caps: set in type, as the app does. */
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 1.625rem;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.015em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  color: var(--on-navy);
+}
+
+.wordmark-board {
+  color: var(--brand-teal);
+}
+
+.site-nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-s) var(--space-xs);
+  width: 100%;
+}
+
+/* Like the app's tab capsule: the current page is brand teal and bold inside a teal-ruled capsule. */
+.site-nav a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border: 1.5px solid transparent;
+  border-radius: 999px;
+  padding: 0 var(--space-m);
+  color: var(--on-navy-dim);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* Phones narrower than 375 px (in em, so it follows the reader's text size): four links and the current page's
+   capsule fit on one line at the default size. Larger text wraps the links onto a second line, never off the page. */
+@media (max-width: 23.375em) {
+  .site-nav {
+    column-gap: 0;
+  }
+
+  .site-nav a {
+    padding: 0 0.5rem;
+    font-size: 0.875rem;
+  }
+}
+
+.site-nav a:hover {
+  color: var(--on-navy);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.site-nav a[aria-current="page"] {
+  border-color: var(--brand-teal);
+  color: var(--brand-teal);
+  font-weight: 700;
+}
+
+.site-nav a[aria-current="page"]:hover {
+  color: var(--brand-teal);
+}
+
+/* Thin over thick, in white, under the wordmark. */
+.masthead-rule {
+  height: 5px;
+  margin-top: var(--space-s);
+  border-top: 1px solid rgb(255 255 255 / 0.38);
+  border-bottom: 2px solid rgb(255 255 255 / 0.88);
+}
+
+/* Wordmark and links on one row (from 45em, so larger text keeps the stacked masthead longer). When they do not
+   fit, the links drop under the wordmark, and wrap again if they must: the masthead never scrolls sideways. */
+@media (min-width: 45em) {
+  .masthead-inner {
+    padding-top: var(--space-l);
+  }
+
+  .masthead-bar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: var(--space-s) var(--space-l);
+  }
+
+  .wordmark {
+    font-size: 1.875rem;
+  }
+
+  .site-nav {
+    justify-content: flex-end;
+    width: auto;
+    margin-left: auto;
+  }
+
+  .site-nav a {
+    padding: 0 var(--space-l);
+  }
+}
+
+/* ---------- Page ---------- */
+
+.page {
+  width: min(100% - 2 * var(--gutter), 1080px);
+  margin-inline: auto;
+  padding: var(--space-xxl) 0 var(--space-xxxl);
+}
+
+/* ---------- Buttons and links (spec 3.16) ---------- */
+
+.button,
+.store-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50px;
+  padding: 0 var(--space-xl);
+  border: 1.25px solid transparent;
+  border-radius: 999px;
+  font: 600 1rem/1.2 var(--font-text);
+  text-align: center;
+  text-decoration: none;
+}
+
+/* Primary: an ink capsule. */
+.button-primary,
+.store-btn-ios {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--on-fill);
+}
+
+.button-primary:hover,
+.store-btn-ios:hover {
+  background: var(--ink-2);
+  border-color: var(--ink-2);
+}
+
+/* "Download on the App Store", set in text until Apple's badge artwork is added (website review 5.1). Its words
+   wrap at a large text size rather than pushing the page sideways. */
+.store-btn {
+  max-width: 100%;
+  padding: var(--space-s) var(--space-xl);
+}
+
+/* "For iPhone": the line under the App Store button. */
+.store-note {
+  font-size: 0.9375rem;
+  color: var(--ink-2);
+}
+
+/* A link on its own line: ink, underlined, with a 44 px target. */
+.text-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.text-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  .button:active,
+  .store-btn:not(:disabled):active {
+    transform: scale(0.98);
+  }
+}
+
+.text-link:active,
+.site-nav a:active {
+  opacity: 0.6;
+}
+
+/* ---------- Stamps and tags (spec 3.2, 3.3) ---------- */
+
+/* A word in a ruled box, like a clerk's rubber stamp. The colour is the word's and the rule's. A stamp keeps its
+   words on one line while they fit, and wraps inside its box only when its line is narrower than the stamp (a
+   large text size on a narrow phone), so it never pushes the page sideways. */
+.stamp {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  min-height: 1.25rem;
+  padding: 1px 0.375rem 0;
+  border: 1.25px solid currentColor;
+  border-radius: var(--radius-mark);
+  color: var(--ink);
+  font: 600 0.6875rem/1.15 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+/* "Ended with the 119th Congress": a long stamp, set from its start when it wraps. */
+.stamp-wrap {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.stamp-updated {
+  color: var(--status-updated);
+}
+
+.stamp-passed,
+.stamp-became-law {
+  color: var(--status-passed);
+}
+
+.stamp-failed,
+.stamp-danger {
+  color: var(--danger);
+}
+
+.stamp-dim {
+  color: var(--ink-3);
+}
+
+/* Became law and Sealed are double-ruled. */
+.stamp-became-law,
+.stamp-sealed {
+  min-height: 1.375rem;
+  border: 3.5px double currentColor;
+}
+
+/* An ink index tab (no fill). */
+.index-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.375rem;
+  padding: 0 0.4375rem;
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-mark);
+  color: var(--ink-2);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ---------- Ledger (spec 3.6) ---------- */
+
+/* Label in the docket face in a fixed column, answer beside it, dotted rules between rows. */
+.ledger-row {
+  display: grid;
+  grid-template-columns: var(--ledger-label, 4rem) minmax(0, 1fr);
+  align-items: first baseline;
+  column-gap: var(--space-m);
+  padding: 0.625rem 0;
+  background: linear-gradient(to right, var(--rule-2) 1px, transparent 1px) top left / 3.5px 1px repeat-x;
+}
+
+.ledger-row:first-child {
+  padding-top: 0.125rem;
+  background: none;
+}
+
+.ledger dt {
+  font: 500 0.71875rem/1.6 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.ledger dd {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* The Breakdown's answers are reading text. */
+.ledger-breakdown {
+  --ledger-label: 3.875rem;
+}
+
+.ledger-breakdown dd {
+  font: 400 1.0625rem/1.45 var(--font-serif);
+  text-wrap: pretty;
+}
+
+.ledger-wide {
+  --ledger-label: 6.5rem;
+}
+
+.ledger-chamber {
+  --ledger-label: 4.25rem;
+}
+
+.ledger-note {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+
+/* Where the label column would take more than about 30% of the row, the label goes above. */
+@media (max-width: 479px) {
+  .ledger-wide .ledger-row {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--space-xs);
+  }
+}
+
+/* ---------- Landing page ---------- */
+
+.landing-hero {
+  display: grid;
+  gap: var(--space-xxl);
+  padding-bottom: var(--space-xxl);
+}
+
+.landing-hero-copy {
+  display: grid;
+  gap: var(--space-l);
+  align-content: start;
+}
+
+/* The approved one-line description is a sentence, so it is set smaller than a two-word display title. */
+.landing-hero-copy .display {
+  max-width: 24ch;
+  font-size: clamp(2rem, 1.45rem + 2.1vw, 3.25rem);
+  line-height: 1.02;
+}
+
+.landing-hero-copy .lead {
+  max-width: 34rem;
+}
+
+.hero-note {
+  max-width: 34rem;
+  color: var(--ink-2);
+}
+
+.hero-note strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.get-app {
+  display: flex;
+  align-items: center;
+  gap: var(--space-l);
+  margin-top: var(--space-s);
+  max-width: 40rem;
+}
+
+.get-app-copy {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-s);
+  flex: 1;
+  min-width: 0;
+}
+
+/* The app's icon, drawn from its AppIcon.icon layers. Decorative: the buttons say what it is. */
+.app-icon {
+  display: none;
+  flex: none;
+  width: 64px;
+  height: 64px;
+}
+
+@media (min-width: 560px) {
+  .app-icon {
+    display: block;
+  }
+}
+
+.landing-panel {
+  display: grid;
+  gap: var(--space-m);
+  align-content: start;
+}
+
+.landing-panel .ruled-list {
+  color: var(--ink-2);
+}
+
+/* A list set as a record: no bullets, dotted rules between items. */
+.ruled-list {
+  padding: 0;
+  list-style: none;
+}
+
+.ruled-list li {
+  padding: var(--space-s) 0;
+  background: linear-gradient(to right, var(--rule-2) 1px, transparent 1px) top left / 3.5px 1px repeat-x;
+}
+
+.ruled-list li:first-child {
+  background: none;
+}
+
+.stamp-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-s);
+  margin-top: var(--space-m);
+  padding: 0;
+  list-style: none;
+}
+
+/* "For everyone." under the features. */
+.feature-note {
+  max-width: 44rem;
+  padding-top: var(--space-m);
+  border-top: 1px solid var(--rule);
+  color: var(--ink-2);
+}
+
+.feature-note strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Links to the other pages: one per line on a phone, in a row where they fit. */
+.link-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-xl);
+  padding: 0;
+  list-style: none;
+}
+
+.landing-section {
+  padding-top: var(--space-xxxl);
+}
+
+.landing-section-head {
+  display: grid;
+  gap: var(--space-s);
+  margin-bottom: var(--space-xl);
+}
+
+.landing-section-head .lead {
+  max-width: 40rem;
+  font-size: 1.125rem;
+}
+
+.info-grid {
+  display: grid;
+  gap: 0 var(--space-xl);
+  margin-bottom: var(--space-l);
+}
+
+.feature-item {
+  padding: var(--space-m) 0 var(--space-xl);
+  border-top: 1px solid var(--rule);
+}
+
+.feature-item h3 {
+  margin-bottom: var(--space-xs);
+}
+
+.feature-item p {
+  color: var(--ink-2);
+}
+
+@media (min-width: 640px) {
+  .info-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 900px) {
+  .page {
+    padding-top: var(--space-xxxl);
+  }
+
+  .landing-hero {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: var(--space-xxxl) 3.5rem;
+    padding-bottom: var(--space-xxxl);
+  }
+
+  .info-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ---------- Shared bill: a document like the app's bill page (spec 4.28 to 4.34) ---------- */
+
+.share {
+  max-width: 44rem;
+  margin-inline: auto;
+}
+
+.front-matter {
+  padding-bottom: var(--space-l);
+}
+
+.share-label {
+  margin-bottom: var(--space-s);
+}
+
+/* "Billboard is an independent project and is not affiliated with Congress or any government agency." near the
+   top of every shared bill (website review 5.4), because the page is set like a printed bill. */
+.independence-note {
+  margin-bottom: var(--space-l);
+  font-size: 0.875rem;
+  color: var(--ink-2);
+}
+
+/* Number, chamber and Congress on the left; the stamp at the trailing edge. */
+.docket-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-s) var(--space-m);
+  margin-bottom: 0.625rem;
+}
+
+.docket-number {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+/* No number (an unavailable bill): the stamp stands alone at the start of the line. */
+.docket-line .docket:empty {
+  display: none;
+}
+
+/* The heading is the bill's official title, set like a printed bill's title in the reading face: never in
+   the condensed headline face, which the AI headline uses inside its block. */
+.bill-title-official {
+  font: 600 clamp(1.25rem, 1.1rem + 0.6vw, 1.375rem) / 1.32 var(--font-serif);
+  font-stretch: normal;
+  letter-spacing: 0;
+  text-wrap: pretty;
+}
+
+.front-matter .subtitle {
+  margin-top: 0.625rem;
+  color: var(--ink-2);
+}
+
+.share-error {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-xs);
+  margin-top: var(--space-s);
+}
+
+.share-message {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* "Also introduced in the Senate as S. 570" (app.js renderCompanions). */
+.companion-notes {
+  margin-top: var(--space-s);
+}
+
+.companion-note {
+  color: var(--ink-2);
+}
+
+.companion-note + .companion-note {
+  margin-top: var(--space-xs);
+}
+
+/* Underlined because the link sits inside a sentence, where colour alone does not mark it. */
+.companion-note .inline-link {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+/* "The 119th Congress ended on January 3, 2027. This bill did not become law. …" (app.js endedNote). */
+.ended-note {
+  margin-top: var(--space-m);
+  padding-left: var(--space-m);
+  border-left: 2px solid var(--rule-heavy);
+  font: 400 1rem/1.45 var(--font-serif);
+  color: var(--ink);
+}
+
+.bill-updated {
+  margin-top: var(--space-m);
+}
+
+/* Sections are ruled, not boxed: a hairline between sections, none under the double rule. */
+.record-section {
+  padding: var(--space-l) 0 var(--space-xl);
+}
+
+.record-section:not(.hidden) ~ .record-section {
+  border-top: 1px solid var(--rule);
+}
+
+.record-section .section-title {
+  margin-bottom: var(--space-m);
+}
+
+/* ---------- The AI block: everything the AI wrote or assigned, under the app's line ---------- */
+
+/* One block, set off by a rule down its leading edge, like a note in a document's margin: the reader can tell
+   where the AI's text starts and ends (website review 5.4). */
+.ai-block {
+  margin-top: var(--space-l);
+  padding: var(--space-xs) 0 var(--space-xs) var(--space-l);
+  border-left: 3px solid var(--rule-2);
+}
+
+.ai-block + .record-section {
+  margin-top: var(--space-l);
+}
+
+/* "Written with AI from the official text · Report a problem" (BillAINote): one quiet line in ink 2, with
+   Report a problem in ink and underlined, heading the block. */
+.ai-note {
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+/* An inline block: "Report a problem" moves to the next line whole, and wraps only where a line is narrower. */
+.ai-report {
+  display: inline-block;
+  max-width: 100%;
+  min-height: 24px;
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+/* The plain-language headline: a headline in the condensed face, smaller than the official title's line. */
+.ai-headline {
+  margin-top: var(--space-m);
+  font-family: var(--font-headline);
+  font-stretch: 62.5%;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.1;
+  text-wrap: balance;
+}
+
+.ai-part {
+  margin-top: var(--space-xl);
+}
+
+.ai-part .section-title {
+  margin-bottom: var(--space-s);
+}
+
+.ai-tags {
+  margin-top: var(--space-xl);
+  padding-top: var(--space-s);
+  border-top: 1px solid var(--rule);
+}
+
+.ai-tags .ledger-row:first-child {
+  padding-top: 0.25rem;
+}
+
+/* ---------- How Congress voted (spec 4.45): official roll calls, never sealed ---------- */
+
+.tallies {
+  display: grid;
+  gap: var(--space-xl);
+}
+
+/* The app's phone form: "✓ YEA" and "✕ NAY" over a heavy rule, the chamber with its figures, the split bar. */
+.tally-sheet {
+  --tally-columns: minmax(0, 1fr) repeat(2, minmax(min-content, 4rem));
+}
+
+.tally-head,
+.tally-row {
+  display: grid;
+  grid-template-columns: var(--tally-columns);
+  align-items: end;
+  column-gap: var(--space-s);
+}
+
+.tally-head {
+  padding-bottom: 0.375rem;
+  border-bottom: 1.5px solid var(--rule-heavy);
+  font-size: 0.71875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tally-head span {
+  text-align: right;
+}
+
+.tally-yea {
+  color: var(--vote-yea);
+}
+
+.tally-nay {
+  color: var(--vote-nay);
+}
+
+.tally-row {
+  padding-top: var(--space-s);
+  align-items: baseline;
+}
+
+.tally-figure {
+  font: 500 1.125rem/1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* The split: Yea from the start, Nay from the end, a 2 px tick at 50%. */
+.tally-bar {
+  position: relative;
+  display: flex;
+  height: 8px;
+  margin: 0.4375rem 0 var(--space-xs);
+  background: var(--well);
+}
+
+.tally-bar-yea {
+  background: var(--vote-yea);
+}
+
+.tally-bar-nay {
+  margin-left: auto;
+  background: var(--vote-nay);
+}
+
+.tally-bar::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  left: calc(50% - 1px);
+  width: 2px;
+  background: var(--ink);
+}
+
+.tally-caption {
+  margin-top: 2px;
+}
+
+.tally-result {
+  margin-top: var(--space-xs);
+  font-size: 0.875rem;
+  color: var(--ink-2);
+}
+
+/* ---------- Invite ---------- */
+
+.invite {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-s);
+  margin-top: var(--space-l);
+}
+
+/* ---------- Results, sealed (spec 3.8, as reference): the share page never shows other people's votes ---------- */
+
+.sealed-sheet {
+  position: relative;
+  margin-bottom: var(--space-l);
+  /* The figure columns never get narrower than their heads, and give way to the label column first. */
+  --sealed-columns: minmax(0, 1fr) repeat(2, minmax(min-content, 3.25rem)) minmax(min-content, 3.75rem);
+}
+
+.sealed-head,
+.sealed-row {
+  display: grid;
+  grid-template-columns: var(--sealed-columns);
+  align-items: end;
+  column-gap: var(--space-s);
+}
+
+.sealed-head {
+  padding-bottom: 0.375rem;
+  border-bottom: 1.5px solid var(--rule-heavy);
+  font-size: 0.71875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+/* The heads keep to one line while they fit, and wrap under 200% text on a narrow phone. */
+.sealed-head span {
+  text-align: right;
+}
+
+.sealed-head .sealed-yea {
+  color: var(--vote-yea);
+}
+
+.sealed-head .sealed-nay {
+  color: var(--vote-nay);
+}
+
+.sealed-row {
+  padding-top: var(--space-m);
+}
+
+@media (max-width: 399px) {
+  .sealed-sheet {
+    --sealed-columns: minmax(0, 1fr) repeat(2, minmax(min-content, 2.875rem)) minmax(min-content, 3.25rem);
+  }
+}
+
+/* A blank cell: a dotted line on the baseline. */
+.sealed-blank {
+  justify-self: end;
+  width: 1.875rem;
+  height: 1px;
+  margin-bottom: 0.3em;
+  background: linear-gradient(to right, var(--rule-2) 1px, transparent 1px) left / 3.5px 1px repeat-x;
+}
+
+/* An empty bar: an outline and no fill. */
+.sealed-bar {
+  height: 8px;
+  margin: 0.4375rem 0 var(--space-xs);
+  border: 1px solid var(--rule-2);
+}
+
+.sealed-sheet .stamp-sealed {
+  position: absolute;
+  top: 62%;
+  left: 50%;
+  min-height: 1.75rem;
+  padding: 2px 0.625rem 0;
+  background: var(--document);
+  font-size: 0.78125rem;
+  transform: translate(-50%, -50%);
+}
+
+.sealed-line {
+  margin-bottom: var(--space-xs);
+}
+
+.sealed-text {
+  color: var(--ink-2);
+}
+
+/* ---------- Help: the contents list ---------- */
+
+.policy-body .page-contents {
+  margin-bottom: var(--space-l);
+}
+
+.policy-body .page-contents h2 {
+  margin: 0 0 var(--space-xs);
+  padding: 0;
+  border: 0;
+}
+
+.policy-body .page-contents ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-text);
+}
+
+.policy-body .page-contents li + li {
+  margin-top: 0;
+}
+
+.policy-body .page-contents a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+}
+
+/* ---------- Roadmap ---------- */
+
+.page-front {
+  display: grid;
+  gap: var(--space-l);
+  max-width: 44rem;
+  padding-bottom: var(--space-xl);
+}
+
+.page-front .hero-note {
+  max-width: 40rem;
+}
+
+.page-front + .double-rule {
+  margin-bottom: var(--space-xxl);
+}
+
+.roadmap-note {
+  display: grid;
+  gap: var(--space-m);
+  max-width: 44rem;
+  margin-bottom: var(--space-xxxl);
+}
+
+.roadmap-note-closing {
+  margin: var(--space-xxxl) 0 0;
+}
+
+.roadmap-note p {
+  color: var(--ink-2);
+}
+
+.roadmap-timeline {
+  display: grid;
+  gap: var(--space-xxxl);
+}
+
+.roadmap-stage {
+  display: grid;
+  gap: var(--space-m);
+}
+
+.roadmap-stage-header {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-s);
+}
+
+/* The stamp keeps its own width; the title takes the column, so a long word wraps inside it. */
+.roadmap-stage-header .title {
+  justify-self: stretch;
+}
+
+.roadmap-stage > p {
+  max-width: 44rem;
+  color: var(--ink-2);
+}
+
+.roadmap-list {
+  display: grid;
+  gap: 0 var(--space-xl);
+  padding: 0;
+  list-style: none;
+}
+
+.roadmap-list li {
+  padding: var(--space-m) 0;
+  border-top: 1px solid var(--rule);
+}
+
+.roadmap-list strong {
+  display: block;
+  margin-bottom: var(--space-xs);
+}
+
+.roadmap-list span {
+  display: block;
+  color: var(--ink-2);
+}
+
+@media (min-width: 720px) {
+  .roadmap-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ---------- Privacy policy: legal text, set as a document ---------- */
+
+.policy {
+  max-width: 44rem;
+  margin-inline: auto;
+}
+
+.policy .page-front {
+  gap: var(--space-m);
+  padding-bottom: var(--space-l);
+}
+
+.policy .page-front + .double-rule {
+  margin-bottom: var(--space-xl);
+}
+
+.policy-body {
+  font: 400 1.0625rem/1.55 var(--font-serif);
+  color: var(--ink);
+}
+
+.policy-body p,
+.policy-body ul {
+  margin-bottom: var(--space-l);
+}
+
+.policy-body h2 {
+  margin: var(--space-xxl) 0 var(--space-m);
+  padding-top: var(--space-l);
+  border-top: 1px solid var(--rule);
+}
+
+.policy-body ul {
+  padding-left: 1.25rem;
+}
+
+.policy-body li + li {
+  margin-top: var(--space-s);
+}
+
+.policy-body li::marker {
+  color: var(--ink-3);
+}
+
+/* The address moves to the next line whole rather than breaking at its hyphen. */
+.policy-body a {
+  display: inline-block;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+
+.policy-back-link {
+  margin-top: var(--space-xxl);
+  padding-top: var(--space-m);
+  border-top: 1px solid var(--rule);
+  font-family: var(--font-text);
+}
+
+/* ---------- Footer ---------- */
+
+.site-footer {
+  width: min(100% - 2 * var(--gutter), 1080px);
+  margin-inline: auto;
+  padding: var(--space-l) 0 var(--space-xxxl);
+  border-top: 1px solid var(--rule);
+}
+
+.site-footer p,
+.footer-links {
+  max-width: 44rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+/* How Billboard works, Help and Privacy: each link a 44 px target, like the masthead's. */
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-l);
+  margin-top: var(--space-s);
+  padding: 0;
+  list-style: none;
+}
+
+.footer-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.footer-links a[aria-current="page"] {
+  font-weight: 600;
+  text-decoration: none;
+}
+
+body[data-view="share"] .site-footer p,
+body[data-view="share"] .footer-links {
+  margin-inline: auto;
+}
+
+body.document-page .site-footer p,
+body.document-page .footer-links {
+  margin-inline: auto;
+}
+
+@media (min-width: 900px) {
+  body[data-view="share"] .site-footer {
+    width: min(100% - 2 * var(--gutter), 44rem);
+  }
+}
+
+/* ---------- Forced colours (Windows contrast themes) ---------- */
+
+@media (forced-colors: active) {
+  .site-nav a[aria-current="page"] {
+    border-color: CanvasText;
+  }
+
+  .button,
+  .store-btn {
+    border-color: ButtonText;
+  }
+
+  .ledger-row,
+  .ruled-list li {
+    border-top: 1px dotted CanvasText;
+  }
+
+  .ledger-row:first-child,
+  .ruled-list li:first-child {
+    border-top: 0;
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "_comment": "BillboardUserPool as main synthesized it at 717d67f (REL-54 step 1 merged and deployed), byte for byte the live UserAPIServiceStack template on 2026-10-29 (aws cloudformation get-template). infra/test/app-wide-invariants.test.ts compares the app's pool with it: the logical id and every property but the four email ones REL-54 step 2 changes must stay as here. A later pull request that changes the pool on purpose updates this file, after checking the property's update behavior (docs/RUNBOOK.md 23.4).",
+  "stack": "UserAPIServiceStack",
+  "logicalId": "BillboardUserPoolC41FE3DD",
+  "resource": {
+    "Type": "AWS::Cognito::UserPool",
+    "Properties": {
+      "AccountRecoverySetting": {
+        "RecoveryMechanisms": [
+          {
+            "Name": "verified_email",
+            "Priority": 1
+          }
+        ]
+      },
+      "AdminCreateUserConfig": {
+        "AllowAdminCreateUserOnly": false
+      },
+      "AutoVerifiedAttributes": [
+        "email"
+      ],
+      "DeletionProtection": "ACTIVE",
+      "EmailVerificationMessage": "Thanks for signing up for BillBoard! Your verification code is {####}",
+      "EmailVerificationSubject": "Verify your email for BillBoard!",
+      "EnabledMfas": [
+        "SOFTWARE_TOKEN_MFA"
+      ],
+      "LambdaConfig": {
+        "PreSignUp": {
+          "Ref": "PreSignUpCheckProdAlias8E7D75B7"
+        }
+      },
+      "MfaConfiguration": "OPTIONAL",
+      "Schema": [
+        {
+          "Mutable": true,
+          "Name": "email",
+          "Required": true
+        },
+        {
+          "Mutable": true,
+          "Name": "address",
+          "Required": false
+        },
+        {
+          "Mutable": true,
+          "Name": "given_name",
+          "Required": false
+        },
+        {
+          "Mutable": true,
+          "Name": "family_name",
+          "Required": false
+        },
+        {
+          "AttributeDataType": "String",
+          "Mutable": true,
+          "Name": "state",
+          "StringAttributeConstraints": {
+            "MaxLength": "2"
+          }
+        },
+        {
+          "AttributeDataType": "String",
+          "Mutable": true,
+          "Name": "district",
+          "StringAttributeConstraints": {
+            "MaxLength": "16"
+          }
+        },
+        {
+          "AttributeDataType": "String",
+          "Mutable": true,
+          "Name": "politicalParty",
+          "StringAttributeConstraints": {
+            "MaxLength": "32"
+          }
+        }
+      ],
+      "SmsVerificationMessage": "The verification code to your new account is {####}",
+      "UserPoolName": "BillboardUserPool",
+      "UserPoolTags": {
+        "project": "billboard",
+        "service": "UserAPIServiceStack"
+      },
+      "UsernameAttributes": [
+        "email"
+      ],
+      "VerificationMessageTemplate": {
+        "DefaultEmailOption": "CONFIRM_WITH_CODE",
+        "EmailMessage": "Thanks for signing up for BillBoard! Your verification code is {####}",
+        "EmailSubject": "Verify your email for BillBoard!",
+        "SmsMessage": "The verification code to your new account is {####}"
+      }
+    },
+    "UpdateReplacePolicy": "Retain",
+    "DeletionPolicy": "Retain",
+    "Metadata": {
+      "aws:cdk:path": "UserAPIServiceStack/BillboardUserPool/Resource"
+    }
+  }
+}

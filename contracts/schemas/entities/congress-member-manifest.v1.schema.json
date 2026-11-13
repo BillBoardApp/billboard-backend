@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.billboard/schemas/entities/congress-member-manifest.v1.schema.json",
+  "title": "CongressMembersManifestV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["generatedAt", "count", "members"],
+  "properties": {
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "members": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/member" }
+    }
+  },
+  "$defs": {
+    "member": {
+      "title": "CongressMemberManifestItemV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bioguideId", "name", "chamber", "state", "party", "district", "depictionImageUrl", "updatedAt"],
+      "properties": {
+        "bioguideId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "chamber": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "type": "string",
+          "minLength": 1
+        },
+        "party": {
+          "type": "string",
+          "minLength": 1
+        },
+        "district": {
+          "type": ["string", "null"]
+        },
+        "depictionImageUrl": {
+          "type": ["string", "null"],
+          "format": "uri"
+        },
+        "updatedAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "currentCongressBillsSupportedCount": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "trackedSponsoredCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bills in the 119th Congress that BillBoard tracks and this member sponsored, from BillBoard's own member stats (billsSponsored), not Congress.gov career totals. Absent, with the other two counts, when the member has no stats row (no tracked 119th bill, as for every member new in the 120th Congress) or the stats could not be read; a member with a row gets its counts, zeros included."
+        },
+        "trackedSupportedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bills in the 119th Congress that BillBoard tracks and this member cosponsored, from BillBoard's own member stats (billsSupported), not Congress.gov career totals. Absent, with the other two counts, when the member has no stats row (no tracked 119th bill, as for every member new in the 120th Congress) or the stats could not be read; a member with a row gets its counts, zeros included."
+        }
+      }
+    }
+  }
+}

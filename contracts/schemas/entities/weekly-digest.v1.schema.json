@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.billboard/schemas/entities/weekly-digest.v1.schema.json",
+  "title": "WeeklyDigestV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "summary",
+    "weekStart",
+    "weekEnd",
+    "publishedAt",
+    "isRead",
+    "stats",
+    "sections"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "weekStart": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "weekEnd": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "publishedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "isRead": {
+      "type": "boolean"
+    },
+    "stats": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/weeklyDigestStat" }
+    },
+    "sections": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/weeklyDigestSection" }
+    }
+  },
+  "$defs": {
+    "weeklyDigestStat": {
+      "title": "WeeklyDigestStatV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "value", "accent"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        },
+        "accent": {
+          "title": "WeeklyDigestAccentV1",
+          "type": "string",
+          "enum": ["attention", "movement", "representative", "discovery", "neutral"]
+        }
+      }
+    },
+    "weeklyDigestSection": {
+      "title": "WeeklyDigestSectionV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "title", "items"],
+      "properties": {
+        "kind": {
+          "title": "WeeklyDigestSectionKindV1",
+          "type": "string",
+          "enum": ["needs_attention", "moved_this_week", "representatives", "worth_quick_look"]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "subtitle": {
+          "type": "string",
+          "minLength": 1
+        },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/weeklyDigestItem" }
+        }
+      }
+    },
+    "weeklyDigestItem": {
+      "title": "WeeklyDigestItemV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "title", "summary", "accent"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "title": "WeeklyDigestItemKindV1",
+          "type": "string",
+          "enum": ["bill", "member"]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "eyebrow": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "accent": {
+          "title": "WeeklyDigestAccentV1",
+          "type": "string",
+          "enum": ["attention", "movement", "representative", "discovery", "neutral"]
+        },
+        "billState": {
+          "title": "WeeklyDigestBillStateV1",
+          "type": "string",
+          "enum": ["new", "updated", "passed", "failed", "finalized"]
+        },
+        "billGuid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "primaryMemberBioguideId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

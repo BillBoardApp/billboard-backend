@@ -1,0 +1,1712 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Billboard User API",
+    "version": "1.0.0",
+    "description": "Every route of the user API (infra/lib/stacks/user-api-service.ts). Routes use the Cognito authorizer unless they say otherwise. Entity payloads reference the JSON schemas in ../schemas; the smaller request and response bodies are defined here. Error bodies carry error and/or message. The contracts check fails when a route is added to or removed from the stack without updating this file.\n\nApp version and App Attest (INT-04). From R2, the app sends X-Billboard-App-Version (CFBundleShortVersionString, such as 1.2; schema AppVersion) on the user API requests it builds, but not on the presigned snapshot URL, the share site or push registration, so no route may require it. POST /feedback reads it, together with X-Billboard-App-Attest (schema AppAttestMarker); GET /preferences reads only whether it is there, to name the two renamed sub-categories the way the calling build knows them (LLM-10). At sign-up R2 passes Cognito ClientMetadata with the keys billboardAppAttest, billboardDeviceCheck and billboardAppVersion, which the pre-sign-up trigger reads; Cognito is outside this document, so that map is described by the PreSignUpClientMetadata schema. Builds 1.0 and R1 send none of these: that counts as missing and is allowed while APP_ATTEST_MODE is watch."
+  },
+  "servers": [
+    {
+      "url": "https://{apiId}.execute-api.us-east-1.amazonaws.com/prod",
+      "variables": { "apiId": { "default": "example" } }
+    }
+  ],
+  "security": [{ "cognito": [] }],
+  "tags": [
+    { "name": "Bills" },
+    { "name": "Congress members" },
+    { "name": "Votes" },
+    { "name": "Civic profile" },
+    { "name": "Weekly digest" },
+    { "name": "Preferences" },
+    { "name": "Devices" },
+    { "name": "Account" },
+    { "name": "System" }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Health check",
+        "description": "API Gateway mock integration used by the synthetics canary; no Lambda runs.",
+        "tags": ["System"],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The API is up",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Health" } } }
+          }
+        },
+        "x-billboard-handler": "none (API Gateway mock integration)"
+      }
+    },
+    "/register-device": {
+      "post": {
+        "operationId": "registerDevice",
+        "summary": "Register this device for push notifications",
+        "description": "Creates or refreshes the SNS APNs endpoint for the push token and stores it with the device's notification settings (defaults: all on). Another account's row with the same push token is removed.",
+        "tags": ["Devices"],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegisterDeviceRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Device registered",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegisterDeviceResult" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/WriteBlocked" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/registerUserDevice"
+      }
+    },
+    "/device-notification-settings": {
+      "get": {
+        "operationId": "getDeviceNotificationSettings",
+        "summary": "Read a device's notification settings",
+        "description": "Settings that were never stored read as all on.",
+        "tags": ["Devices"],
+        "parameters": [{ "$ref": "#/components/parameters/deviceIdQuery" }],
+        "responses": {
+          "200": {
+            "description": "Current settings",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/DeviceNotificationSettings" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/deviceNotificationSettings"
+      },
+      "put": {
+        "operationId": "updateDeviceNotificationSettings",
+        "summary": "Change a device's notification settings",
+        "description": "Only the flags present in the body change; the others keep their stored (or default) value. device_id comes from the body, or from the query when the body has none.",
+        "tags": ["Devices"],
+        "parameters": [{ "$ref": "#/components/parameters/deviceIdQuery" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/DeviceNotificationSettingsUpdate" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated settings",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/DeviceNotificationSettings" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/WriteBlocked" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/deviceNotificationSettings"
+      }
+    },
+    "/preferences": {
+      "get": {
+        "operationId": "listPreferences",
+        "summary": "List the caller's subscriptions",
+        "description": "Every stored preference, in the stored order. The two renamed sub-categories (LLM-10: Social Justice is Civil Rights and Liberties, Identity Politics is Heritage and Identity) are named the way the calling build knows them: with X-Billboard-App-Version (R2 and later) under the current name, without it (builds 1.0 and R1) under the former name, each with its parent category (unchanged by the rename), and without it a Category row's sub_category (which the apps read first) also gives the former name. A label followed under both names is returned once. Every other row is returned as stored.",
+        "tags": ["Preferences"],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": false,
+            "description": "Optional. When present it must equal the caller's Cognito sub, or the request is rejected with 403.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Billboard-App-Version",
+            "in": "header",
+            "required": false,
+            "description": "Sent by R2 and later. Only its presence is read here (any letter case, any non-blank value): it selects the current names of the two renamed sub-categories; without it they are returned under their former names.",
+            "schema": { "$ref": "#/components/schemas/AppVersion" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every stored preference",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Preference" } }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": {
+            "description": "userId does not match the caller",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+          },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/fetchPreferences"
+      },
+      "put": {
+        "operationId": "addPreferences",
+        "summary": "Add subscriptions",
+        "description": "Stores each preference (an existing one with the same value is overwritten). Other preferences are kept.",
+        "tags": ["Preferences"],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PreferenceMutationBody" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Preferences updated",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PreferenceMutationResult" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/WriteBlocked" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/setPreferences"
+      },
+      "delete": {
+        "operationId": "deletePreferences",
+        "summary": "Remove subscriptions",
+        "description": "Deletes the preferences named in the body (matched by value).",
+        "tags": ["Preferences"],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PreferenceMutationBody" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Preferences deleted",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PreferenceMutationResult" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/WriteBlocked" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/deletePreferences"
+      }
+    },
+    "/me": {
+      "get": {
+        "operationId": "getMe",
+        "summary": "Read the caller's account eligibility",
+        "tags": ["Account"],
+        "responses": {
+          "200": {
+            "description": "Eligibility state",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Me" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/fetchMe"
+      }
+    },
+    "/weekly-digests/latest": {
+      "get": {
+        "operationId": "getLatestWeeklyDigest",
+        "summary": "Read the caller's weekly digest for the latest published week",
+        "tags": ["Weekly digest"],
+        "responses": {
+          "200": {
+            "description": "Weekly digest payload",
+            "content": {
+              "application/json": { "schema": { "$ref": "../schemas/entities/weekly-digest.v1.schema.json" } }
+            }
+          },
+          "204": { "description": "No digest was stored for the caller for the latest published week" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/fetchLatestWeeklyDigest"
+      }
+    },
+    "/adult-attestation": {
+      "post": {
+        "operationId": "attestAdult",
+        "summary": "Record whether the caller is 18 or older",
+        "description": "An under-18 answer is final: a later yes is rejected with ADULT_STATUS_LOCKED.",
+        "tags": ["Account"],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdultAttestationRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Attestation stored",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdultAttestationResult" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": {
+            "description": "ACCOUNT_DELETION_IN_PROGRESS, ACCOUNT_DELETED or ADULT_STATUS_LOCKED",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+          },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/adultAttestation"
+      }
+    },
+    "/account-data": {
+      "delete": {
+        "operationId": "deleteAccountData",
+        "summary": "Delete the caller's data",
+        "description": "Deletes votes, preferences, devices and weekly digests, then recomputes the affected bill stats. With deleteSignIn (query) or the x-billboard-delete-sign-in header set to 1 or true, the Cognito user is deleted too; otherwise the client deletes it.",
+        "tags": ["Account"],
+        "parameters": [
+          {
+            "name": "deleteSignIn",
+            "in": "query",
+            "required": false,
+            "description": "1 or true also deletes the Cognito user.",
+            "schema": { "type": "string", "enum": ["1", "true"] }
+          },
+          {
+            "name": "x-billboard-delete-sign-in",
+            "in": "header",
+            "required": false,
+            "description": "Same as the deleteSignIn query parameter.",
+            "schema": { "type": "string", "enum": ["1", "true"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The data was already deleted (deletionStatus completed)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDeletionResult" } } }
+          },
+          "202": {
+            "description": "Deleted now (completed), or another request is already deleting it (in_progress)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDeletionResult" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/accountData"
+      }
+    },
+    "/account-data/status": {
+      "get": {
+        "operationId": "getAccountDataStatus",
+        "summary": "Read the caller's data-deletion status",
+        "tags": ["Account"],
+        "responses": {
+          "200": {
+            "description": "Deletion status",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDataStatus" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/accountDataStatus"
+      }
+    },
+    "/processed-bill": {
+      "get": {
+        "operationId": "getProcessedBill",
+        "summary": "Fetch a processed bill",
+        "tags": ["Bills"],
+        "parameters": [
+          {
+            "name": "guid",
+            "in": "query",
+            "required": false,
+            "description": "Bill guid such as BILLS-119hr1234ih (at most 64 characters). Either guid, or congress + type + bill_id, is required. With a guid, a congress + type that does not match the patterns is ignored.",
+            "schema": { "type": "string", "pattern": "^BILLS-[0-9]+[A-Za-z]+[0-9]+[A-Za-z]*$", "maxLength": 64 }
+          },
+          {
+            "name": "congress",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "pattern": "^[0-9]{1,3}$" }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "Bill type, such as hr or s.",
+            "schema": { "type": "string", "pattern": "^[A-Za-z][A-Za-z-]{0,39}$" }
+          },
+          {
+            "name": "bill_id",
+            "in": "query",
+            "required": false,
+            "description": "Bill number.",
+            "schema": { "type": "string", "pattern": "^[0-9]{1,6}$" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Processed bill, with the active priority fields merged in, plus companionGroup when the bill (or its plain guid, for a guid with a text-version suffix) is in a companion group",
+            "content": {
+              "application/json": { "schema": { "$ref": "../schemas/entities/processed-bill.v1.schema.json" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": {
+            "description": "No processed bill for the locator. Storage errors are also reported as 404.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+          }
+        },
+        "x-billboard-handler": "services/src/handlers/fetchProcessedBill"
+      }
+    },
+    "/public/processed-bill": {
+      "get": {
+        "operationId": "getPublicProcessedBill",
+        "summary": "Fetch a processed bill for the public share page",
+        "description": "Same handler and response as GET /processed-bill. Called only by the share site's CloudFront origin, which adds the API key; the usage plan throttles it (SHARE_PUBLIC_USAGE_PLAN_THROTTLE in infra/lib/config/abuse-limits.ts).",
+        "tags": ["Bills"],
+        "security": [{ "shareApiKey": [] }],
+        "parameters": [
+          {
+            "name": "guid",
+            "in": "query",
+            "required": false,
+            "description": "Bill guid such as BILLS-119hr1234ih (at most 64 characters). Either guid, or congress + type + bill_id, is required. With a guid, a congress + type that does not match the patterns is ignored.",
+            "schema": { "type": "string", "pattern": "^BILLS-[0-9]+[A-Za-z]+[0-9]+[A-Za-z]*$", "maxLength": 64 }
+          },
+          {
+            "name": "congress",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "pattern": "^[0-9]{1,3}$" }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "Bill type, such as hr or s.",
+            "schema": { "type": "string", "pattern": "^[A-Za-z][A-Za-z-]{0,39}$" }
+          },
+          {
+            "name": "bill_id",
+            "in": "query",
+            "required": false,
+            "description": "Bill number.",
+            "schema": { "type": "string", "pattern": "^[0-9]{1,6}$" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Processed bill, with the active priority fields merged in, plus companionGroup when the bill (or its plain guid, for a guid with a text-version suffix) is in a companion group",
+            "content": {
+              "application/json": { "schema": { "$ref": "../schemas/entities/processed-bill.v1.schema.json" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": {
+            "description": "Missing or wrong API key (API Gateway)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+          },
+          "404": {
+            "description": "No processed bill for the locator. Storage errors are also reported as 404.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+          },
+          "429": {
+            "description": "Throttled by the usage plan (API Gateway)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+          }
+        },
+        "x-billboard-handler": "services/src/handlers/fetchProcessedBill"
+      }
+    },
+    "/feedback": {
+      "get": {
+        "operationId": "getFeedback",
+        "summary": "Read the caller's vote on one bill",
+        "description": "An Abstain that builds 1.0 and 1.1 stored when the user dismissed a Passed or Failed bill in Updates is not a vote (INT-11): a request with X-Billboard-App-Version (1.2 and later) gets an empty object for it; one without the header gets it as stored.",
+        "tags": ["Votes"],
+        "parameters": [{ "$ref": "#/components/parameters/billIdQuery" }],
+        "responses": {
+          "200": {
+            "description": "The vote, or an empty object when the caller has not voted",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FeedbackVote" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/fetchFeedback"
+      },
+      "post": {
+        "operationId": "submitFeedback",
+        "summary": "Cast or change the caller's vote on a bill",
+        "description": "The vote row stores weight 1 (every vote counts once, INT-08), the caller's verification state and a snapshot of the bill's civic profile, life areas and sub-categories. Each account may make VOTE_DAILY_LIMIT vote writes (new, changed or Abstain) per UTC day; the 429 for the next one is returned only when VOTE_DAILY_CAP_MODE is enforce. The App Attest checks (X-Billboard-App-Attest, X-Billboard-App-Version) block a vote, with the 403 App Attest codes or the 426, only when APP_ATTEST_MODE is enforce; in watch mode they only record an outcome, and builds without the headers vote as before. An Abstain from a request without X-Billboard-App-Version (builds 1.0 and 1.1, which send one when the user dismisses a Passed or Failed bill in Updates) on a bill that is Passed or Failed, or whose companion is, is stored as a dismissal: it never unlocks GET /bill-stats (INT-11). Answers 500 when the companion groups cannot be read to decide it.",
+        "tags": ["Votes"],
+        "parameters": [
+          { "$ref": "#/components/parameters/appAttestHeader" },
+          { "$ref": "#/components/parameters/appVersionHeader" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SubmitFeedbackRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Feedback submitted",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Message" } } }
+          },
+          "400": {
+            "description": "Missing billId or feedback, invalid feedback or reasons, or unknown billId",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/VoteBlocked" },
+          "426": { "$ref": "#/components/responses/AppUpdateRequired" },
+          "429": { "$ref": "#/components/responses/VoteDailyLimit" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/AppAttestUnavailable" }
+        },
+        "x-billboard-handler": "services/src/handlers/setFeedback"
+      }
+    },
+    "/feedback-batch": {
+      "post": {
+        "operationId": "getFeedbackBatch",
+        "summary": "Read the caller's votes on many bills",
+        "description": "A read that uses POST for its body. Bill ids are trimmed, de-duplicated and capped at 500; bills without a vote are left out. A body without a billIds array falls back to the single-bill lookup of GET /feedback (billId in the body). As there, an Abstain stored for a 1.0 or 1.1 dismissal is left out for a request with X-Billboard-App-Version (INT-11).",
+        "tags": ["Votes"],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FeedbackBatchRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "The caller's votes",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FeedbackBatchResult" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/fetchFeedback"
+      }
+    },
+    "/bill-stats": {
+      "get": {
+        "operationId": "getBillStats",
+        "summary": "Read the community vote stats for a bill",
+        "description": "Only for a caller who has voted Yea, Nay or Abstain on this bill or a member of its companion group (INT-11; an Abstain that builds 1.0 and 1.1 stored for an Updates dismissal does not count); otherwise 403 RESULTS_LOCKED, and nothing is read. billId must be a bill guid (BILLS-<congress><type><number>, with or without a text-version suffix); anything else is 400 INVALID_BILL_ID. Reads the cached aggregate; before one exists every count is zero. The aggregate lags votes by up to about 30 s; with forceRefresh=true, a caller whose own counted vote on this bill is newer than it and less than 2 minutes old gets the bill's votes counted on request instead, with the same floors (bills over about 5,000 votes keep the aggregate). With scope=companions on a bill in a companion group the same holds for the group: the caller's vote the group counts (on the primary when it is a vote, else on the other member) and the group's aggregate, both members' votes counted on request one per person (groups whose members hold over about 5,000 votes between them keep the aggregate). State, district and verified-segment splits under 5 Yea + Nay votes are withheld. With scope=companions and a bill in a companion group (APPF-23), returns the group's combined stats instead: every member's votes, one vote per person (the primary's row wins), computed on request when no group aggregate is cached yet. billId stays the requested guid and companionBillIds lists the members. Every vote counts once (INT-08): every weighted* field equals its plain counterpart, including in aggregates cached before the change. Every 200 body also carries comparison (BillStatsComparison): all users beside verified constituents, national only, with the verified split left out (verifiedWithheld true) under the same floor. A body from an older server has no comparison; clients then use totals and segments.verified.",
+        "tags": ["Votes"],
+        "parameters": [
+          { "$ref": "#/components/parameters/billIdQuery" },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "description": "bill (the default): this bill's own stats. companions: the combined stats of the bill's companion group; for a bill not in a group, the same as bill.",
+            "schema": { "type": "string", "enum": ["bill", "companions"], "default": "bill" }
+          },
+          {
+            "name": "forceRefresh",
+            "in": "query",
+            "required": false,
+            "description": "true right after the caller's vote is saved (builds 1.1 and 1.2 send it about 0 s and 4 s after), so the stats can include that vote before the cached aggregate does; the description gives the limits. Without it, the cached aggregate. The 200 body has the same shape either way.",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bill stats",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BillStats" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/ResultsLocked" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/fetchBillStats"
+      }
+    },
+    "/civic-score": {
+      "get": {
+        "operationId": "getCivicScore",
+        "summary": "Read the caller's civic score, streaks, rank and honors",
+        "description": "A participation record (UX-31): a Yea, Nay or Abstain counts the same, a companion pair once, and a 1.0 or 1.1 Updates dismissal not at all. The score, the rank, longestStreak and the honors never go down: the parts that could are kept on the caller's record, which the first read after UX-31 seeds from what the rule before it gave. A vote counts on the day it was first cast on its bill; changing it adds no day.",
+        "tags": ["Civic profile"],
+        "responses": {
+          "200": {
+            "description": "Civic score",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CivicScore" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/fetchCivicScore"
+      }
+    },
+    "/civic-profile": {
+      "get": {
+        "operationId": "getCivicProfile",
+        "summary": "Read the caller's civic profile",
+        "description": "Averages the civic-profile axes (themes) of the bills in the caller's 100 most recent Yea/Nay votes on bills with theme scores (a Nay flips the sign; a companion pair counts once), normalized from [-1, 1] to [0, 1]. A theme with fewer than 8 of those votes on bills scored on it is left out of axes (UX-32; a member's profile needs 3). The profile is ready (isReady) at 25 of those votes with at least 3 themes at 8, the 3 a chart needs to draw a shape (UX-32, project decision 2026-10-29): it stays locked until it can show one. While it is locked, lockedBy says what holds it and minVotesRequired - votesUsed (at least 1) is how many more votes apps 1.1 and 1.2 ask for. GET /civic-score's Civic Compass honor is earned by the same rule from the votes saved with their bill's themes, so it can come later than the profile and is not earned while it is locked, except by the read that seeds a user's Civic Score record (UX-31), which keeps it on the count before UX-32 (25 Yea/Nay votes); once earned it is kept.",
+        "tags": ["Civic profile"],
+        "responses": {
+          "200": {
+            "description": "Civic profile",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserCivicProfile" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/fetchCivicProfile"
+      }
+    },
+    "/congress-member-civic-profile": {
+      "get": {
+        "operationId": "getCongressMemberCivicProfile",
+        "summary": "Read a Congress member's civic profile",
+        "description": "Computed from the member's official votes and sponsorships. A member with no evidence gets an empty profile (isReady false), not a 404.",
+        "tags": ["Congress members"],
+        "parameters": [
+          {
+            "name": "bioguideId",
+            "in": "query",
+            "required": true,
+            "description": "Bioguide ID (trimmed and upper-cased by the handler; not otherwise validated).",
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Civic profile",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "../schemas/entities/congress-member-civic-profile.v1.schema.json" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/fetchCongressMemberCivicProfile"
+      }
+    },
+    "/district-verification": {
+      "get": {
+        "operationId": "getDistrictVerification",
+        "summary": "Read the caller's district verification",
+        "tags": ["Account"],
+        "responses": {
+          "200": {
+            "description": "Current verification state",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DistrictVerification" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/districtVerification"
+      },
+      "post": {
+        "operationId": "submitDistrictVerification",
+        "summary": "Verify the caller's congressional district",
+        "description": "With an address (line1, city, state, zip), geocodes it with the Census geocoder and marks the caller a likely constituent. With only state and district, records a self-attested district (not verified). The address itself is not stored; a salted one-way hash of the matched address and unit is kept to limit verified accounts per address. Both limits apply only when VERIFICATION_LIMITS_MODE is enforce: an address (matched address and unit) that already has the most verified accounts allowed (MAX_VERIFIED_ACCOUNTS_PER_ADDRESS) still gets a 200, with verified false, status self_attested, method address_capped and limitReason address_limit, so the district is saved but not as verified; and a change to a new address beyond MAX_ADDRESS_CHANGES_PER_WINDOW in the window gets 429 VERIFICATION_RATE_LIMITED.",
+        "tags": ["Account"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/DistrictVerificationRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verification stored",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DistrictVerification" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/WriteBlocked" },
+          "422": {
+            "description": "The address did not resolve to a congressional district",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+          },
+          "429": { "$ref": "#/components/responses/VerificationRateLimited" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/districtVerification"
+      }
+    },
+    "/processed-congress-members": {
+      "get": {
+        "operationId": "getProcessedCongressMember",
+        "summary": "Fetch a processed Congress member",
+        "description": "Returns the stored object, which is the {member} envelope (older objects may be the bare member), with currentCongressBillsSupportedCount, trackedSponsoredCount and trackedSupportedCount added from BillBoard's member stats; all three are left out when the member has no stats row (REL-46) or the stats could not be read (REL-52). terms has one entry per term: Senate service is merged into six-year terms (REL-52).",
+        "tags": ["Congress members"],
+        "parameters": [{ "$ref": "#/components/parameters/bioguideIdQuery" }],
+        "responses": {
+          "200": {
+            "description": "Processed Congress member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/ProcessedCongressMemberEnvelope" },
+                    { "$ref": "../schemas/entities/processed-congress-member.v1.schema.json" }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/fetchProcessedCongressMembers"
+      }
+    },
+    "/congress-members-manifest": {
+      "get": {
+        "operationId": "getCongressMembersManifest",
+        "summary": "Fetch the Congress members manifest",
+        "tags": ["Congress members"],
+        "parameters": [{ "$ref": "#/components/parameters/updatedAfter" }],
+        "responses": {
+          "200": {
+            "description": "Current members, sorted by bioguide ID. currentCongressBillsSupportedCount, trackedSponsoredCount and trackedSupportedCount are left out of a member with no stats row (REL-46) or whose stats could not be read (REL-52).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "../schemas/entities/congress-member-manifest.v1.schema.json" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/fetchCongressMembersManifest"
+      }
+    },
+    "/bills-manifest": {
+      "get": {
+        "operationId": "getBillsManifest",
+        "summary": "Fetch the bills manifest",
+        "tags": ["Bills"],
+        "parameters": [
+          { "$ref": "#/components/parameters/updatedAfter" },
+          {
+            "name": "delivery",
+            "in": "query",
+            "required": false,
+            "description": "When `snapshot` and `updatedAfter` is absent, the response is a BillsManifestSnapshotPointer whose snapshotUrl returns the full BillsManifest as gzip-encoded JSON (no Authorization header; expires at expiresAt). If no snapshot exists yet, the full BillsManifest is returned inline instead.",
+            "schema": { "type": "string", "enum": ["snapshot"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bills, active priorities first, then by most recent update (never by vote count, and no voteCount, INT-11), with every companion group in companionGroups (also on windowed responses); or, with delivery=snapshot and no updatedAfter, a pointer to a snapshot of the full manifest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "../schemas/entities/bills-manifest.v1.schema.json" },
+                    { "$ref": "../schemas/entities/bills-manifest-snapshot-pointer.v1.schema.json" }
+                  ]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/fetchBillsManifest"
+      }
+    },
+    "/app-attest/challenge": {
+      "post": {
+        "operationId": "issueAppAttestChallenge",
+        "summary": "Issue a single-use App Attest challenge",
+        "description": "No Authorization header. Returns a challenge valid for APP_ATTEST_CHALLENGE_TTL_SECONDS (infra/lib/config/abuse-limits.ts). With APP_ATTEST_CLIENT_MODE off, returns {clientMode: off} and stores nothing. The route has its own API Gateway throttle in front of the function's reserved concurrency, so a flood gets 429 without taking capacity from other routes.",
+        "tags": ["Devices"],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AppAttestChallengeRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "A challenge, or clientMode off",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AppAttestChallenge" } } }
+          },
+          "400": {
+            "description": "INVALID_REQUEST: purpose is not attest or assert",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+          },
+          "429": { "description": "Throttled by API Gateway (API Gateway's own body). Back off; R2 sends the vote or sign-up with a v1.e.challenge marker" },
+          "503": { "$ref": "#/components/responses/AppAttestUnavailable" }
+        },
+        "x-billboard-handler": "services/src/handlers/appAttest"
+      }
+    },
+    "/app-attest/attest": {
+      "post": {
+        "operationId": "registerAppAttestKey",
+        "summary": "Register an App Attest key",
+        "description": "No Authorization header. Verifies the attestation offline (Apple's certificate chain, nonce, key ID, app ID, counter 0) and stores the key's public key. Once per app install; repeating it for a stored key returns already_attested and changes nothing.",
+        "tags": ["Devices"],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AppAttestAttestRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "The key is registered",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AppAttestAttestResult" } } }
+          },
+          "400": {
+            "description": "APP_ATTEST_CHALLENGE_INVALID (the challenge is unknown, expired, not for attest, or already used: retry once with a new challenge and the same key) or APP_ATTEST_REJECTED (the attestation failed verification: discard the key and generate a new one next time). The detailed reason is logged only.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+          },
+          "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+          "429": { "description": "Throttled by API Gateway (API Gateway's own body). Keep the key and retry after a back-off, as for 503" },
+          "503": { "$ref": "#/components/responses/AppAttestUnavailable" }
+        },
+        "x-billboard-handler": "services/src/handlers/appAttest"
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cognito": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "A Billboard Cognito user pool ID token in the Authorization header, checked by the API Gateway Cognito authorizer. Handlers take the caller's identity from the token's sub claim."
+      },
+      "shareApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "The share-site API key. Only the share site's CloudFront origin sends it."
+      }
+    },
+    "parameters": {
+      "bioguideIdQuery": {
+        "name": "bioguideId",
+        "in": "query",
+        "required": true,
+        "description": "Bioguide ID, such as D000001 (trimmed and upper-cased by the handler).",
+        "schema": { "type": "string", "pattern": "^\\s*[A-Za-z][0-9]{6}\\s*$" }
+      },
+      "billIdQuery": {
+        "name": "billId",
+        "in": "query",
+        "required": true,
+        "description": "Bill guid.",
+        "schema": { "type": "string", "minLength": 1 }
+      },
+      "deviceIdQuery": {
+        "name": "device_id",
+        "in": "query",
+        "required": false,
+        "description": "The client's device id (required for GET; for PUT it may come from the body instead).",
+        "schema": { "type": "string" }
+      },
+      "updatedAfter": {
+        "name": "updatedAfter",
+        "in": "query",
+        "required": false,
+        "description": "ISO 8601 timestamp. Returns only rows whose manifest sort key (which starts with the row's updatedAt) sorts after it.",
+        "schema": { "type": "string", "format": "date-time" }
+      },
+      "appAttestHeader": {
+        "name": "X-Billboard-App-Attest",
+        "in": "header",
+        "required": false,
+        "description": "App Attest assertion or marker (INT-04), sent by R2 on POST /feedback only. Read case-insensitively, first value, at most 2,048 characters. Absent (builds 1.0 and R1) is the outcome missing. Never blocks while APP_ATTEST_MODE is watch.",
+        "schema": { "$ref": "#/components/schemas/AppAttestMarker" }
+      },
+      "appVersionHeader": {
+        "name": "X-Billboard-App-Version",
+        "in": "header",
+        "required": false,
+        "description": "The app's CFBundleShortVersionString, such as 1.2 (R2 and later). Logged; when APP_ATTEST_MODE is enforce and MIN_APP_VERSION is set, a missing or older version gets 426 APP_UPDATE_REQUIRED.",
+        "schema": { "$ref": "#/components/schemas/AppVersion" }
+      }
+    },
+    "headers": {
+      "RetryAfter": {
+        "description": "Seconds until the limit resets. Set on the handler's own 429s; API Gateway throttling 429s do not carry it.",
+        "schema": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid request",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "Unauthorized": {
+        "description": "Missing or invalid token (API Gateway), or authorizer claims without a sub (handler)",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "WriteBlocked": {
+        "description": "The account cannot write: ACCOUNT_INELIGIBLE (under 18, or deleted) or ACCOUNT_DELETION_IN_PROGRESS",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "NotFound": {
+        "description": "Resource not found",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "InternalError": {
+        "description": "Unexpected error",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "VoteBlocked": {
+        "description": "The vote was refused. ACCOUNT_INELIGIBLE (under 18, or deleted) or ACCOUNT_DELETION_IN_PROGRESS, as for every write. Only when APP_ATTEST_MODE is enforce, and never for members of the App Attest exempt group: APP_ATTEST_REQUIRED (the header says unsupported device, Debug bypass or client error), APP_ATTEST_FAILED (invalid assertion, or a development key when development keys are not allowed; resend once with a fresh challenge), APP_ATTEST_UNKNOWN_KEY (unknown or revoked key; attest a new key and resend once) or DEVICE_ACCOUNT_LIMIT (one account more than the limit voting from one app install).",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "AppUpdateRequired": {
+        "description": "APP_UPDATE_REQUIRED, only when APP_ATTEST_MODE is enforce and the caller is not in the App Attest exempt group: the request has no X-Billboard-App-Attest header (builds 1.0 and R1), or MIN_APP_VERSION is set and X-Billboard-App-Version is missing or older. R2 shows a blocking update alert.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "VoteDailyLimit": {
+        "description": "VOTE_DAILY_LIMIT, only when VOTE_DAILY_CAP_MODE is enforce: the account already made VOTE_DAILY_LIMIT vote writes (new, changed or Abstain) this UTC day, so this vote is not saved. Retry-After is the seconds to the next UTC midnight. API Gateway throttling also answers 429, with only a message and no Retry-After.",
+        "headers": { "Retry-After": { "$ref": "#/components/headers/RetryAfter" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "VerificationRateLimited": {
+        "description": "VERIFICATION_RATE_LIMITED, only when VERIFICATION_LIMITS_MODE is enforce: the account already changed to a new verified address MAX_ADDRESS_CHANGES_PER_WINDOW times in the window, and nothing was changed. Retry-After is the seconds until the oldest of those changes leaves the window. API Gateway throttling also answers 429, with only a message and no Retry-After.",
+        "headers": { "Retry-After": { "$ref": "#/components/headers/RetryAfter" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "AppAttestUnavailable": {
+        "description": "APP_ATTEST_UNAVAILABLE. On the App Attest routes: the App Attest table could not be read or written; keep the key and retry after a back-off. On POST /feedback: only when APP_ATTEST_MODE is enforce and APP_ATTEST_FAIL_CLOSED is true (false by default) and the check failed on the server's side; never in watch.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "PayloadTooLarge": {
+        "description": "PAYLOAD_TOO_LARGE: the request body is larger than the route allows (16 KB for POST /app-attest/attest).",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "ResultsLocked": {
+        "description": "RESULTS_LOCKED (INT-11): the caller has no Yea, Nay or Abstain stored for this bill or any member of its companion group, so no result is sent. Skipping, clearing or a vote that was refused or never reached the server stores nothing and does not unlock; nor does the Abstain builds 1.0 and 1.1 store when the user dismisses a Passed or Failed bill. Clients show the locked Results and ask again once their vote is saved; never retry in a loop.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ApiError" },
+            "example": { "error": "RESULTS_LOCKED", "message": "Vote or abstain on this bill to see its results." }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ApiError": {
+        "title": "ApiErrorV1",
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Machine-readable code or short reason, such as ACCOUNT_INELIGIBLE."
+          },
+          "message": { "type": "string", "description": "Human-readable detail." }
+        }
+      },
+      "Message": { "type": "object", "required": ["message"], "properties": { "message": { "type": "string" } } },
+      "Health": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status"],
+        "properties": { "status": { "type": "string", "const": "ok" } }
+      },
+      "AdultStatus": { "type": "string", "enum": ["attested_adult", "self_reported_under18", "unknown"] },
+      "DeletionStatus": { "type": "string", "enum": ["not_requested", "in_progress", "completed", "failed"] },
+      "Me": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["userId", "adultStatus", "adultMethod", "adultStatusSetAt", "deletionStatus", "canWrite"],
+        "properties": {
+          "userId": { "type": "string", "description": "The caller's Cognito sub." },
+          "adultStatus": { "$ref": "#/components/schemas/AdultStatus" },
+          "adultMethod": { "type": ["string", "null"] },
+          "adultStatusSetAt": { "type": ["string", "null"], "format": "date-time" },
+          "deletionStatus": { "$ref": "#/components/schemas/DeletionStatus" },
+          "canWrite": {
+            "type": "boolean",
+            "description": "False until the caller attests to being an adult, and after deletion starts."
+          }
+        }
+      },
+      "AdultAttestationRequest": {
+        "type": "object",
+        "required": ["isAdult"],
+        "properties": { "isAdult": { "type": "boolean" } }
+      },
+      "AdultAttestationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["adultStatus", "adultMethod", "adultStatusSetAt", "canWrite"],
+        "properties": {
+          "adultStatus": { "type": "string", "enum": ["attested_adult", "self_reported_under18"] },
+          "adultMethod": { "type": "string", "const": "yes_no" },
+          "adultStatusSetAt": { "type": "string", "format": "date-time" },
+          "canWrite": { "type": "boolean" }
+        }
+      },
+      "AccountDeletionResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["deletionStatus", "message"],
+        "properties": {
+          "deletionStatus": { "type": "string", "enum": ["completed", "in_progress"] },
+          "message": { "type": "string" }
+        }
+      },
+      "AccountDataStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deletionStatus",
+          "deletionRequestedAt",
+          "deletionCompletedAt",
+          "deletionError",
+          "adultStatus",
+          "canWrite"
+        ],
+        "properties": {
+          "deletionStatus": {
+            "type": "string",
+            "description": "The stored status (see DeletionStatus); not_requested when none is stored."
+          },
+          "deletionRequestedAt": { "type": ["string", "null"], "format": "date-time" },
+          "deletionCompletedAt": { "type": ["string", "null"], "format": "date-time" },
+          "deletionError": { "type": ["string", "null"] },
+          "adultStatus": { "$ref": "#/components/schemas/AdultStatus" },
+          "canWrite": { "type": "boolean" }
+        }
+      },
+      "RegisterDeviceRequest": {
+        "type": "object",
+        "required": ["device_id", "platform", "push_token"],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,128}$",
+            "description": "Client-generated device id."
+          },
+          "platform": { "type": "string", "const": "ios" },
+          "push_token": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{16,512}$",
+            "description": "APNs device token, hex."
+          }
+        }
+      },
+      "RegisterDeviceResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message", "endpointArn"],
+        "properties": {
+          "message": { "type": "string", "const": "Device registered" },
+          "endpointArn": { "type": "string", "description": "The SNS platform endpoint ARN." }
+        }
+      },
+      "DeviceNotificationSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "device_id",
+          "notifications_enabled",
+          "notify_new",
+          "notify_updated",
+          "notify_alert",
+          "notify_passed",
+          "notify_failed"
+        ],
+        "properties": {
+          "device_id": { "type": "string" },
+          "notifications_enabled": { "type": "boolean", "description": "Master switch." },
+          "notify_new": { "type": "boolean" },
+          "notify_updated": { "type": "boolean" },
+          "notify_alert": { "type": "boolean" },
+          "notify_passed": { "type": "boolean" },
+          "notify_failed": { "type": "boolean" }
+        }
+      },
+      "DeviceNotificationSettingsUpdate": {
+        "type": "object",
+        "properties": {
+          "device_id": { "type": "string" },
+          "notifications_enabled": { "type": "boolean" },
+          "notify_new": { "type": "boolean" },
+          "notify_updated": { "type": "boolean" },
+          "notify_alert": { "type": "boolean" },
+          "notify_passed": { "type": "boolean" },
+          "notify_failed": { "type": "boolean" }
+        }
+      },
+      "Preference": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["preference", "type", "category", "sub_category"],
+        "properties": {
+          "preference": {
+            "type": ["string", "null"],
+            "description": "The subscribed value (see PreferenceMutation). A Category row of a renamed sub-category (LLM-10) is returned under its current name (Civil Rights and Liberties, Heritage and Identity) when the request carries X-Billboard-App-Version, and under its former name (Social Justice, Identity Politics) when it does not, whichever name it is stored under, de-duplicated."
+          },
+          "type": { "type": ["string", "null"] },
+          "category": { "type": ["string", "null"] },
+          "sub_category": {
+            "type": ["string", "null"],
+            "description": "Legacy rows only. The apps read it before preference when it is set. Returned as stored when the request carries X-Billboard-App-Version (R2 maps either name of a renamed sub-category itself). Without the header, a Category row's sub_category that names a renamed sub-category (LLM-10) is returned under its former name (Social Justice, Identity Politics)."
+          }
+        }
+      },
+      "PreferenceMutation": {
+        "type": "object",
+        "required": ["preference", "type"],
+        "description": "Must not carry the user id; the handler takes it from the token.",
+        "properties": {
+          "preference": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A sub-category (type Category), a life area (Life Area), a bill guid such as BILLS-119hr1234 (Bill, written with a vote, and Watch), a bioguide ID (Congress Member), or bills, joint_resolutions or other_resolutions (Content Type). A bill guid with a text-version suffix (BILLS-119hr1234ih) or in another case is stored under its plain guid (REL-42); a DELETE of a Bill or Watch removes the row under the plain guid, under the id as sent, and under every suffixed id of that bill the user has a row under. For Category, the former names \"Social Justice\" and \"Identity Politics\" are accepted during the label switch (LLM-10, until the legacy-name cleanup) and stored under their new names, \"Civil Rights and Liberties\" and \"Heritage and Identity\", with the same parent category; a DELETE with either name removes the row under both names."
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Bill, Watch, Category, Life Area, Congress Member or Content Type, matched case-insensitively (life_area and lifearea also work). Category, Life Area, Bill, Watch and Content Type values are validated."
+          },
+          "category": {
+            "type": "string",
+            "description": "The sub-category's parent category (required for Category); must be empty for Bill, Watch and Content Type."
+          }
+        }
+      },
+      "PreferenceMutationBody": {
+        "description": "One preference, an array of them, or {preferences: [...]}.",
+        "oneOf": [
+          { "$ref": "#/components/schemas/PreferenceMutation" },
+          { "type": "array", "minItems": 1, "items": { "$ref": "#/components/schemas/PreferenceMutation" } },
+          {
+            "type": "object",
+            "required": ["preferences"],
+            "properties": {
+              "preferences": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "#/components/schemas/PreferenceMutation" }
+              }
+            }
+          }
+        ]
+      },
+      "PreferenceMutationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message", "count"],
+        "properties": { "message": { "type": "string" }, "count": { "type": "integer", "minimum": 1 } }
+      },
+      "FeedbackValue": { "type": "string", "enum": ["Yea", "Nay", "Abstain"] },
+      "FeedbackReason": {
+        "type": "string",
+        "enum": [
+          "morals_values",
+          "constitutional_rights",
+          "economic_impact",
+          "taxes_spending",
+          "public_safety",
+          "healthcare",
+          "education",
+          "environment",
+          "national_security",
+          "privacy_liberty",
+          "local_community",
+          "trust_sponsor",
+          "evidence_data",
+          "need_more_info"
+        ]
+      },
+      "SubmitFeedbackRequest": {
+        "type": "object",
+        "required": ["billId", "feedback"],
+        "properties": {
+          "billId": { "type": "string", "minLength": 1, "description": "Bill guid; must be in the bills manifest." },
+          "feedback": { "$ref": "#/components/schemas/FeedbackValue" },
+          "reasons": {
+            "type": "array",
+            "maxItems": 3,
+            "items": { "$ref": "#/components/schemas/FeedbackReason" },
+            "description": "Up to three distinct reasons; duplicates are dropped."
+          }
+        }
+      },
+      "FeedbackVote": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Empty when the caller has not voted on the bill.",
+        "properties": {
+          "feedback": { "type": "string", "description": "As stored; setFeedback writes Yea, Nay or Abstain." },
+          "votedAt": { "type": ["string", "null"], "format": "date-time" },
+          "reasons": { "type": "array", "items": { "type": "string" }, "description": "Reason keys as stored, sorted." }
+        }
+      },
+      "FeedbackBatchRequest": {
+        "type": "object",
+        "required": ["billIds"],
+        "properties": { "billIds": { "type": "array", "items": { "type": "string" } } }
+      },
+      "FeedbackBatchResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["votes"],
+        "properties": {
+          "votes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["billId", "feedback", "votedAt", "reasons"],
+              "properties": {
+                "billId": { "type": "string" },
+                "feedback": { "type": "string", "description": "As stored; setFeedback writes Yea, Nay or Abstain." },
+                "votedAt": { "type": ["string", "null"], "format": "date-time" },
+                "reasons": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Reason keys as stored, sorted."
+                }
+              }
+            }
+          }
+        }
+      },
+      "VoteBucket": {
+        "type": "object",
+        "description": "Vote counts for one scope. Percentages are 0 to 100 over Yea + Nay, null when there are none. Every vote counts 1 (INT-08), so each weighted* field equals its plain counterpart (weightedVotes = votes, ..., weightedYeaPct = yeaPct). The weighted* fields stay, still required, for app builds 1.0 and R1, which decode them; new clients read the plain fields and BillStats.comparison. No field is removed.",
+        "additionalProperties": false,
+        "required": [
+          "votes",
+          "yea",
+          "nay",
+          "abstain",
+          "decisionVotes",
+          "yeaPct",
+          "weightedVotes",
+          "weightedYea",
+          "weightedNay",
+          "weightedAbstain",
+          "weightedDecisionVotes",
+          "weightedYeaPct"
+        ],
+        "properties": {
+          "votes": { "type": "integer", "minimum": 0 },
+          "yea": { "type": "integer", "minimum": 0 },
+          "nay": { "type": "integer", "minimum": 0 },
+          "abstain": { "type": "integer", "minimum": 0 },
+          "decisionVotes": { "type": "integer", "minimum": 0, "description": "yea + nay." },
+          "yeaPct": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+          "weightedVotes": { "type": "number", "minimum": 0 },
+          "weightedYea": { "type": "number", "minimum": 0 },
+          "weightedNay": { "type": "number", "minimum": 0 },
+          "weightedAbstain": { "type": "number", "minimum": 0 },
+          "weightedDecisionVotes": { "type": "number", "minimum": 0 },
+          "weightedYeaPct": { "type": ["number", "null"], "minimum": 0, "maximum": 100 }
+        }
+      },
+      "VoteSegments": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["verified", "selfAttested"],
+        "description": "Both segments are all zero when the verified segment is under the sample floor.",
+        "properties": {
+          "verified": { "$ref": "#/components/schemas/VoteBucket" },
+          "selfAttested": { "$ref": "#/components/schemas/VoteBucket" }
+        }
+      },
+      "VoteSplit": {
+        "title": "VoteSplitV1",
+        "type": "object",
+        "description": "Plain vote counts for one group of voters, every vote counted once. yeaPct is 0 to 100 over Yea + Nay, null when there are none.",
+        "additionalProperties": false,
+        "required": ["votes", "yea", "nay", "abstain", "decisionVotes", "yeaPct"],
+        "properties": {
+          "votes": { "type": "integer", "minimum": 0, "description": "Yea + Nay + Abstain." },
+          "yea": { "type": "integer", "minimum": 0 },
+          "nay": { "type": "integer", "minimum": 0 },
+          "abstain": { "type": "integer", "minimum": 0 },
+          "decisionVotes": { "type": "integer", "minimum": 0, "description": "yea + nay." },
+          "yeaPct": { "type": ["number", "null"], "minimum": 0, "maximum": 100 }
+        }
+      },
+      "BillStatsComparison": {
+        "title": "BillStatsComparisonV1",
+        "type": "object",
+        "description": "All users beside verified constituents, national only (INT-08). allUsers is the plain split of totals; verified is the plain split of segments.verified. When the verified segment has fewer than minDecisionVotes Yea + Nay votes, or the sample floor emptied the segments, verifiedWithheld is true and verified is absent. Absent from bodies an older server sends.",
+        "additionalProperties": false,
+        "required": ["allUsers", "verifiedWithheld", "minDecisionVotes"],
+        "properties": {
+          "allUsers": { "$ref": "#/components/schemas/VoteSplit" },
+          "verified": { "$ref": "#/components/schemas/VoteSplit" },
+          "verifiedWithheld": { "type": "boolean" },
+          "minDecisionVotes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The floor: Yea + Nay votes a group needs before its split is shown (5 today)."
+          }
+        },
+        "if": { "type": "object", "properties": { "verifiedWithheld": { "const": true } } },
+        "then": { "not": { "required": ["verified"] } },
+        "else": { "required": ["verified"] }
+      },
+      "ReasonBreakdownSide": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["voteCount", "reasons"],
+        "properties": {
+          "voteCount": { "type": "integer", "minimum": 0 },
+          "reasons": {
+            "type": "array",
+            "description": "Reasons given at least minCount times, most frequent first.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["reasonKey", "count", "pct"],
+              "properties": {
+                "reasonKey": { "type": "string" },
+                "count": { "type": "integer", "minimum": 0 },
+                "pct": { "type": "number", "minimum": 0, "maximum": 100 }
+              }
+            }
+          }
+        }
+      },
+      "BillStats": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["billId", "generatedAt", "totals", "segments", "rollups", "reasonBreakdown"],
+        "properties": {
+          "billId": { "type": "string" },
+          "companionBillIds": {
+            "type": "array",
+            "minItems": 2,
+            "items": { "type": "string" },
+            "description": "Present only for scope=companions on a grouped bill: members whose votes were combined, one vote per person (primary's wins)."
+          },
+          "generatedAt": { "type": "string", "format": "date-time" },
+          "totals": { "$ref": "#/components/schemas/VoteBucket" },
+          "segments": { "$ref": "#/components/schemas/VoteSegments" },
+          "comparison": { "$ref": "#/components/schemas/BillStatsComparison" },
+          "rollups": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["byState", "byDistrict"],
+            "properties": {
+              "byState": {
+                "type": "object",
+                "description": "Keyed by state code. States and districts under the sample floor are left out.",
+                "additionalProperties": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["state", "totals", "segments"],
+                  "properties": {
+                    "state": { "type": "string" },
+                    "totals": { "$ref": "#/components/schemas/VoteBucket" },
+                    "segments": { "$ref": "#/components/schemas/VoteSegments" }
+                  }
+                }
+              },
+              "byDistrict": {
+                "type": "object",
+                "description": "Keyed by district id, such as CA-12.",
+                "additionalProperties": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["state", "district", "totals", "segments"],
+                  "properties": {
+                    "state": { "type": "string" },
+                    "district": { "type": "string" },
+                    "totals": { "$ref": "#/components/schemas/VoteBucket" },
+                    "segments": { "$ref": "#/components/schemas/VoteSegments" }
+                  }
+                }
+              }
+            }
+          },
+          "reasonBreakdown": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["minCount", "yea", "nay"],
+            "properties": {
+              "minCount": { "type": "integer", "minimum": 1 },
+              "yea": { "$ref": "#/components/schemas/ReasonBreakdownSide" },
+              "nay": { "$ref": "#/components/schemas/ReasonBreakdownSide" }
+            }
+          }
+        }
+      },
+      "CivicRank": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "minScore", "approxVotesRequired"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable: citizen, voice, delegate (titled Stalwart since UX-31; app 1.1 colours by id), steward, advocate, champion."
+          },
+          "title": { "type": "string", "description": "What the apps show." },
+          "minScore": { "type": "integer", "minimum": 0 },
+          "approxVotesRequired": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "CivicHonor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "description", "bonusScore", "category"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "bonusScore": { "type": "integer", "minimum": 0 },
+          "category": { "type": "string", "enum": ["participation", "consistency", "breadth", "identity", "unlock"] }
+        }
+      },
+      "CivicScore": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "civicScore",
+          "totalVotes",
+          "currentStreak",
+          "longestStreak",
+          "lastVotedAt",
+          "recentVoteDays",
+          "voteScore",
+          "streakBonus",
+          "honorBonus",
+          "coverageAreaCount",
+          "rank",
+          "nextRank",
+          "scoreToNextRank",
+          "honors"
+        ],
+        "properties": {
+          "civicScore": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "voteScore + streakBonus + honorBonus. Never goes down."
+          },
+          "totalVotes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Bills voted on now: Yea, Nay and Abstain, a companion pair once."
+          },
+          "currentStreak": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Consecutive days with a first vote on a bill, ending today or yesterday. Days are America/New_York calendar days; a user's days before their switch (the first Eastern midnight after their first read after UX-31) stay UTC days."
+          },
+          "longestStreak": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The best streak ever, in days. Never goes down."
+          },
+          "lastVotedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the latest first vote on a bill was cast."
+          },
+          "recentVoteDays": {
+            "type": "array",
+            "description": "The last 30 days, as currentStreak counts them, oldest first; count is the bills first voted on that day.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["date", "count"],
+              "properties": {
+                "date": { "type": "string", "format": "date" },
+                "count": { "type": "integer", "minimum": 0 }
+              }
+            }
+          },
+          "voteScore": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "10 for each vote counted. A vote that later leaves the count (a companion pair published over two votes, a 1.0 or 1.1 dismissal written over a vote) keeps its 10, so it can exceed 10 x totalVotes. Never goes down."
+          },
+          "streakBonus": { "type": "integer", "minimum": 0, "description": "5 x longestStreak." },
+          "honorBonus": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The bonuses of the honors earned; an honor once earned is kept."
+          },
+          "coverageAreaCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Distinct life areas and sub-categories voted on (Abstain included)."
+          },
+          "rank": { "$ref": "#/components/schemas/CivicRank" },
+          "nextRank": { "oneOf": [{ "$ref": "#/components/schemas/CivicRank" }, { "type": "null" }] },
+          "scoreToNextRank": { "type": "integer", "minimum": 0 },
+          "honors": {
+            "type": "array",
+            "description": "Every honor earned, in the ladder's order, including one whose condition no longer holds.",
+            "items": { "$ref": "#/components/schemas/CivicHonor" }
+          }
+        }
+      },
+      "UserCivicProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["axes", "votesUsed", "totalVotesWithProfile", "minVotesRequired", "isReady"],
+        "properties": {
+          "axes": {
+            "$ref": "../schemas/entities/congress-member-civic-profile.v1.schema.json#/$defs/normalizedCivicProfileScores"
+          },
+          "votesUsed": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Yea/Nay votes in the window (at most 100): the caller's most recent votes on bills with theme scores."
+          },
+          "totalVotesWithProfile": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "All the caller's Yea/Nay votes on bills with theme scores; above votesUsed only past the 100-vote window."
+          },
+          "minVotesRequired": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The votes in the window the profile needs before it can unlock; both apps ask for minVotesRequired - votesUsed more votes while isReady is false. 25 when ready. While locked (UX-32): votesUsed plus the larger of two shortfalls, each a lower bound on the further votes it needs, 25 less votesUsed and minThemeVotes less the votes of the theme ranked 3rd by votes (one bill can count toward several themes), at least 1. So it is 25 for a caller with no votes and whenever the votes' shortfall is not the smaller (always so under 18 votes), and minVotesRequired - votesUsed is 1 to minThemeVotes while lockedBy is themes. Under the 100-vote window that difference never rises as votes on bills not yet in the window are added, so it does not jump up at 25 votes. A vote on the other bill of a companion pair already voted on replaces that vote in the window (the primary's row counts, an Abstain too), so it can raise that difference by 1. It can exceed 100 when votesUsed is 100: each new vote then pushes the oldest out of the window, so that difference can go back up after a vote, never above minThemeVotes."
+          },
+          "isReady": {
+            "type": "boolean",
+            "description": "The profile is unlocked: at least 25 votes in the window and at least minThemesRequired themes with minThemeVotes votes each (UX-32), so axes always has enough themes for a chart shape."
+          },
+          "lockedBy": {
+            "oneOf": [{ "type": "string", "enum": ["votes", "themes"] }, { "type": "null" }],
+            "description": "UX-32, additive. The shortfall that sets minVotesRequired while the profile is locked: themes when minThemeVotes less the votes of the theme ranked 3rd by votes is larger than 25 less votesUsed (always from 25 votes, when fewer than minThemesRequired themes have minThemeVotes votes; under 25 votes only when the themes are short by more than the votes), otherwise votes (votesUsed under 25, its shortfall the larger or equal). null when ready; absent from a server before UX-32. Clients should read an unknown value as votes."
+          },
+          "themesReady": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 6,
+            "description": "UX-32, additive. Themes with at least minThemeVotes votes in the window: the themes in axes."
+          },
+          "minThemesRequired": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "UX-32, additive. Themes with minThemeVotes votes the profile needs to unlock (3)."
+          },
+          "minThemeVotes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "UX-32, additive. Votes in the window on bills scored on a theme before the theme gets a score (8; a member's needs 3)."
+          }
+        }
+      },
+      "DistrictVerificationRequest": {
+        "type": "object",
+        "description": "Either an address (line1, city, state, zip; district optional as a claim to compare) or state + district for a self-attested district.",
+        "properties": {
+          "line1": { "type": "string" },
+          "line2": { "type": "string" },
+          "city": { "type": "string" },
+          "state": { "type": "string", "description": "Two-letter state code or state name." },
+          "zip": { "type": "string" },
+          "district": { "type": "string", "description": "Such as 12, AL or CA-12." },
+          "claimedDistrict": { "type": "string", "description": "Used when district is absent." }
+        }
+      },
+      "DistrictVerification": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["verified"],
+        "properties": {
+          "verified": {
+            "type": "boolean",
+            "description": "True only for a geocoded address that was not capped (method address_capped is false)."
+          },
+          "status": { "type": "string", "description": "likely_constituent or self_attested." },
+          "method": {
+            "type": "string",
+            "description": "address_geocode, manual_state_district, or address_capped (INT-03: the address geocoded, but its address and unit already have the most verified accounts allowed, so the district is saved as self_attested and verified is false)."
+          },
+          "verifiedAt": { "type": "string", "format": "date-time" },
+          "resolved": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["state", "districtId"],
+            "properties": {
+              "state": { "type": "string" },
+              "districtId": { "type": "string", "description": "Such as CA-12." }
+            }
+          },
+          "signals": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["addressGeocoded", "ipStateConsistency"],
+            "properties": {
+              "addressGeocoded": { "type": "boolean" },
+              "ipStateConsistency": { "type": "string", "enum": ["match", "mismatch", "unknown"] },
+              "ipStateObserved": { "type": ["string", "null"] },
+              "districtClaimMatch": { "type": ["boolean", "null"] }
+            }
+          },
+          "repsSignalEligible": { "type": "boolean" },
+          "limitReason": {
+            "type": "string",
+            "enum": ["address_limit"],
+            "description": "Present (GET and POST) while a verification limit holds the account back (INT-03): address_limit while its address is capped (method address_capped). Removed by the next successful verification. Old builds ignore it."
+          },
+          "nextStep": { "type": "string" }
+        },
+        "if": { "type": "object", "required": ["limitReason"] },
+        "then": { "properties": { "verified": { "const": false } } }
+      },
+      "ProcessedCongressMemberEnvelope": {
+        "type": "object",
+        "required": ["member"],
+        "properties": { "member": { "$ref": "../schemas/entities/processed-congress-member.v1.schema.json" } }
+      },
+      "AppAttestChallengeRequest": {
+        "title": "AppAttestChallengeRequestV1",
+        "type": "object",
+        "description": "Body of POST /app-attest/challenge (no Authorization). Any other purpose returns 400 INVALID_REQUEST.",
+        "required": ["purpose"],
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "enum": ["attest", "assert"],
+            "description": "attest: for registering a new key (POST /app-attest/attest). assert: for one assertion, on a protected request or at sign-up."
+          }
+        }
+      },
+      "AppAttestChallenge": {
+        "title": "AppAttestChallengeV1",
+        "type": "object",
+        "description": "clientMode on: a single-use challenge, valid until expiresAt (APP_ATTEST_CHALLENGE_TTL_SECONDS after it is issued). clientMode off (the APP_ATTEST_CLIENT_MODE kill switch): no challenge is issued and nothing is stored; R2 stops attesting for 6 hours.",
+        "additionalProperties": false,
+        "required": ["clientMode"],
+        "properties": {
+          "clientMode": { "type": "string", "enum": ["on", "off"] },
+          "challenge": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "description": "base64url, no padding, of 32 random bytes. Attestation hashes its UTF-8 bytes; an assertion embeds it in clientData."
+          },
+          "expiresAt": { "type": "string", "format": "date-time" }
+        },
+        "if": { "type": "object", "properties": { "clientMode": { "const": "on" } } },
+        "then": { "required": ["challenge", "expiresAt"] },
+        "else": { "not": { "anyOf": [{ "required": ["challenge"] }, { "required": ["expiresAt"] }] } }
+      },
+      "AppAttestAttestRequest": {
+        "title": "AppAttestAttestRequestV1",
+        "type": "object",
+        "description": "Body of POST /app-attest/attest (no Authorization), sent once per app install. The whole body may be at most 16 KB (413 PAYLOAD_TOO_LARGE).",
+        "required": ["keyId", "challenge", "attestation"],
+        "properties": {
+          "keyId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "description": "base64url, no padding, of the 32-byte key ID. Apple returns standard base64; the client converts it. The server compares decoded bytes."
+          },
+          "challenge": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "description": "From POST /app-attest/challenge with purpose attest."
+          },
+          "attestation": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 16384,
+            "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+            "description": "Standard base64, with padding, of the CBOR attestation object (about 7-8 KB encoded)."
+          }
+        }
+      },
+      "AppAttestAttestResult": {
+        "title": "AppAttestAttestResultV1",
+        "type": "object",
+        "description": "The key is registered: mark it attested. already_attested is a retry of a key registered before; nothing changed.",
+        "additionalProperties": false,
+        "required": ["status", "environment"],
+        "properties": {
+          "status": { "type": "string", "enum": ["attested", "already_attested"] },
+          "environment": {
+            "type": "string",
+            "enum": ["production", "development"],
+            "description": "development for a development-signed build (Apple's sandbox), production for TestFlight and App Store builds."
+          }
+        }
+      },
+      "AppAttestMarker": {
+        "title": "AppAttestMarkerV1",
+        "type": "string",
+        "maxLength": 2048,
+        "pattern": "^v1\\.(?:a\\.[A-Za-z0-9_-]{43}\\.[A-Za-z0-9_-]{1,1366}\\.[A-Za-z0-9_-]{1,683}|u|b|e\\.(?:challenge|attest|assert|timeout|disabled|keychain))$",
+        "description": "The X-Billboard-App-Attest value, and the ClientMetadata billboardAppAttest value at sign-up. Segments are base64url without padding. v1.a.<keyId>.<clientData>.<assertion>: an assertion; keyId is 32 bytes, clientData is the exact UTF-8 JSON bytes the assertion signs (at most 1,024; AppAttestRequestClientData on a request, AppAttestSignUpClientData at sign-up) and assertion is the CBOR bytes (at most 512). v1.u: the device does not support App Attest (Release builds). v1.b: a Debug build on an unsupported device, such as the Simulator. v1.e.<code>: the client could not produce an assertion; code is challenge, attest, assert, timeout, disabled or keychain (the server records any other code as other)."
+      },
+      "AppAttestRequestClientData": {
+        "title": "AppAttestRequestClientDataV1",
+        "type": "object",
+        "description": "The clientData of an assertion on a protected request (purpose request), bound to the method, the API Gateway resource path and the SHA-256 of the exact body bytes sent. The server ignores unknown keys.",
+        "required": ["v", "purpose", "challenge", "method", "path", "bodySha256"],
+        "properties": {
+          "v": { "const": 1 },
+          "purpose": { "const": "request" },
+          "challenge": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "description": "From POST /app-attest/challenge with purpose assert."
+          },
+          "method": { "type": "string", "description": "The HTTP method, such as POST." },
+          "path": { "type": "string", "description": "The API Gateway resource, such as /feedback." },
+          "bodySha256": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "description": "base64url, no padding, of the SHA-256 of the raw request body (of no bytes when there is no body)."
+          }
+        }
+      },
+      "AppAttestSignUpClientData": {
+        "title": "AppAttestSignUpClientDataV1",
+        "type": "object",
+        "description": "The clientData of an assertion at sign-up (purpose signup), bound to the email address. The server ignores unknown keys.",
+        "required": ["v", "purpose", "challenge", "emailSha256"],
+        "properties": {
+          "v": { "const": 1 },
+          "purpose": { "const": "signup" },
+          "challenge": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "description": "From POST /app-attest/challenge with purpose assert."
+          },
+          "emailSha256": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "description": "base64url, no padding, of the SHA-256 of the email address, trimmed and lower-cased."
+          }
+        }
+      },
+      "AppVersion": {
+        "title": "AppVersionV1",
+        "type": "string",
+        "maxLength": 32,
+        "pattern": "^[0-9]+(?:\\.[0-9]+){0,2}$",
+        "description": "The app's CFBundleShortVersionString, such as 1.2: one to three dot-separated numbers."
+      },
+      "PreSignUpClientMetadata": {
+        "title": "PreSignUpClientMetadataV1",
+        "type": "object",
+        "description": "Not an API body: the Cognito SignUp ClientMetadata that R2 sends and Cognito passes to the pre-sign-up trigger (PreSignUpCheck). Every key is optional: builds 1.0 and R1 send none (outcome missing, allowed while APP_ATTEST_MODE is watch), and R2 leaves out what it could not produce. Cognito allows only string values; other keys are ignored.",
+        "additionalProperties": { "type": "string" },
+        "properties": {
+          "billboardAppAttest": { "$ref": "#/components/schemas/AppAttestMarker" },
+          "billboardDeviceCheck": {
+            "type": "string",
+            "minLength": 4,
+            "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+            "description": "The DCDevice token, standard base64, when the device supports DeviceCheck."
+          },
+          "billboardAppVersion": { "$ref": "#/components/schemas/AppVersion" }
+        }
+      }
+    }
+  }
+}

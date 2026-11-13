@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "kind": "processed",
+  "storedAt": "2026-03-06T20:00:00.000Z",
+  "identifier": {
+    "congress": "119",
+    "billType": "hr",
+    "billNumber": "1285"
+  },
+  "guid": "BILLS-119hr1285ih",
+  "title": "Clean Energy Access Act",
+  "officialTitle": "To expand access to clean energy programs, and for other purposes.",
+  "link": "https://www.congress.gov/bill/119th-congress/house-bill/1285",
+  "soWhat": "Creates grant funding for state-level clean energy grid upgrades.",
+  "summary": "A bill to establish clean energy grid grants.",
+  "billBreakdown": {
+    "who": "State energy offices and eligible utilities",
+    "what": "Provides competitive clean energy grid grants",
+    "how": "Authorizes federal appropriations and application scoring",
+    "when": "Funding begins in fiscal year 2027",
+    "where": "All U.S. states and territories",
+    "why": "Improve grid resiliency and lower emissions"
+  },
+  "internalSchema": 2,
+  "subCategories": ["Energy", "Climate Change"],
+  "lifeAreas": ["Utility Bills", "Home Energy"],
+  "sponsors": ["D000001"],
+  "cosponsors": ["S000001", "L000001"],
+  "isPriority": true,
+  "priorityRank": 1,
+  "priorityReason": "National outlets are covering the bill as part of broader energy funding talks.",
+  "priorityExpiresAt": "2026-03-07T08:00:00.000Z",
+  "actions": [
+    {
+      "actionCode": "8000",
+      "actionDate": "2026-02-27",
+      "text": "On passage Passed by the Yeas and Nays: 231 - 196, 2 Present (Roll no. 58).",
+      "type": "Floor",
+      "sourceSystem": { "code": 2, "name": "House floor actions" }
+    },
+    {
+      "actionCode": "H11100",
+      "actionDate": "2026-02-10",
+      "text": "Referred to the House Committee on Energy and Commerce.",
+      "type": "IntroReferral",
+      "sourceSystem": { "code": 2, "name": "House floor actions" },
+      "committees": [{ "name": "Energy and Commerce Committee", "systemCode": "hsif00" }]
+    },
+    {
+      "actionDate": "2026-02-10",
+      "text": "Introduced in House",
+      "type": "IntroReferral",
+      "sourceSystem": { "code": 9, "name": "Library of Congress" }
+    }
+  ],
+  "committees": [
+    {
+      "name": "Energy and Commerce Committee",
+      "chamber": "House",
+      "systemCode": "hsif00",
+      "type": "Standing",
+      "activities": [{ "name": "Referred to", "date": "2026-02-10T15:03:15Z" }]
+    },
+    {
+      "name": "Agriculture Committee",
+      "chamber": "House",
+      "systemCode": "hsag00",
+      "type": "Standing",
+      "activities": [{ "name": "Bills of Interest - Exchange of Letters" }]
+    },
+    {
+      "name": "Agriculture, Nutrition, and Forestry Committee",
+      "chamber": "Senate",
+      "systemCode": "ssaf00",
+      "type": "Standing",
+      "subcommittees": [
+        {
+          "name": "Conservation, Forestry, Natural Resources, and Biotechnology Subcommittee",
+          "systemCode": "ssaf14",
+          "activities": [{ "name": "Hearings By (subcommittee)", "date": "2026-02-24T16:00:00Z" }]
+        }
+      ]
+    }
+  ],
+  "billStatus": "Updated",
+  "civicProfile": {
+    "individualVsCommunity": 0.55,
+    "localVsFederal": -0.25,
+    "freeMarketVsRegulated": -0.4,
+    "traditionalVsProgressive": 0.35,
+    "interventionistVsRestrained": 0.2,
+    "privacyVsSecurity": -0.15
+  },
+  "officialVotes": {
+    "house": {
+      "yea": 231,
+      "nay": 196,
+      "present": 2,
+      "notVoting": 6,
+      "totalCounted": 429,
+      "actionCode": "pass",
+      "actionDate": "2026-02-27",
+      "resultText": "Passed",
+      "memberDataAvailable": true,
+      "members": [
+        {
+          "bioguideId": "D000001",
+          "displayName": "Doe, Jane",
+          "party": "D",
+          "state": "CA",
+          "district": "12",
+          "votePosition": "Yea"
+        }
+      ]
+    },
+    "lastSyncedAt": "2026-03-06T19:55:00.000Z",
+    "source": "congress_api",
+    "completeness": "partial"
+  },
+  "companionGroup": {
+    "primaryGuid": "BILLS-119hr1285",
+    "memberGuids": ["BILLS-119hr1285", "BILLS-119s570"],
+    "relationship": "identical"
+  }
+}

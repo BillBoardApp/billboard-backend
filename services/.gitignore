@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.vscode/
+.DS_Store
+.env
+coverage/
+.idea/
+*.log
+*.tsbuildinfo
+release-manifest*.json
+repair-*-undo-*.jsonl
+redate-manifest-rows-*.jsonl
+*.zip
+.claude/
+repair-failed-status-*.jsonl
+# The REL-56 backfill (RUNBOOK 16.1): snapshots, their journals, guids and progress files stay out of the repository.
+rel56-*
+*.progress.tsv

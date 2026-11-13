@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.billboard/schemas/entities/processed-congress-member.v1.schema.json",
+  "title": "ProcessedCongressMemberV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "bioguideId",
+    "name"
+  ],
+  "properties": {
+    "bioguideId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "firstName": {
+      "type": ["string", "null"]
+    },
+    "lastName": {
+      "type": ["string", "null"]
+    },
+    "directOrderName": {
+      "type": ["string", "null"]
+    },
+    "chamber": {
+      "type": ["string", "null"]
+    },
+    "state": {
+      "type": ["string", "null"]
+    },
+    "district": {
+      "type": ["integer", "string", "null"]
+    },
+    "party": {
+      "type": ["string", "null"]
+    },
+    "partyAbbreviation": {
+      "type": ["string", "null"]
+    },
+    "partyName": {
+      "type": ["string", "null"]
+    },
+    "depictionImageUrl": {
+      "type": ["string", "null"],
+      "format": "uri"
+    },
+    "sponsoredLegislationCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cosponsoredLegislationCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "currentCongressBillsSupportedCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The same count as trackedSupportedCount, kept for older app builds. GET /processed-congress-members adds it with the tracked counts and leaves all three out when the member has no stats row (REL-46) or the member stats could not be read (REL-52), never sending 0 for a member with no stats row or an unknown count."
+    },
+    "trackedSponsoredCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Bills in the 119th Congress that BillBoard tracks and this member sponsored, from BillBoard's own member stats (billsSponsored), not Congress.gov career totals. Absent, with the other two counts, when the member has no stats row (no tracked 119th bill, as for every member new in the 120th Congress) or the stats could not be read; a member with a row gets its counts, zeros included."
+    },
+    "trackedSupportedCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Bills in the 119th Congress that BillBoard tracks and this member cosponsored, from BillBoard's own member stats (billsSupported), not Congress.gov career totals. Absent, with the other two counts, when the member has no stats row (no tracked 119th bill, as for every member new in the 120th Congress) or the stats could not be read; a member with a row gets its counts, zeros included."
+    },
+    "termCount": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "The number of entries in terms (0 when it is missing). Clients count terms and use this only when terms is missing."
+    },
+    "congress": {
+      "type": ["integer", "null"],
+      "minimum": 1
+    },
+    "memberType": {
+      "type": ["string", "null"]
+    },
+    "startYear": {
+      "type": ["integer", "null"],
+      "minimum": 1700
+    },
+    "stateCode": {
+      "type": ["string", "null"]
+    },
+    "stateName": {
+      "type": ["string", "null"]
+    },
+    "updateDate": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "terms": {
+      "type": "array",
+      "description": "The member's terms in chronological order, one entry per term. A House term is one Congress, as Congress.gov lists it. Congress.gov lists Senate service one entry per Congress; since REL-52 those entries are merged into the six-year terms of the seat's class (three Congresses), a term served in part (after an appointment or a special election) being one entry too.",
+      "items": { "$ref": "#/$defs/term" }
+    }
+  },
+  "$defs": {
+    "term": {
+      "title": "CongressMemberTermV1",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "chamber": { "type": ["string", "null"] },
+        "memberType": { "type": ["string", "null"] },
+        "congress": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "The Congress of a House term; for a Senate term, the first Congress of it the member served."
+        },
+        "district": { "type": ["integer", "string", "null"] },
+        "startYear": { "type": ["integer", "null"], "minimum": 1700, "description": "The year the member's service in the term began." },
+        "endYear": {
+          "type": ["integer", "null"],
+          "minimum": 1700,
+          "description": "The year the member's service in the term ended; absent while the member serves in it."
+        },
+        "stateCode": { "type": ["string", "null"] },
+        "stateName": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

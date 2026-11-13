@@ -1,0 +1,278 @@
+name: Deploy
+
+# The production pipeline (docs/DEPLOYING.md). Every run verifies and builds the Lambda release for its own commit.
+# A push to main stops there. A manual run on main also reaches production, after approval:
+#   mode=diff   = publish the release and show the CloudFormation diff
+#   mode=deploy = publish the release (unless release_id names an existing one) and deploy it
+#
+# All AWS work is in one job, `deploy`, in the `production` environment: GitHub holds it until one of the project's
+# maintainers approves the run, and the environment lets only main in. That job alone may request an OIDC token, and
+# the two AWS roles (infra/lib/stacks/github-oidc.ts) trust only this file on this repository's main branch, in the
+# production environment. The job first
+# publishes the release with the services release role, clears those credentials, and only then installs packages and
+# takes the infra deploy role. A diff run narrows that role's session to the reads it makes (inline session policy
+# below). The account ID comes from the environment's AWS_ACCOUNT_ID secret, so GitHub masks it in the logs.
+#
+# infra/test/deploy-workflow.test.ts scans this file for CLI calls and checks the roles grant each one, and that
+# the diff session policy covers every call a diff run makes. S3 copies here must be downloads; uploads live
+# in scripts/ci/publish-release.sh. Never write the CLI's name followed by two words anywhere in this file,
+# comments included.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/CODEOWNERS'
+      - '.github/pull_request_template.md'
+      - '.github/workflows/pr.yml'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'diff = publish the release and show the CloudFormation diff; deploy = deploy to production'
+        type: choice
+        options: [diff, deploy]
+        default: diff
+      release_id:
+        description: 'Optional: use this existing release (releases/<id>/manifest.json) instead of the one built here, for a rollback.'
+        type: string
+        default: ''
+      allow_replacements:
+        description: 'Optional, for an intentional replacement only: <Stack>/<LogicalId> entries (comma-separated) the deploy guard may let through. Back up or move the data first.'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ARTIFACTS_BUCKET: billboard-lambda-artifacts
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      release_id: ${{ steps.plan.outputs.release_id }}
+    steps:
+      - id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_RELEASE_ID: ${{ inputs.release_id }}
+        run: |
+          set -euo pipefail
+          # Only a manual run on main reaches production; a push only verifies and builds.
+          if [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$EVENT_NAME" = "workflow_dispatch" ]; then mode="$INPUT_MODE"
+          else mode=off; fi
+          case "$mode" in off|diff|deploy) ;; *) echo "::error::mode must be diff or deploy, not '$mode'"; exit 1;; esac
+          release_id="${INPUT_RELEASE_ID:-}"
+          if [ -n "$release_id" ] && [[ ! "$release_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
+            echo "::error::release_id '$release_id' is not a valid release id"; exit 1
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "Deploy mode: $mode" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$release_id" ]; then echo "Existing release: $release_id" >> "$GITHUB_STEP_SUMMARY"; fi
+
+  build:
+    # No cloud credentials in this job.
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            contracts/package-lock.json
+            services/package-lock.json
+            infra/package-lock.json
+      - run: npm run setup
+      - name: Verify, build the release and strict-synth it
+        run: npm run verify
+      - name: The release belongs to this commit
+        run: test "$(jq -r .git.commitSha .release/manifest.json)" = "$GITHUB_SHA"
+      - if: needs.plan.outputs.mode != 'off' && needs.plan.outputs.release_id == ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lambda-release
+          path: |
+            .release/zips/
+            .release/manifest.json
+            .release/release-id
+            .release/version
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy:
+    # The only job with AWS access. It waits in the production environment until one of the project's maintainers
+    # approves it, and only one such job runs at a time: queue, never cancel, because a cancelled run can leave
+    # CloudFormation or CodeDeploy mid-flight. Push runs never reach it, so they never wait for this lock.
+    needs: [plan, build]
+    if: needs.plan.outputs.mode != 'off' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: billboard-production
+      cancel-in-progress: false
+    # CON-08: CodeDeploy shifts API handlers 10% for 10 minutes, then 100% (workers all at once), and all
+    # deployments run in parallel, so they finish in about 11 minutes; the wait allows 45. The rest leaves
+    # room for the upload, npm ci, synth, a 15-stack diff and cdk deploy. GitHub's hard limit is 360.
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      MODE: ${{ needs.plan.outputs.mode }}
+      EXISTING_RELEASE_ID: ${{ needs.plan.outputs.release_id }}
+      BILLBOARD_STRICT_RELEASE: 'true'
+      # The real account, in place of the documentation example in infra/lib/config/deployment-identity.ts.
+      CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+      CDK_DEFAULT_REGION: us-east-1
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # 1. Publish the release this run built, before any package is installed. No npm and no Node while these
+      #    credentials are live.
+      - name: Download the release this run built
+        if: env.EXISTING_RELEASE_ID == ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: lambda-release
+          path: ${{ runner.temp }}/release
+      - name: The release belongs to this commit
+        if: env.EXISTING_RELEASE_ID == ''
+        run: test "$(jq -r .git.commitSha "$RUNNER_TEMP/release/manifest.json")" = "$GITHUB_SHA"
+      # Lists, reads and writes the artifacts bucket, nothing else; 1-hour sessions at most.
+      - name: AWS credentials for the release upload
+        if: env.EXISTING_RELEASE_ID == ''
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubServicesReleaseRole
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600
+          mask-aws-account-id: true
+      - id: publish
+        name: Publish zips, then the manifest
+        if: env.EXISTING_RELEASE_ID == ''
+        working-directory: .
+        run: scripts/ci/publish-release.sh "$RUNNER_TEMP/release"
+      # 2. Clear the upload credentials before npm ci runs any package's install script.
+      - name: Clear the upload credentials
+        if: env.EXISTING_RELEASE_ID == ''
+        run: |
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do echo "$name=" >> "$GITHUB_ENV"; done
+      - name: The release to deploy
+        env:
+          PUBLISHED_RELEASE_ID: ${{ steps.publish.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          release_id="${PUBLISHED_RELEASE_ID:-$EXISTING_RELEASE_ID}"
+          test -n "$release_id"
+          echo "BILLBOARD_RELEASE_ID=$release_id" >> "$GITHUB_ENV"
+          if [ -n "$PUBLISHED_RELEASE_ID" ]; then echo "BUILT_THIS_RUN=true" >> "$GITHUB_ENV"; else echo "BUILT_THIS_RUN=false" >> "$GITHUB_ENV"; fi
+          echo "Release: $release_id" >> "$GITHUB_STEP_SUMMARY"
+      # 3. Install, then the infra deploy role: synth, diff and the deploy guard in both modes.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+      - name: No AWS credentials while packages install
+        run: test -z "${AWS_ACCESS_KEY_ID:-}${AWS_SECRET_ACCESS_KEY:-}${AWS_SESSION_TOKEN:-}"
+      - run: npm ci
+      # GitHubInfraDeployRole reaches CloudFormation and the CDK assets bucket only through the CDK bootstrap
+      # roles. A diff run keeps, of its policy, the release manifest download, the alias reads and the three
+      # bootstrap roles a change-set diff assumes: it cannot write an alias pin or start a CodeDeploy
+      # deployment. The bootstrap deploy role can still change stacks, so this is not a read-only diff.
+      - name: AWS credentials for a diff (no alias pin or CodeDeploy writes)
+        if: env.MODE == 'diff'
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubInfraDeployRole
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600
+          mask-aws-account-id: true
+          inline-session-policy: >-
+            {"Version":"2012-10-17","Statement":[
+            {"Sid":"CdkDiffBootstrapRoles","Effect":"Allow","Action":"sts:AssumeRole","Resource":[
+            "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/cdk-hnb659fds-deploy-role-${{ secrets.AWS_ACCOUNT_ID }}-us-east-1",
+            "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/cdk-hnb659fds-file-publishing-role-${{ secrets.AWS_ACCOUNT_ID }}-us-east-1",
+            "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/cdk-hnb659fds-lookup-role-${{ secrets.AWS_ACCOUNT_ID }}-us-east-1"]},
+            {"Sid":"DownloadReleaseManifest","Effect":"Allow","Action":"s3:GetObject",
+            "Resource":"arn:aws:s3:::billboard-lambda-artifacts/releases/*"},
+            {"Sid":"ReadProdAliases","Effect":"Allow","Action":"lambda:GetAlias",
+            "Resource":"arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:*"}]}
+      - name: AWS credentials for a deploy
+        if: env.MODE == 'deploy'
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubInfraDeployRole
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 14400
+          mask-aws-account-id: true
+      - name: Verify the release manifest exists
+        run: |
+          key="releases/${BILLBOARD_RELEASE_ID}/manifest.json"
+          if ! error="$(aws s3api head-object --bucket "$ARTIFACTS_BUCKET" --key "$key" 2>&1 >/dev/null)"; then
+            echo "$error" >&2
+            echo "::error title=Release manifest missing::s3://$ARTIFACTS_BUCKET/$key is missing or unreadable (a 403 also means missing: the deploy role cannot list the bucket). Run this workflow without release_id to build and publish a fresh release."
+            exit 1
+          fi
+      - name: Download the release manifest
+        run: |
+          manifest="$RUNNER_TEMP/release-manifest.json"
+          aws s3 cp "s3://${ARTIFACTS_BUCKET}/releases/${BILLBOARD_RELEASE_ID}/manifest.json" "$manifest"
+          if [ "$BUILT_THIS_RUN" = "true" ]; then test "$(jq -r .git.commitSha "$manifest")" = "$GITHUB_SHA"; fi
+          echo "BILLBOARD_RELEASE_MANIFEST_FILE=$manifest" >> "$GITHUB_ENV"
+      - name: Synthesize (strict release; website/ and contracts/ come from this checkout)
+        env:
+          # Unset reserves 1 poller execution; "off" drops it. See infra/lib/config/congress-integration-service-constants.ts.
+          BILLS_API_POLLER_RESERVED_CONCURRENCY: ${{ vars.BILLS_API_POLLER_RESERVED_CONCURRENCY }}
+        run: npx cdk synth --all --quiet
+      - name: Diff against production
+        env:
+          ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+        run: |
+          set -o pipefail
+          npx cdk diff --app cdk.out --all --no-color 2>&1 | tee "$RUNNER_TEMP/cdk-diff.txt"
+          # Build the summary from files, not a grep | head pipe: under pipefail a large diff makes
+          # head exit early, grep dies of SIGPIPE, and the step would fail after a successful diff.
+          # The account ID is masked in the log, and taken out of the summary here.
+          grep -E '^(Stack |\[[-+~]\]|There were no differences)' "$RUNNER_TEMP/cdk-diff.txt" > "$RUNNER_TEMP/cdk-diff-summary.txt" || true
+          { echo '```'; sed -n '1,300p' "$RUNNER_TEMP/cdk-diff-summary.txt" | sed "s/${ACCOUNT_ID:?}/***/g"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      # Fails the run, in diff and deploy mode, when the diff would replace or delete a Cognito user pool or client,
+      # a DynamoDB table, an S3 bucket, a Secrets Manager secret or the UserFeedback stream mapping, or would change
+      # the poller cursor parameter. SQS queue and mapping replacements are warnings. It also fails when a stack of
+      # cdk.out has no section in the diff (a diff cut short). Nothing has been written to production yet: the alias
+      # pins and cdk deploy come after. docs/DEPLOYING.md has the details and the override.
+      - name: Block replacing or deleting stateful resources
+        env:
+          DEPLOY_GUARD_ALLOW: ${{ inputs.allow_replacements }}
+        run: npm run release:check-deploy-guard -- --diff "$RUNNER_TEMP/cdk-diff.txt" --templates cdk.out
+      - name: Show the alias pins a deploy would write
+        if: env.MODE == 'diff'
+        run: npm run release:sync-prod-alias-versions -- --templates cdk.out --dry-run
+      # 4. Deploy mode only: the alias pins, cdk deploy and CodeDeploy.
+      - name: Sync live Lambda alias version pins
+        if: env.MODE == 'deploy'
+        run: npm run release:sync-prod-alias-versions -- --templates cdk.out
+      - name: Deploy all stacks
+        if: env.MODE == 'deploy'
+        run: npx cdk deploy --app cdk.out --all --require-approval never --outputs-file cdk-outputs.json
+      - name: Move Lambda prod aliases with CodeDeploy
+        if: env.MODE == 'deploy'
+        run: npm run release:deploy-lambdas -- --outputs cdk-outputs.json --timeout-minutes 45

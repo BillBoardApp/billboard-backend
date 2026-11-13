@@ -1,0 +1,119 @@
+{
+  "id": "2026-03-22T14:00:00.000Z",
+  "title": "Your Week in Congress | Mar 15-21, 2026",
+  "summary": "One bill needs your attention, one more moved, one member you follow had a bill move, and 2 more are worth a look.",
+  "weekStart": "2026-03-15T04:00:00.000Z",
+  "weekEnd": "2026-03-21T04:00:00.000Z",
+  "publishedAt": "2026-03-22T14:00:00.000Z",
+  "isRead": false,
+  "stats": [
+    {
+      "id": "attention",
+      "label": "Need attention",
+      "value": "1",
+      "accent": "attention"
+    },
+    {
+      "id": "representatives",
+      "label": "Members active",
+      "value": "1",
+      "accent": "representative"
+    },
+    {
+      "id": "quicklook",
+      "label": "Worth a look",
+      "value": "2",
+      "accent": "discovery"
+    }
+  ],
+  "sections": [
+    {
+      "kind": "needs_attention",
+      "title": "Needs Your Attention",
+      "subtitle": "Bills you watch, changes since your vote, and outcomes on your topics.",
+      "items": [
+        {
+          "id": "bill|BILLS-119hr204ih",
+          "kind": "bill",
+          "title": "Clean Water Infrastructure Act",
+          "eyebrow": "Updated Mar 20",
+          "summary": "Mar 20: Reported by the Committee on Transportation and Infrastructure.",
+          "detail": "Funds upgrades to local drinking water and wastewater systems.",
+          "reason": "You voted on this before",
+          "accent": "attention",
+          "billState": "updated",
+          "billGuid": "BILLS-119hr204ih"
+        }
+      ]
+    },
+    {
+      "kind": "moved_this_week",
+      "title": "What Moved This Week",
+      "subtitle": "Other bills that moved this week.",
+      "items": [
+        {
+          "id": "bill|BILLS-119s512es",
+          "kind": "bill",
+          "title": "Affordable Child Care Access Act",
+          "eyebrow": "Passed Mar 19",
+          "summary": "Mar 19: Passed Senate with an amendment by Unanimous Consent.",
+          "detail": "Expands child care grants and adds rural providers to those who qualify.",
+          "reason": "Matches your topic: Child Care",
+          "accent": "movement",
+          "billState": "passed",
+          "billGuid": "BILLS-119s512es"
+        }
+      ]
+    },
+    {
+      "kind": "representatives",
+      "title": "Members You Follow",
+      "subtitle": "Members you follow who sponsor or cosponsor a bill that moved this week.",
+      "items": [
+        {
+          "id": "member|D000001|BILLS-119s512es",
+          "kind": "member",
+          "title": "Rep. Jane Doe",
+          "eyebrow": "1 bill this week",
+          "summary": "Sponsored S. 512, which moved this week.",
+          "detail": "S. 512: Affordable Child Care Access Act",
+          "reason": "Member you follow",
+          "accent": "representative",
+          "billGuid": "BILLS-119s512es",
+          "primaryMemberBioguideId": "D000001"
+        }
+      ]
+    },
+    {
+      "kind": "worth_quick_look",
+      "title": "Worth A Quick Look",
+      "subtitle": "More new or updated bills on your topics.",
+      "items": [
+        {
+          "id": "bill|BILLS-119hr991ih",
+          "kind": "bill",
+          "title": "Community Health Workforce Act",
+          "eyebrow": "New Mar 20",
+          "summary": "Mar 20: Introduced in House",
+          "detail": "Expands training grants for community health workers at local clinics.",
+          "reason": "Matches your life area: Health",
+          "accent": "discovery",
+          "billState": "new",
+          "billGuid": "BILLS-119hr991ih"
+        },
+        {
+          "id": "bill|BILLS-119s88is",
+          "kind": "bill",
+          "title": "Emergency Communications Modernization Act",
+          "eyebrow": "Updated Mar 21",
+          "summary": "Ties federal emergency communications grants to new resilience benchmarks.",
+          "detail": "Local 911 centers could get money to keep working through outages.",
+          "reason": "Matches your topic: Emergency Response",
+          "accent": "discovery",
+          "billState": "updated",
+          "billGuid": "BILLS-119s88is"
+        }
+      ]
+    }
+  ]
+}

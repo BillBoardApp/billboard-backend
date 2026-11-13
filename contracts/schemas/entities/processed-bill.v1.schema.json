@@ -1,0 +1,364 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.billboard/schemas/entities/processed-bill.v1.schema.json",
+  "title": "ProcessedBillV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "storedAt",
+    "identifier",
+    "guid",
+    "title",
+    "link",
+    "soWhat",
+    "billBreakdown",
+    "subCategories",
+    "lifeAreas",
+    "sponsors",
+    "cosponsors"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "kind": {
+      "type": "string",
+      "const": "processed"
+    },
+    "storedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "identifier": {
+      "title": "ProcessedBillIdentifierV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["congress", "billType", "billNumber"],
+      "properties": {
+        "congress": { "type": "string", "minLength": 1 },
+        "billType": { "type": "string", "minLength": 1 },
+        "billNumber": { "type": "string", "minLength": 1 }
+      }
+    },
+    "guid": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "officialTitle": {
+      "type": "string",
+      "description": "The bill's official title from its text (or Congress's title when the text has none). `title` is a generated plain-language headline."
+    },
+    "link": {
+      "type": "string",
+      "format": "uri"
+    },
+    "soWhat": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "description": "Optional long-form summary. No services writer sets it today (billSummarizer omits it), so real bills do not carry it; clients fall back to soWhat."
+    },
+    "billBreakdown": {
+      "title": "ProcessedBillBreakdownV1",
+      "description": "The summarizer's who/what/how/when/where/why. Older summaries have no `why`, and some carry extra keys (such as `lifeAreas`), which clients ignore.",
+      "type": "object",
+      "required": ["who", "what", "how", "when", "where"],
+      "properties": {
+        "who": { "type": "string" },
+        "what": { "type": "string" },
+        "how": { "type": "string" },
+        "when": { "type": "string" },
+        "where": { "type": "string" },
+        "why": { "type": "string" }
+      }
+    },
+    "internalSchema": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "subCategories": {
+      "type": "array",
+      "description": "Sub-category labels. Since Phase C the summarizer writes Civil Rights and Liberties and Heritage and Identity; until the label switch ends (Phase E) a bill may still carry the legacy names Social Justice and Identity Politics, which clients show under the new names (LEGACY_SUB_CATEGORY_ALIASES in services/src/models/categories.ts). GET /processed-bill serves none for a ceremonial resolution (one that designates a day or week, or recognizes, honors or congratulates someone; since 2026-10-29), as its manifest row has none; the stored document keeps them.",
+      "items": { "$ref": "#/$defs/subCategory" },
+      "uniqueItems": true
+    },
+    "lifeAreas": {
+      "type": "array",
+      "description": "Life areas. GET /processed-bill serves none for a ceremonial resolution, as its manifest row has none; the stored document keeps them.",
+      "items": { "$ref": "#/$defs/lifeArea" },
+      "uniqueItems": true
+    },
+    "sponsors": {
+      "type": "array",
+      "description": "Bioguide IDs of the sponsors, from Congress.gov.",
+      "items": { "$ref": "#/$defs/bioguideId" },
+      "uniqueItems": true
+    },
+    "cosponsors": {
+      "type": "array",
+      "description": "Bioguide IDs of the cosponsors. fetchRawBill reads every page of Congress.gov cosponsors (REL-28); a bill fetched before that change lists only the first 20 until `npm run backfill:cosponsors` (in services) refreshes it. IDs may repeat: one stored bill lists a cosponsor twice.",
+      "items": { "$ref": "#/$defs/bioguideId" }
+    },
+    "isPriority": {
+      "type": "boolean"
+    },
+    "priorityRank": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "priorityReason": {
+      "type": "string"
+    },
+    "priorityExpiresAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "actions": {
+      "type": "array",
+      "description": "Congress.gov bill actions, newest first, as the Congress.gov API returns them.",
+      "items": { "$ref": "#/$defs/action" }
+    },
+    "committees": {
+      "type": "array",
+      "description": "Congress.gov committee referrals, as the Congress.gov API returns them.",
+      "items": { "$ref": "#/$defs/committee" }
+    },
+    "billStatus": {
+      "title": "BillStatusV1",
+      "type": "string",
+      "enum": ["New", "Updated", "Passed", "Failed", "Finalized"]
+    },
+    "civicProfile": {
+      "title": "CivicProfileScoresV1",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "individualVsCommunity": { "type": "number", "minimum": -1, "maximum": 1 },
+        "localVsFederal": { "type": "number", "minimum": -1, "maximum": 1 },
+        "freeMarketVsRegulated": { "type": "number", "minimum": -1, "maximum": 1 },
+        "traditionalVsProgressive": { "type": "number", "minimum": -1, "maximum": 1 },
+        "interventionistVsRestrained": { "type": "number", "minimum": -1, "maximum": 1 },
+        "privacyVsSecurity": { "type": "number", "minimum": -1, "maximum": 1 }
+      }
+    },
+    "officialVotes": {
+      "title": "OfficialVotesBreakdownV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lastSyncedAt", "source", "completeness"],
+      "properties": {
+        "house": { "$ref": "#/$defs/officialChamberVote" },
+        "senate": { "$ref": "#/$defs/officialChamberVote" },
+        "lastSyncedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "type": "string",
+          "const": "congress_api"
+        },
+        "completeness": {
+          "type": "string",
+          "enum": ["none", "partial", "complete"]
+        }
+      }
+    },
+    "companionGroup": {
+      "$ref": "#/$defs/companionGroup",
+      "description": "Added by GET /processed-bill and /public/processed-bill when the bill is in a companion group. Never stored."
+    }
+  },
+  "$defs": {
+    "subCategory": {
+      "title": "BillSubCategoryV1",
+      "description": "A sub-category from BILL_CATEGORY_DEFINITIONS in services/src/models/categories.ts, or a legacy name from LEGACY_SUB_CATEGORY_ALIASES there. The last two values, Social Justice (now Civil Rights and Liberties) and Identity Politics (now Heritage and Identity), are legacy names (LLM-10): accepted until the label switch ends, never written by the summarizer, and to be shown under their current names. The contracts check fails unless this list equals the current names plus the legacy names.",
+      "type": "string",
+      "enum": [
+        "Fiscal Policy",
+        "Monetary Policy",
+        "Labor and Employment",
+        "Trade and Globalization",
+        "Social Welfare",
+        "Healthcare",
+        "Education",
+        "Housing",
+        "Civil Rights and Liberties",
+        "Family and Gender Policy",
+        "Climate Change",
+        "Energy",
+        "Conservation and Natural Resources",
+        "Pollution Control",
+        "Diplomacy",
+        "Military and Defense",
+        "Trade and Sanctions",
+        "Immigration and Border Control",
+        "Humanitarian Intervention",
+        "Constitutional and Legal Issues",
+        "Elections and Voting",
+        "Transparency and Accountability",
+        "Local vs. Federal Power",
+        "Technology Regulation",
+        "Transportation",
+        "Research and Innovation",
+        "Telecommunications",
+        "Religion and State",
+        "Heritage and Identity",
+        "Freedom of Speech and Press",
+        "Ethics in Policy",
+        "Social Justice",
+        "Identity Politics"
+      ]
+    },
+    "lifeArea": {
+      "title": "LifeAreaV1",
+      "description": "A life area from LIFE_AREAS in services/src/models/lifeAreas.ts. The contracts check fails when the two lists differ.",
+      "type": "string",
+      "enum": [
+        "Utility Bills",
+        "Home Energy",
+        "Student Loans",
+        "Health Insurance",
+        "Taxes",
+        "Medical Costs",
+        "Transportation",
+        "Local Development",
+        "Online Privacy",
+        "Digital Security",
+        "Social Media",
+        "Digital Services",
+        "Pet Ownership"
+      ]
+    },
+    "bioguideId": {
+      "description": "A Congress.gov bioguide ID: one capital letter and six digits, such as D000001.",
+      "type": "string",
+      "pattern": "^[A-Z][0-9]{6}$"
+    },
+    "action": {
+      "title": "ProcessedBillActionV1",
+      "description": "One Congress.gov bill action. Only the fields clients read are listed; the rest of the Congress.gov object (sourceSystem, committees, recordedVotes, actionTime) is stored unchanged.",
+      "type": "object",
+      "required": ["actionDate", "type"],
+      "properties": {
+        "actionCode": { "type": "string" },
+        "actionDate": { "type": "string", "format": "date", "description": "yyyy-mm-dd." },
+        "text": {
+          "type": "string",
+          "description": "Absent on some Congress.gov actions, such as an Intro-S IntroReferral action of some Senate bills."
+        },
+        "type": {
+          "type": "string",
+          "description": "Congress.gov action type, such as IntroReferral, Committee, Floor, President or BecameLaw."
+        }
+      }
+    },
+    "committee": {
+      "title": "ProcessedBillCommitteeV1",
+      "description": "One committee the bill was referred to. Only the fields clients read are listed; the rest of the Congress.gov object (systemCode, type, url, subcommittees) is stored unchanged.",
+      "type": "object",
+      "required": ["name", "chamber"],
+      "properties": {
+        "name": { "type": "string" },
+        "chamber": { "type": "string", "description": "House, Senate or Joint." },
+        "activities": {
+          "type": "array",
+          "description": "The committee's own activities. Absent when only its subcommittees acted (Congress.gov then lists the activities under subcommittees, as on H.R. 471 of the 119th Congress).",
+          "items": { "$ref": "#/$defs/committeeActivity" }
+        }
+      }
+    },
+    "committeeActivity": {
+      "title": "ProcessedBillCommitteeActivityV1",
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "description": "Such as Referred to, Markup by or Reported by." },
+        "date": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Absent on some activities, such as Bills of Interest - Exchange of Letters (H.R. 3838 and H.R. 4275 of the 119th Congress)."
+        }
+      }
+    },
+    "officialVoteMember": {
+      "title": "OfficialVoteMemberV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bioguideId", "displayName", "votePosition"],
+      "properties": {
+        "bioguideId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "party": { "type": "string" },
+        "state": { "type": "string" },
+        "district": { "type": "string" },
+        "votePosition": {
+          "type": "string",
+          "enum": ["Yea", "Nay", "Present", "Not Voting", "Unknown"]
+        }
+      }
+    },
+    "officialChamberVote": {
+      "title": "OfficialChamberVoteV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "yea",
+        "nay",
+        "present",
+        "notVoting",
+        "totalCounted",
+        "memberDataAvailable",
+        "members"
+      ],
+      "properties": {
+        "yea": { "type": "integer", "minimum": 0 },
+        "nay": { "type": "integer", "minimum": 0 },
+        "present": { "type": "integer", "minimum": 0 },
+        "notVoting": { "type": "integer", "minimum": 0 },
+        "totalCounted": { "type": "integer", "minimum": 0 },
+        "actionCode": { "type": "string" },
+        "actionDate": { "type": "string" },
+        "resultText": { "type": "string" },
+        "memberDataAvailable": { "type": "boolean" },
+        "members": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/officialVoteMember" }
+        }
+      }
+    },
+    "companionGroup": {
+      "title": "CompanionGroupV1",
+      "description": "Companion bills: identical bills introduced in both chambers of the same Congress (APPF-23), shown as one bill. Only served, never stored: GET /processed-bill adds it to a grouped bill, and GET /bills-manifest lists every group in companionGroups.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primaryGuid", "memberGuids", "relationship"],
+      "properties": {
+        "primaryGuid": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The House member's plain guid; always memberGuids[0]. Card identity, share guid, default vote target."
+        },
+        "memberGuids": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Plain guids BILLS-<congress><type><number> (no text-version suffix), primary first, then guid order. Parse congress/type/number from the guid."
+        },
+        "relationship": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why they are grouped. Today always \"identical\" (Congress.gov related bills: Identical bill, marked by CRS). A string, not an enum, so new values never break decoding."
+        }
+      }
+    }
+  }
+}

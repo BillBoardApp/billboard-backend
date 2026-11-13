@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.billboard/schemas/entities/bills-manifest.v1.schema.json",
+  "title": "BillsManifestV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["generatedAt", "count", "bills"],
+  "properties": {
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "bills": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/billManifestItem" }
+    },
+    "companionGroups": {
+      "type": "array",
+      "items": { "$ref": "processed-bill.v1.schema.json#/$defs/companionGroup" },
+      "description": "Every companion group among the manifest's bills, complete on every response (full, windowed, snapshot), sorted by primaryGuid. [] = no groups (or disabled); field absent = server predates companion groups."
+    }
+  },
+  "$defs": {
+    "billManifestItem": {
+      "title": "BillsManifestItemV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["guid", "billType"],
+      "properties": {
+        "guid": { "type": "string", "minLength": 1 },
+        "billType": { "type": "string", "minLength": 1 },
+        "congress": { "type": "string" },
+        "billNumber": { "type": "string" },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When something last happened to the bill: the processed bill's storedAt at its first publication or at its latest news (a status change, an action newer than its latest or another on that day, or a new text version). A reprocess, a re-summary of the same text or a change to its details (cosponsors, member votes, committees, older actions, topics, life areas) keeps it (since 2026-10-28)."
+        },
+        "title": { "type": "string" },
+        "subCategories": {
+          "type": "array",
+          "description": "The processed bill's sub-category labels, except that a ceremonial resolution (one that designates a day or week, or recognizes, honors or congratulates someone) has none (since 2026-10-29). Until the label switch ends (Phase E) a bill may still carry the legacy names Social Justice and Identity Politics, which clients show as Civil Rights and Liberties and Heritage and Identity.",
+          "items": { "$ref": "processed-bill.v1.schema.json#/$defs/subCategory" }
+        },
+        "lifeAreas": {
+          "type": "array",
+          "description": "The processed bill's life areas, except that a ceremonial resolution (one that designates a day or week, or recognizes, honors or congratulates someone) has none.",
+          "items": { "$ref": "processed-bill.v1.schema.json#/$defs/lifeArea" }
+        },
+        "sponsors": {
+          "type": "array",
+          "description": "Bioguide IDs, copied from the processed bill.",
+          "items": { "$ref": "processed-bill.v1.schema.json#/$defs/bioguideId" }
+        },
+        "cosponsors": {
+          "type": "array",
+          "description": "Bioguide IDs, copied from the processed bill: every Congress.gov cosponsor since REL-28, only the first 20 on a bill fetched before it (see the processed bill's cosponsors).",
+          "items": { "$ref": "processed-bill.v1.schema.json#/$defs/bioguideId" }
+        },
+        "voteCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Deprecated: no longer sent (INT-11). A vote count is other users' votes, which nobody sees before voting on the bill; clients must not show or sort by it. Kept optional so older builds keep decoding."
+        },
+        "isPriority": {
+          "type": "boolean"
+        },
+        "priorityRank": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "priorityReason": {
+          "type": "string"
+        },
+        "priorityExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "billStatus": {
+          "title": "BillStatusV1",
+          "type": "string",
+          "enum": ["New", "Updated", "Passed", "Failed", "Finalized"]
+        },
+        "civicProfile": {
+          "title": "CivicProfileScoresV1",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "individualVsCommunity": { "type": "number", "minimum": -1, "maximum": 1 },
+            "localVsFederal": { "type": "number", "minimum": -1, "maximum": 1 },
+            "freeMarketVsRegulated": { "type": "number", "minimum": -1, "maximum": 1 },
+            "traditionalVsProgressive": { "type": "number", "minimum": -1, "maximum": 1 },
+            "interventionistVsRestrained": { "type": "number", "minimum": -1, "maximum": 1 },
+            "privacyVsSecurity": { "type": "number", "minimum": -1, "maximum": 1 }
+          }
+        }
+      }
+    }
+  }
+}

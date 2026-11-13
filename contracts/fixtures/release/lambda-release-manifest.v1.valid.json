@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "releaseId": "services-20260306-0ecfac3",
+  "createdAt": "2026-03-06T20:05:00.000Z",
+  "service": "billboard-services",
+  "environment": "prod",
+  "git": {
+    "repository": "BillBoardApp/billboard-services",
+    "commitSha": "0ecfac30ecfac30ecfac30ecfac30ecfac30ecfa",
+    "branch": "main"
+  },
+  "artifacts": [
+    {
+      "logicalName": "fetchProcessedBill",
+      "functionName": "FetchProcessedBill",
+      "runtime": "nodejs24.x",
+      "handler": "dist/index.handler",
+      "s3Bucket": "billboard-lambda-artifacts",
+      "s3Key": "artifacts/fetchProcessedBill/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.zip",
+      "releaseS3Key": "releases/services-20260306-0ecfac3/fetchProcessedBill.zip",
+      "s3ObjectVersion": "wq.YqQ8i8Gk3OJjQf9c8Q.Jk.1T7C8kN",
+      "sizeBytes": 319528,
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    {
+      "logicalName": "fetchBillsManifest",
+      "functionName": "FetchBillsManifest",
+      "runtime": "nodejs24.x",
+      "handler": "dist/index.handler",
+      "s3Bucket": "billboard-lambda-artifacts",
+      "s3Key": "artifacts/fetchBillsManifest/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789.zip",
+      "releaseS3Key": "releases/services-20260306-0ecfac3/fetchBillsManifest.zip",
+      "s3ObjectVersion": "QxA6blS0fV2A5aR4g4WvV2Y",
+      "sizeBytes": 248777,
+      "sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+    }
+  ]
+}
