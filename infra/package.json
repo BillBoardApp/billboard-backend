@@ -30,7 +30,7 @@
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.758.0",
     "@aws-sdk/client-sns": "^3.758.0",
-    "aws-cdk-lib": "^2.265.0",
+    "aws-cdk-lib": "^2.273.0",
     "constructs": "^10.0.0"
   },
   "overrides": {

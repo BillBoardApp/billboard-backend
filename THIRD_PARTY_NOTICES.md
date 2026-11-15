@@ -179,7 +179,7 @@ Licences: Apache-2.0 80, MIT 11, ISC 3, (MIT OR GPL-3.0-or-later) 1, 0BSD 1, Blu
 | `@aws-sdk/util-user-agent-browser` | 3.972.8 | Apache-2.0 |
 | `@aws-sdk/util-user-agent-node` | 3.973.10 | Apache-2.0 |
 | `@aws-sdk/xml-builder` | 3.972.41 | Apache-2.0 |
-| `@aws/cloudformation-validate` (bundled inside its parent package) | 1.7.0-beta | Apache-2.0 |
+| `@aws/cloudformation-validate` (bundled inside its parent package) | 1.12.1 | Apache-2.0 |
 | `@aws/lambda-invoke-store` | 0.2.4 | Apache-2.0 |
 | `@balena/dockerignore` (bundled inside its parent package) | 1.0.2 | Apache-2.0 |
 | `@smithy/abort-controller` | 4.2.12 | Apache-2.0 |
@@ -225,10 +225,10 @@ Licences: Apache-2.0 80, MIT 11, ISC 3, (MIT OR GPL-3.0-or-later) 1, 0BSD 1, Blu
 | `@smithy/util-utf8` | 2.3.0 | Apache-2.0 |
 | `@smithy/util-utf8` | 4.2.2 | Apache-2.0 |
 | `@smithy/uuid` | 1.1.2 | Apache-2.0 |
-| `aws-cdk-lib` | 2.265.0 | Apache-2.0 |
+| `aws-cdk-lib` | 2.273.0 | Apache-2.0 |
 | `balanced-match` (bundled inside its parent package) | 4.0.4 | MIT |
 | `bowser` | 2.14.1 | MIT |
-| `brace-expansion` (bundled inside its parent package) | 5.0.9 | MIT |
+| `brace-expansion` (bundled inside its parent package) | 5.0.12 | MIT |
 | `case` (bundled inside its parent package) | 1.6.3 | (MIT OR GPL-3.0-or-later) |
 | `constructs` | 10.6.0 | Apache-2.0 |
 | `fs-extra` (bundled inside its parent package) | 11.3.6 | MIT |
