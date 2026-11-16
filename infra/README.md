@@ -74,7 +74,7 @@ deployment group in its stack.
 | `CongressIntegrationServiceStack` | Ingestion from congress.gov: `BillsApiPoller`, `FetchRawBill`, `EnrichOfficialVotes`, `FetchCongressMembersList`, `FetchRawCongressMembers`, their queues and the poller cursor |
 | `PriorityServiceStack` | `BillPriorityResolver` (Amazon Bedrock, hourly) and the `BillPriority` table |
 | `UserAPIServiceStack` | The Cognito user pool and app clients, the API Gateway REST API with its web ACL, the user-facing Lambdas (votes, preferences, district verification, App Attest, the pre-sign-up check, digests, account deletion and cleanup), and the canary |
-| `ShareSiteStack` | The private site bucket, the CloudFront distribution with WAF, the SPA rewrite function, a `/public/*` behaviour proxied to the user API, the certificate, DNS records and the upload of `../website` |
+| `ShareSiteStack` | The private site bucket, the CloudFront distribution with WAF, the SPA rewrite function, a `/public/*` behaviour proxied to the user API, a `/.well-known/security.txt` behaviour that serves it as `text/plain; charset=utf-8`, the certificate, DNS records and the upload of `../website` |
 | `NotificationServiceStack` | The notification pipeline (`NotificationType`, `UserMatcher`, `NotificationFanout`, `NotificationDispatcher`, `UserNotifier`), its queues and table, and the SNS platform application for APNs |
 | `SummarizerServiceStack` | `BillDiffer`, `BillSummarizer` (Amazon Bedrock), `CongressMemberSummarizer` |
 | `UserStoreStack` | The user tables |

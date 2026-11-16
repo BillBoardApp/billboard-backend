@@ -67,9 +67,16 @@ export const SHARE_PUBLIC_API_QUERY_STRINGS = ["guid", "congress", "type", "bill
 export const SHARE_SITE_ASSET_EXCLUDES = [".git", ".git/**", ".git*", ".github", ".github/**", "*.md", ".DS_Store", ".nvmrc"];
 
 // WEB-07 (project decision O3, 2026-11-12): the CloudFront access logs (IP address, time, page, referrer, browser) are
-// kept 30 days, as the API and Lambda logs are; it was 90. The privacy policy states this number, so it must be live
-// before a policy that says it is published (docs/RUNBOOK.md 25.1). The bucket is not versioned: expiry deletes.
+// kept 30 days, as the API and Lambda logs are; it was 90. The privacy policy's website paragraph is to state this
+// number, so this must be live before a policy that says it is published (docs/RUNBOOK.md 25.1), and a change to it
+// changes that paragraph too. The bucket is not versioned: expiry deletes.
 export const SHARE_SITE_ACCESS_LOG_RETENTION_DAYS = 30;
+
+// website/.well-known/security.txt (RFC 9116). The bucket deployment types each file from its extension, which gives
+// text/plain with no charset, and RFC 9116 section 3 asks for "text/plain" with charset "utf-8". So this one path has
+// its own cache behavior, whose response headers policy sets that Content-Type as well as the site's security headers.
+export const SECURITY_TXT_PATH_PATTERN = ".well-known/security.txt";
+export const SECURITY_TXT_CONTENT_TYPE = "text/plain; charset=utf-8";
 
 export interface ShareSiteCustomDomainProps {
   readonly shareDomainName: string;
@@ -171,9 +178,11 @@ export class ShareSiteStack extends cdk.Stack {
       defaultAction: { allow: {} },
       // Sampled requests stay on here and on the rules (waf-rules.ts), on purpose, unlike the user API's ACL
       // (user-api-gateway.ts). A sample holds the visitor's IP address and request headers, kept 3 hours by AWS. The
-      // privacy policy's "Our website" paragraph already says the hosting service records each visit's IP address,
-      // time, page, referrer and browser, kept 30 days. A project decision of 2026-11-12 (WEB-07 privacy draft,
-      // checklist item 7) covered only the API and sign-in firewall, whose samples are off.
+      // site's access logs (accessLogsBucket above) hold each request's IP address, time, page, referrer and browser,
+      // among other request details, kept SHARE_SITE_ACCESS_LOG_RETENTION_DAYS days. The privacy policy's website
+      // paragraph must say so (WEB-07), and a change to these samples or logs must keep it true. A project decision of
+      // 2026-11-12 (WEB-07 privacy draft, checklist item 7) covered only the API and sign-in firewall, whose samples
+      // are off.
       visibilityConfig: {
         cloudWatchMetricsEnabled: true,
         metricName: "ShareSiteWebAcl",
@@ -223,26 +232,36 @@ function handler(event) {
       `),
     });
 
+    const shareSiteSecurityHeaders: cloudfront.ResponseSecurityHeadersBehavior = {
+      contentSecurityPolicy: {
+        contentSecurityPolicy: SHARE_SITE_CONTENT_SECURITY_POLICY,
+        override: true,
+      },
+      contentTypeOptions: { override: true },
+      frameOptions: { frameOption: cloudfront.HeadersFrameOption.DENY, override: true },
+      referrerPolicy: {
+        referrerPolicy: cloudfront.HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
+        override: true,
+      },
+      strictTransportSecurity: {
+        accessControlMaxAge: cdk.Duration.days(365),
+        includeSubdomains: false,
+        override: true,
+      },
+    };
     const shareSiteResponseHeadersPolicy = new cloudfront.ResponseHeadersPolicy(this, "ShareSiteResponseHeadersPolicy", {
       comment: "Billboard share site security headers with a same-origin CSP",
-      securityHeadersBehavior: {
-        contentSecurityPolicy: {
-          contentSecurityPolicy: SHARE_SITE_CONTENT_SECURITY_POLICY,
-          override: true,
-        },
-        contentTypeOptions: { override: true },
-        frameOptions: { frameOption: cloudfront.HeadersFrameOption.DENY, override: true },
-        referrerPolicy: {
-          referrerPolicy: cloudfront.HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
-          override: true,
-        },
-        strictTransportSecurity: {
-          accessControlMaxAge: cdk.Duration.days(365),
-          includeSubdomains: false,
-          override: true,
-        },
+      securityHeadersBehavior: shareSiteSecurityHeaders,
+    });
+    // The same security headers, plus security.txt's Content-Type (SECURITY_TXT_CONTENT_TYPE, above).
+    const securityTxtResponseHeadersPolicy = new cloudfront.ResponseHeadersPolicy(this, "ShareSiteSecurityTxtResponseHeadersPolicy", {
+      comment: "Billboard share site security headers, and the RFC 9116 Content-Type for security.txt",
+      securityHeadersBehavior: shareSiteSecurityHeaders,
+      customHeadersBehavior: {
+        customHeaders: [{ header: "Content-Type", value: SECURITY_TXT_CONTENT_TYPE, override: true }],
       },
     });
+    const siteOrigin = origins.S3BucketOrigin.withOriginAccessControl(this.siteBucket);
 
     this.distribution = new cloudfront.Distribution(this, "ShareSiteDistribution", {
       defaultRootObject: "index.html",
@@ -253,7 +272,7 @@ function handler(event) {
       logBucket: accessLogsBucket,
       logFilePrefix: "cloudfront/",
       defaultBehavior: {
-        origin: origins.S3BucketOrigin.withOriginAccessControl(this.siteBucket),
+        origin: siteOrigin,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
         responseHeadersPolicy: shareSiteResponseHeadersPolicy,
@@ -294,6 +313,15 @@ function handler(event) {
             headerBehavior: cloudfront.OriginRequestHeaderBehavior.none(),
           }),
           responseHeadersPolicy: shareSiteResponseHeadersPolicy,
+          compress: true,
+        },
+        // The file comes from the site bucket like any other; only its Content-Type differs. The path has a dot, so
+        // the default behavior's rewrite function would pass it through unchanged, and none is attached here.
+        [SECURITY_TXT_PATH_PATTERN]: {
+          origin: siteOrigin,
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+          responseHeadersPolicy: securityTxtResponseHeadersPolicy,
           compress: true,
         },
       },

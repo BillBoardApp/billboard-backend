@@ -1423,8 +1423,9 @@ button:focus-visible {
   text-underline-offset: 3px;
 }
 
-/* How Billboard works, Help, Privacy, Acceptable use and Report a security problem: each link a 44 px target,
-   like the masthead's. */
+/* How Billboard works, Help, Privacy, Acceptable use, Code of conduct, Contributing, Trademarks and Report a
+   security problem: each link a 44 px target, like the masthead's. They wrap onto as many rows as the width needs,
+   with no gap between rows, so each row is one target high. */
 .footer-links {
   display: flex;
   flex-wrap: wrap;

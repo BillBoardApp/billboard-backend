@@ -1,7 +1,8 @@
 // Keeps the copies of the site's header and footer in step (website content review, item 9b). The site has no
 // build step, so every page in website/ carries its own copy of the masthead and the footer. This fails when a
 // page's copy differs from index.html's, ignoring whitespace and which link marks the current page, or when a
-// page marks another page as current.
+// page marks another page as current. It also fails on a drafting placeholder in capitals and brackets, such as
+// "[EFFECTIVE DATE]", anywhere in a page.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,6 +56,10 @@ for (const page of pages) {
     for (const [, href] of block.matchAll(/<a\s+href="([^"]*)"\s+aria-current="page"/g)) {
       if (target(href) !== page) fail(page, `marks ${href} as the current page`);
     }
+  }
+  // A drafting placeholder such as "[EFFECTIVE DATE]" must never reach the live site: every deploy re-syncs it.
+  for (const [placeholder] of readFileSync(path.join(siteDir, page), "utf8").matchAll(/\[[A-Z][A-Z0-9 ,.'-]*\]/g)) {
+    fail(page, `holds the placeholder ${placeholder}; replace it with the real text before merging`);
   }
 }
 

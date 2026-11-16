@@ -1,0 +1,8 @@
+# How to report a security problem in Billboard. The policy below says what is in scope and how we respond.
+Contact: https://github.com/BillBoardApp/billboard-backend/security/advisories/new
+Contact: mailto:contact@billboard-project.com
+Expires: 2027-11-15T00:00:00Z
+Policy: https://github.com/BillBoardApp/billboard-backend/security/policy
+Canonical: https://billboard-project.com/.well-known/security.txt
+Canonical: https://share.billboard-project.com/.well-known/security.txt
+Preferred-Languages: en
