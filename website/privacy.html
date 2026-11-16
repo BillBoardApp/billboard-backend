@@ -37,14 +37,15 @@
           <p class="kicker">Billboard Privacy Policy</p>
           <h1 class="page-title">Privacy Policy</h1>
           <p class="docket">
-            Effective date: November 3, 2026
+            Effective date: November 16, 2026
           </p>
         </header>
         <div class="double-rule" aria-hidden="true"></div>
         <div class="policy-body">
         <p>
           This Privacy Policy explains how Billboard collects, uses, and protects information when you use
-          the Billboard mobile app and related services.
+          the Billboard mobile app and the related services we run. Section 8 explains which copies of the app it
+          covers, now that Billboard's code is public.
         </p>
 
         <h2 class="heading">1. Information We Collect</h2>
@@ -80,11 +81,12 @@
           </li>
           <li>
             App integrity information. To keep votes and accounts genuine, the app uses Apple's App Attest and
-            DeviceCheck to show it is a real copy of Billboard on a real Apple device. We store a random identifier
-            for your app installation, its public key, Apple's attestation receipt and a use counter, which accounts
-            have used that installation, and with each vote the result of this check. Apple keeps a small per-device
-            counter of accounts created, with no account information. The installation records expire about 400 days
-            after their last use, and deleting your account deletes its link to the installation.
+            DeviceCheck to show it is a copy of Billboard built and signed by us, running on a real Apple device. We
+            store a random identifier for your app installation, its public key, Apple's attestation receipt and a
+            use counter, which accounts have used that installation, and with each vote the result of this check.
+            Apple keeps a small per-device counter of accounts created, with no account information. The
+            installation records expire about 400 days after their last use, and deleting your account deletes its
+            link to the installation.
           </li>
           <li>
             In-app activity records required to provide app features, including feedback submissions and
@@ -151,7 +153,7 @@
             including the email hashes described above and your account's links to the address hashes and to your app
             installation.
           </li>
-          <li>You may also request account or data assistance by contacting support.</li>
+          <li>You may also ask for help with your account or data by email (see section 10).</li>
         </ul>
 
         <h2 class="heading">7. Children’s Privacy</h2>
@@ -160,13 +162,56 @@
           from children under 13.
         </p>
 
-        <h2 class="heading">8. Changes to This Policy</h2>
+        <h2 class="heading">8. Billboard Is Open Source</h2>
+        <p>
+          Billboard's source code is public. The app, the service behind it, and this website are published on
+          <a href="https://github.com/BillBoardApp">GitHub</a> under the Apache License 2.0, so anyone can read, copy,
+          change, and share the code. Our service is built and deployed from that public code.
+        </p>
+        <p>Publishing the code does not change how we handle your information:</p>
+        <ul>
+          <li>
+            We collect, use, store, and delete the same information described in this policy, in the same ways and
+            for the same periods.
+          </li>
+          <li>
+            The published code contains no personal information about our users, and no passwords or secret keys.
+            Reading or copying the code does not give anyone access to your information.
+          </li>
+          <li>
+            Other people never see how you voted. Results show only combined counts, and a state or district
+            breakdown appears only after enough people there have voted. Anyone can now read the code that applies
+            these rules.
+          </li>
+        </ul>
+        <p>
+          <strong>Builds from source.</strong> You can build the Billboard app yourself from our source code. As
+          published, it connects to our service, the same one the App Store app uses. When it does, this policy
+          covers it exactly as it covers the App Store app. Please follow our
+          <a href="/acceptable-use.html">acceptable-use rules</a> when you use our service this way. A copy you build
+          yourself is signed with your own Apple developer account, so it cannot pass the app integrity check
+          described in section 1. We may limit or refuse votes and sign-ups from copies that do not pass it.
+        </p>
+        <p>
+          <strong>Apps and services run by others.</strong> Anyone may run their own copy of Billboard's code on
+          their own servers. Those apps and services are not ours, and this policy does not cover them; their
+          operators' own policies apply. If someone else's app connects to our service, this policy covers what our
+          service receives, but not what that app collects or sends anywhere else. Before you sign up for an app
+          based on Billboard, check who runs it.
+        </p>
+        <p>
+          <strong>Keep personal details out of public pages.</strong> Our code repositories, and their issues and
+          pull requests, are public. Do not post your email address, street address, or votes there. Send account
+          and data requests to the address in section 10.
+        </p>
+
+        <h2 class="heading">9. Changes to This Policy</h2>
         <p>
           We may update this policy from time to time. If we make material changes, we will update the effective
           date and may provide additional notice in the app or service.
         </p>
 
-        <h2 class="heading">9. Contact</h2>
+        <h2 class="heading">10. Contact</h2>
         <p>
           For privacy questions, account help, or data requests, contact:
           <a href="mailto:contact@billboard-project.com">contact@billboard-project.com</a>
@@ -180,11 +225,19 @@
     </main>
 
     <footer class="site-footer">
+      <p>
+        Billboard is open source under the
+        <a href="https://www.apache.org/licenses/LICENSE-2.0">Apache License 2.0</a>. Read the code on GitHub:
+        <a href="https://github.com/BillBoardApp/billboard-ios">the iOS app</a> and
+        <a href="https://github.com/BillBoardApp/billboard-backend">the service and this website</a>.
+      </p>
       <p>Billboard is an independent project and is not affiliated with Congress or any government agency.</p>
       <ul class="footer-links">
         <li><a href="/about.html">How Billboard works</a></li>
         <li><a href="/support.html">Help</a></li>
         <li><a href="/privacy.html" aria-current="page">Privacy</a></li>
+        <li><a href="/acceptable-use.html">Acceptable use</a></li>
+        <li><a href="https://github.com/BillBoardApp/billboard-backend/security/policy">Report a security problem</a></li>
       </ul>
     </footer>
   </body>

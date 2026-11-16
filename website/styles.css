@@ -1411,7 +1411,20 @@ button:focus-visible {
   color: var(--ink-2);
 }
 
-/* How Billboard works, Help and Privacy: each link a 44 px target, like the masthead's. */
+.site-footer p + p {
+  margin-top: var(--space-s);
+}
+
+/* The links in the open-source line sit in its sentence, so they keep the line's height (WCAG 2.5.8's inline
+   exception) and are underlined like the links below. */
+.site-footer p a {
+  color: var(--ink);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+/* How Billboard works, Help, Privacy, Acceptable use and Report a security problem: each link a 44 px target,
+   like the masthead's. */
 .footer-links {
   display: flex;
   flex-wrap: wrap;

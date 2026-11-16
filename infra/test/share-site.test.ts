@@ -318,6 +318,7 @@ describe("ShareSiteStack", () => {
           "roadmap.html",
           "support.html",
           "about.html",
+          "acceptable-use.html",
           "app.js",
           "styles.css",
           "robots.txt",

@@ -1,9 +1,9 @@
 # website
 
-The static public site for Billboard: the landing page, Help, How Billboard works, the privacy policy, the roadmap and
-the read-only shared-bill page. There is no build step and no `package.json`: this directory is the site.
-`infra/lib/stacks/share-site.ts` (`ShareSiteStack`) publishes it to S3 behind CloudFront at `billboard-project.com` and
-`share.billboard-project.com`.
+The static public site for Billboard: the landing page, Help, How Billboard works, the privacy policy, the
+acceptable-use rules, the roadmap and the read-only shared-bill page. There is no build step and no `package.json`:
+this directory is the site. `infra/lib/stacks/share-site.ts` (`ShareSiteStack`) publishes it to S3 behind CloudFront
+at `billboard-project.com` and `share.billboard-project.com`.
 
 ## Files
 
@@ -13,8 +13,9 @@ the read-only shared-bill page. There is no build step and no `package.json`: th
 | `app.js` | Client-side routing for `/b/<guid>`, `/share/<guid>` and `/?guid=<guid>`, and the shared-bill page (below). The landing page keeps `index.html`'s own title and description |
 | `styles.css` | Styles for every page, in the app's Civic Record design (below) |
 | `support.html` | Help: contact, deleting an account (in the app, or by email for someone without it: section 8.3 of the operations runbook, which is kept private), signing in, where you vote, reporting a problem with a summary, results and accessibility. |
-| `about.html` | How Billboard works: who runs it, where the data comes from, what the AI does and does not do, staying neutral, how results work, and the data fetcher |
-| `privacy.html` | Privacy policy (legal-facing text: say so in the pull request when you change it) |
+| `about.html` | How Billboard works: who runs it (an independent project, open source with links to both repositories), where the data comes from, what the AI does and does not do, staying neutral, how results work, and the data fetcher |
+| `privacy.html` | Privacy policy (legal-facing text: say so in the pull request when you change it). Section 8 covers the open-source code, builds from source and copies run by others |
+| `acceptable-use.html` | Acceptable use: the rules for using the hosted service from a build made from source or from other code (legal-facing text, like the privacy policy). Its list is the same, word for word, as "Acceptable use of the hosted service" in `CONTRIBUTING.md` here and in billboard-ios: change them together. Link it as `/acceptable-use.html`, since CloudFront has no extensionless route for it |
 | `roadmap.html` | Roadmap page |
 | `robots.txt` | `Disallow: /public/`, so crawlers do not call the bill API. `/b/` stays open, because some link previewers obey `robots.txt`; `app.js` keeps share views out of search with a `noindex` instead |
 | `favicon.ico`, `apple-touch-icon.png` | The 1.2 app icon at 16, 32 and 48 px (on its rounded navy tile) and at 180 px (full-bleed navy, which iOS rounds itself), drawn from the same layers as `assets/favicon.svg` |
@@ -100,10 +101,12 @@ is drawn sealed.
 
 Each page carries its own copy of the masthead and the footer, since there is no build step. Copy them from
 `index.html` when you add a page, and mark the current page with `aria-current="page"` on its own link only. The
-footer is short: the approved not-affiliated sentence, word for word ("Billboard is
-an independent project and is not affiliated with Congress or any government agency."), then How Billboard works,
-Help and Privacy. `scripts/ci/check-website-chrome.mjs` (in `npm run check`) fails when a page's masthead or footer
-differs from `index.html`'s, when a footer lacks that sentence, or when a page marks another page as current.
+footer carries the approved open-source line (the Apache License 2.0 and links to billboard-ios and
+billboard-backend), the approved not-affiliated sentence, word for word ("Billboard is an independent project and is
+not affiliated with Congress or any government agency."), then How Billboard works, Help, Privacy, Acceptable use and
+Report a security problem (the backend repository's security policy). `scripts/ci/check-website-chrome.mjs` (in
+`npm run check`) fails when a page's masthead or footer differs from `index.html`'s, when a footer lacks that
+sentence, or when a page marks another page as current.
 
 ## Keeping it current
 
@@ -123,10 +126,11 @@ node --check website/app.js
 python3 -m http.server 8080 --bind 127.0.0.1 --directory website
 ```
 
-Open http://127.0.0.1:8080/, `/support.html`, `/about.html`, `/privacy.html` and `/roadmap.html`. `--bind 127.0.0.1`
-keeps the server off your local network. Only CloudFront serves the share routes (`/b/<guid>`, `/share/<guid>`) and
-the extensionless `/privacy`, `/roadmap`, `/support` and `/about`, and proxies `/public/processed-bill` to the API, so
-locally `/?guid=<guid>` shows the share shell and then its plain "couldn't load" error.
+Open http://127.0.0.1:8080/, `/support.html`, `/about.html`, `/privacy.html`, `/acceptable-use.html` and
+`/roadmap.html`. `--bind 127.0.0.1` keeps the server off your local network. Only CloudFront serves the share routes
+(`/b/<guid>`, `/share/<guid>`) and the extensionless `/privacy`, `/roadmap`, `/support` and `/about`, and proxies
+`/public/processed-bill` to the API, so locally `/?guid=<guid>` shows the share shell and then its plain "couldn't
+load" error.
 
 `npm run check` at the root checks `app.js` with `node --check`, runs `scripts/ci/check-website-chrome.mjs` (above) and
 `scripts/ci/test-website-app.mjs`, which loads `app.js` in Node and checks the ended note on faked dates (January 3
