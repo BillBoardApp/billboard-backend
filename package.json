@@ -9,7 +9,7 @@
   },
   "scripts": {
     "setup": "cd contracts && env -u npm_config_allow_scripts npm ci && cd ../services && env -u npm_config_allow_scripts npm ci && cd ../infra && env -u npm_config_allow_scripts npm ci",
-    "check": "cd contracts && npm run check --silent && cd .. && bash scripts/ci/check-layout.sh && node --check website/app.js && node scripts/ci/check-website-chrome.mjs && node scripts/ci/test-website-app.mjs",
+    "check": "cd contracts && npm run check --silent && cd .. && bash scripts/ci/check-layout.sh && node --check website/app.js && node scripts/ci/check-website-chrome.mjs && node scripts/ci/check-security-txt.mjs && node scripts/ci/test-website-app.mjs",
     "generate": "cd contracts && npm run generate --silent",
     "typecheck": "cd services && npm run typecheck && cd ../infra && npm run typecheck",
     "lint": "cd services && npm run lint --silent && npm run format:check --silent",

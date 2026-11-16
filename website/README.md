@@ -12,12 +12,13 @@ at `billboard-project.com` and `share.billboard-project.com`.
 | `index.html` | Landing page, and the shell for the shared-bill view. Its static preview tags (`og:*`, `twitter:*`) are written to fit a shared bill as well as the home page, because link previewers do not run `app.js`; there is no `og:url`. It carries the Smart App Banner (`apple-itunes-app`, app ID 6757132060) |
 | `app.js` | Client-side routing for `/b/<guid>`, `/share/<guid>` and `/?guid=<guid>`, and the shared-bill page (below). The landing page keeps `index.html`'s own title and description |
 | `styles.css` | Styles for every page, in the app's Civic Record design (below) |
-| `support.html` | Help: contact, deleting an account (in the app, or by email for someone without it: section 8.3 of the operations runbook, which is kept private), signing in, where you vote, reporting a problem with a summary, results and accessibility. |
+| `support.html` | Help: contact (with privacy section 8's sentences, word for word, on keeping personal details out of the public repositories), deleting an account (in the app, or by email for someone without it: section 8.3 of the operations runbook, which is kept private), signing in, where you vote, reporting a problem with a summary, results and accessibility. |
 | `about.html` | How Billboard works: who runs it (an independent project, open source with links to both repositories), where the data comes from, what the AI does and does not do, staying neutral, how results work, and the data fetcher |
 | `privacy.html` | Privacy policy (legal-facing text: say so in the pull request when you change it). Section 8 covers the open-source code, builds from source and copies run by others |
 | `acceptable-use.html` | Acceptable use: the rules for using the hosted service from a build made from source or from other code (legal-facing text, like the privacy policy). Its list is the same, word for word, as "Acceptable use of the hosted service" in `CONTRIBUTING.md` here and in billboard-ios: change them together. Link it as `/acceptable-use.html`, since CloudFront has no extensionless route for it |
 | `roadmap.html` | Roadmap page |
 | `robots.txt` | `Disallow: /public/`, so crawlers do not call the bill API. `/b/` stays open, because some link previewers obey `robots.txt`; `app.js` keeps share views out of search with a `noindex` instead |
+| `.well-known/security.txt` | How to report a security problem, in the RFC 9116 format: the private GitHub report and contact@billboard-project.com as contacts, the security policy, the canonical URLs and an Expires date that has to be renewed every year ("security.txt", below) |
 | `favicon.ico`, `apple-touch-icon.png` | The 1.2 app icon at 16, 32 and 48 px (on its rounded navy tile) and at 180 px (full-bleed navy, which iOS rounds itself), drawn from the same layers as `assets/favicon.svg` |
 | `assets/favicon.svg` | Favicon, and the app icon beside the App Store button: the 1.2 app icon's layers (`AppIcon.icon/Assets/*.svg` in the app repository), drawn flat |
 | `assets/share-preview.png` | Social preview image (1200 × 630): the app icon's artwork alone, centred on the masthead navy. It sets no type, so it carries no font licence |
@@ -103,10 +104,13 @@ Each page carries its own copy of the masthead and the footer, since there is no
 `index.html` when you add a page, and mark the current page with `aria-current="page"` on its own link only. The
 footer carries the approved open-source line (the Apache License 2.0 and links to billboard-ios and
 billboard-backend), the approved not-affiliated sentence, word for word ("Billboard is an independent project and is
-not affiliated with Congress or any government agency."), then How Billboard works, Help, Privacy, Acceptable use and
-Report a security problem (the backend repository's security policy). `scripts/ci/check-website-chrome.mjs` (in
+not affiliated with Congress or any government agency."), then How Billboard works, Help, Privacy, Acceptable use,
+Code of conduct, Contributing and Trademarks (`CODE_OF_CONDUCT.md`, `CONTRIBUTING.md` and `TRADEMARKS.md` in the
+backend repository on GitHub) and Report a security problem (the backend repository's security policy). Each footer
+link is a 44 px target, and the list wraps at phone width. `scripts/ci/check-website-chrome.mjs` (in
 `npm run check`) fails when a page's masthead or footer differs from `index.html`'s, when a footer lacks that
-sentence, or when a page marks another page as current.
+sentence, when a page marks another page as current, or when a page still holds a drafting placeholder in capitals
+and brackets, such as `[EFFECTIVE DATE]`.
 
 ## Keeping it current
 
@@ -132,10 +136,31 @@ Open http://127.0.0.1:8080/, `/support.html`, `/about.html`, `/privacy.html`, `/
 `/public/processed-bill` to the API, so locally `/?guid=<guid>` shows the share shell and then its plain "couldn't
 load" error.
 
-`npm run check` at the root checks `app.js` with `node --check`, runs `scripts/ci/check-website-chrome.mjs` (above) and
-`scripts/ci/test-website-app.mjs`, which loads `app.js` in Node and checks the ended note on faked dates (January 3
-before and after noon Eastern, February 1, resolutions, Passed bills, a later Congress), the action list, the
-roll-call wording, Report a problem and the source link. The infra tests package this directory.
+`npm run check` at the root checks `app.js` with `node --check`, runs `scripts/ci/check-website-chrome.mjs` (above),
+`scripts/ci/check-security-txt.mjs` ("security.txt", below) and `scripts/ci/test-website-app.mjs`, which loads
+`app.js` in Node and checks the ended note on faked dates (January 3 before and after noon Eastern, February 1,
+resolutions, Passed bills, a later Congress), the action list, the roll-call wording, Report a problem and the source
+link. The infra tests package this directory.
+
+## security.txt
+
+`.well-known/security.txt` tells security researchers how to reach the project (RFC 9116). It lists, in order of
+preference, the private vulnerability report on GitHub and contact@billboard-project.com, then the security policy
+(`SECURITY.md` at the root of the repository), the two URLs it is served at and the preferred language. Keep its
+contacts in step with `SECURITY.md`.
+
+Its `Expires` date must stay in the future, and RFC 9116 recommends less than a year ahead.
+`scripts/ci/check-security-txt.mjs` (in `npm run check`, so in every pull request and before each deploy) checks the
+fields and fails from 30 days before `Expires`, with a message that says how to renew. To renew it:
+
+1. Set `Expires` to midnight UTC 364 days from today; the check's message gives that date. The check fails if it is
+   more than a year away.
+2. Check that the other fields still hold: the contacts and policy against `SECURITY.md`, and the canonical URLs
+   against the site's domains.
+3. Run `npm run check`, then merge and deploy. The file is only renewed once it is live: check
+   https://billboard-project.com/.well-known/security.txt.
+
+`node scripts/ci/check-security-txt.mjs --now=<date-time>` runs the check as if it were that time, to try the message.
 
 ## Content Security Policy
 
@@ -163,6 +188,8 @@ policy in `share-site.ts` in the same pull request.
   pipeline, branch or approval starts one is the deployer's own setup.
 - Each deploy that changes the site re-syncs the bucket (removing files that are gone) and invalidates `/*` on the
   CloudFront distribution, so new or renamed pages and assets need no infra change. The bucket deployment sets each
-  file's content type from its extension (`robots.txt` text, `favicon.ico` an icon). An extensionless route such as
+  file's content type from its extension (`robots.txt` text, `favicon.ico` an icon). `.well-known/security.txt` has its
+  own CloudFront behavior, whose response headers policy adds `charset=utf-8` to its `text/plain` (RFC 9116 asks for
+  it); the CloudFront function passes it, like any path with a dot, unchanged. An extensionless route such as
   `/support` needs a line in the CloudFront function in `share-site.ts` and its test; a path the function does not
   know is served the landing page.

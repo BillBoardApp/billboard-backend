@@ -17,7 +17,7 @@ maintainers deploy it ([docs/DEPLOYING.md](docs/DEPLOYING.md)). The iOS app live
 | `services/` | 48 Lambda handlers in TypeScript (esbuild, Jest), one per directory under `src/handlers/`, plus operator scripts | [services/README.md](services/README.md) |
 | `infra/` | The CDK app: 15 stacks in one AWS account and region | [infra/README.md](infra/README.md) |
 | `website/` | The static public site: landing page, Help, How Billboard works, privacy policy, roadmap and the `/b/<guid>` share page | [website/README.md](website/README.md) |
-| `scripts/ci/` | `build-release.sh` (deterministic Lambda zips and a release manifest), `publish-release.sh` (its upload), the layout guard `check-layout.sh`, and the commit-safety check's two scripts | |
+| `scripts/ci/` | `build-release.sh` (deterministic Lambda zips and a release manifest), `publish-release.sh` (its upload), the layout guard `check-layout.sh`, the website checks (`check-website-chrome.mjs`, `check-security-txt.mjs` and `test-website-app.mjs`), and the commit-safety check's two scripts | |
 | `.github/workflows/` | `pr.yml` (the checks every pull request runs) and `deploy.yml` (the production pipeline) | [docs/DEPLOYING.md](docs/DEPLOYING.md) |
 | `docs/` | How deploys work, a glossary of the IDs that code comments cite, and why the operations runbook they cite is not public | [docs/README.md](docs/README.md) |
 
@@ -58,7 +58,7 @@ python3 -m http.server 8080 --bind 127.0.0.1 --directory website
 | Command | What it does |
 |---|---|
 | `npm run setup` | `npm ci` in `contracts/`, `services/` and `infra/` |
-| `npm run check` | Contracts check, the layout guard, `node --check website/app.js`, the website's masthead and footer check and its `app.js` unit checks |
+| `npm run check` | Contracts check, the layout guard, `node --check website/app.js`, the website's masthead and footer check, its `security.txt` check (fields, and Expires more than 30 days away) and its `app.js` unit checks |
 | `npm run generate` | Rewrites `contracts/generated/` from the schemas |
 | `npm run typecheck` | `tsc --noEmit` in `services/` and `infra/` |
 | `npm run lint` | ESLint (errors only) and the Prettier check in `services/` |

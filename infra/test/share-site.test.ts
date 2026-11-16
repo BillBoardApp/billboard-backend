@@ -8,6 +8,8 @@ import { BILL_PRIORITY_TABLE_PARTITION_KEY } from "../lib/config/priority-servic
 import { SharedInfraStack } from "../lib/stacks/shared-infra";
 import { UserAPIServiceStack } from "../lib/stacks/user-api-service";
 import {
+  SECURITY_TXT_CONTENT_TYPE,
+  SECURITY_TXT_PATH_PATTERN,
   SHARE_PUBLIC_API_QUERY_STRINGS,
   SHARE_SITE_ACCESS_LOG_RETENTION_DAYS,
   SHARE_SITE_CONTENT_SECURITY_POLICY,
@@ -196,9 +198,10 @@ describe("ShareSiteStack", () => {
       ]);
     });
 
-    // WEB-07 (project decision O3): the privacy policy says the site's request logs are kept 30 days, so the distribution
-    // logs to this one bucket, which expires every log after 30 days and keeps no other rule or version.
-    test("keeps the CloudFront access logs 30 days, the period the privacy policy states", () => {
+    // WEB-07 (project decision O3): the site's request logs are kept 30 days, the period the privacy policy's website
+    // paragraph is to state, so the distribution logs to this one bucket, which expires every log after 30 days and
+    // keeps no other rule or version.
+    test("keeps the CloudFront access logs 30 days (WEB-07, decision O3)", () => {
       expect(SHARE_SITE_ACCESS_LOG_RETENTION_DAYS).toBe(30);
       const logBuckets = Object.entries(template.findResources("AWS::S3::Bucket")).filter(([id]) =>
         id.startsWith("ShareSiteAccessLogsBucket"),
@@ -223,30 +226,65 @@ describe("ShareSiteStack", () => {
       });
       expect(SHARE_SITE_CONTENT_SECURITY_POLICY).not.toMatch(/https?:|unsafe-inline|unsafe-eval|\*/);
 
-      template.resourceCountIs("AWS::CloudFront::ResponseHeadersPolicy", 1);
-      template.hasResourceProperties("AWS::CloudFront::ResponseHeadersPolicy", {
-        ResponseHeadersPolicyConfig: Match.objectLike({
-          SecurityHeadersConfig: {
-            ContentSecurityPolicy: {
-              ContentSecurityPolicy: SHARE_SITE_CONTENT_SECURITY_POLICY,
-              Override: true,
-            },
-            ContentTypeOptions: { Override: true },
-            FrameOptions: { FrameOption: "DENY", Override: true },
-            ReferrerPolicy: { ReferrerPolicy: "strict-origin-when-cross-origin", Override: true },
-            StrictTransportSecurity: Match.objectLike({ AccessControlMaxAgeSec: 31536000, Override: true }),
+      // The site's policy, and security.txt's, which adds only its Content-Type (next test).
+      const policies = template.findResources("AWS::CloudFront::ResponseHeadersPolicy");
+      expect(Object.keys(policies)).toHaveLength(2);
+      for (const policy of Object.values(policies)) {
+        expect(policy.Properties.ResponseHeadersPolicyConfig.SecurityHeadersConfig).toEqual({
+          ContentSecurityPolicy: {
+            ContentSecurityPolicy: SHARE_SITE_CONTENT_SECURITY_POLICY,
+            Override: true,
           },
-        }),
-      });
+          ContentTypeOptions: { Override: true },
+          FrameOptions: { FrameOption: "DENY", Override: true },
+          ReferrerPolicy: { ReferrerPolicy: "strict-origin-when-cross-origin", Override: true },
+          StrictTransportSecurity: { AccessControlMaxAgeSec: 31536000, IncludeSubdomains: false, Override: true },
+        });
+      }
 
-      const policyId = Object.keys(template.findResources("AWS::CloudFront::ResponseHeadersPolicy"))[0];
+      const policyId = Object.keys(policies).find((id) => id.startsWith("ShareSiteResponseHeadersPolicy"));
+      expect(policyId).toBeDefined();
+      expect(policies[policyId!].Properties.ResponseHeadersPolicyConfig.CustomHeadersConfig).toBeUndefined();
       template.hasResourceProperties("AWS::CloudFront::Distribution", {
         DistributionConfig: Match.objectLike({
           DefaultCacheBehavior: Match.objectLike({ ResponseHeadersPolicyId: { Ref: policyId } }),
-          CacheBehaviors: [Match.objectLike({ PathPattern: "public/*", ResponseHeadersPolicyId: { Ref: policyId } })],
+          CacheBehaviors: [
+            Match.objectLike({ PathPattern: "public/*", ResponseHeadersPolicyId: { Ref: policyId } }),
+            Match.objectLike({ PathPattern: SECURITY_TXT_PATH_PATTERN }),
+          ],
         }),
       });
       expect(JSON.stringify(template.toJSON())).not.toContain(MANAGED_SECURITY_HEADERS_POLICY_ID);
+    });
+
+    // RFC 9116 section 3: security.txt is served as text/plain with charset utf-8. S3 gives it text/plain from its
+    // extension, so its own behavior's policy sets the whole Content-Type. Otherwise the behavior matches the default:
+    // same bucket origin, HTTPS only, the same caching.
+    test("serves /.well-known/security.txt from the site bucket as text/plain; charset=utf-8", () => {
+      expect(SECURITY_TXT_PATH_PATTERN).toBe(".well-known/security.txt");
+      expect(SECURITY_TXT_CONTENT_TYPE).toBe("text/plain; charset=utf-8");
+      const policies = template.findResources("AWS::CloudFront::ResponseHeadersPolicy");
+      const securityTxtPolicyId = Object.keys(policies).find((id) => id.startsWith("ShareSiteSecurityTxtResponseHeadersPolicy"));
+      expect(securityTxtPolicyId).toBeDefined();
+      expect(policies[securityTxtPolicyId!].Properties.ResponseHeadersPolicyConfig.CustomHeadersConfig).toEqual({
+        Items: [{ Header: "Content-Type", Value: "text/plain; charset=utf-8", Override: true }],
+      });
+
+      const [distribution] = Object.values(template.findResources("AWS::CloudFront::Distribution"));
+      const config = distribution.Properties.DistributionConfig;
+      const behavior = (config.CacheBehaviors as Array<Record<string, any>>).find(
+        ({ PathPattern }) => PathPattern === ".well-known/security.txt",
+      );
+      expect(behavior).toEqual({
+        PathPattern: ".well-known/security.txt",
+        TargetOriginId: config.DefaultCacheBehavior.TargetOriginId,
+        ViewerProtocolPolicy: "redirect-to-https",
+        CachePolicyId: config.DefaultCacheBehavior.CachePolicyId,
+        ResponseHeadersPolicyId: { Ref: securityTxtPolicyId },
+        Compress: true,
+      });
+      // Still two origins, the site bucket and the API: the bucket origin is shared, not added a second time.
+      expect(config.Origins).toHaveLength(2);
     });
 
     test("keys and forwards the public API only on the query strings fetchProcessedBill reads", () => {
@@ -324,8 +362,10 @@ describe("ShareSiteStack", () => {
           "robots.txt",
           "favicon.ico",
           "apple-touch-icon.png",
+          ".well-known",
         ]),
       );
+      expect(fs.readdirSync(path.join(stagedDir, ".well-known"))).toEqual(["security.txt"]);
       [".git", ".github", ".gitignore", "README.md", "CONTRIBUTING.md"].forEach((repoFile) => {
         expect(staged).not.toContain(repoFile);
       });
@@ -357,6 +397,7 @@ describe("ShareSiteStack", () => {
       expect(rewrite("/robots.txt")).toBe("/robots.txt");
       expect(rewrite("/favicon.ico")).toBe("/favicon.ico");
       expect(rewrite("/apple-touch-icon.png")).toBe("/apple-touch-icon.png");
+      expect(rewrite("/.well-known/security.txt")).toBe("/.well-known/security.txt");
       expect(rewrite("/public/processed-bill")).toBe("/public/processed-bill");
     });
   });
