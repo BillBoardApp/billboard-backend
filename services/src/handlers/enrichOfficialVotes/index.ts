@@ -52,6 +52,16 @@ const VOTE_ENRICHMENT_DEFER_DELAY_SECONDS = Number.parseInt(
   10,
 );
 const VOTE_ENRICHMENT_MAX_DEFER_ATTEMPTS = Number.parseInt(process.env.VOTE_ENRICHMENT_MAX_DEFER_ATTEMPTS ?? "4", 10);
+// REL-61: how long the BillDiffer message after an enrichment write waits (SQS DelaySeconds, 0 to 900; 60 when unset
+// or not a number). FetchRawBill's own pass ran before the members were written. For a bill already summarized, this
+// later pass patches them into the processed bill. For a new bill or new text, the summary FetchRawBill's pass queued
+// reads the latest raw bill when it stores, so it usually takes the members itself and this pass changes nothing; an
+// immediate pass found no processed bill yet and queued a second summary of the same text.
+const DEFAULT_DIFFER_DELAY_AFTER_ENRICHMENT_SECONDS = 60;
+const parsedDifferDelay = Number.parseInt(process.env.DIFFER_DELAY_AFTER_ENRICHMENT_SECONDS ?? "", 10);
+const DIFFER_DELAY_AFTER_ENRICHMENT_SECONDS = Number.isFinite(parsedDifferDelay)
+  ? Math.max(0, Math.min(900, parsedDifferDelay))
+  : DEFAULT_DIFFER_DELAY_AFTER_ENRICHMENT_SECONDS;
 const HOUSE_ROLLCALL_ENDPOINT_TEMPLATE =
   process.env.HOUSE_ROLLCALL_ENDPOINT_TEMPLATE ||
   `${CONGRESS_API_BASE_URL}/house-vote/{congress}/{session}/{rollCall}/members`;
@@ -516,7 +526,7 @@ const buildHouseVotesUrl = (
 };
 
 // Every message carries `correlationId` (the bill's pipeline trace id) as a message attribute.
-const enqueueGuids = async (queueUrl: string, guids: string[], correlationId?: string) => {
+const enqueueGuids = async (queueUrl: string, guids: string[], correlationId?: string, delaySeconds = 0) => {
   if (!queueUrl || guids.length === 0) return;
   for (let i = 0; i < guids.length; i += QUEUE_BATCH_SIZE) {
     const batch = guids.slice(i, i + QUEUE_BATCH_SIZE);
@@ -526,6 +536,7 @@ const enqueueGuids = async (queueUrl: string, guids: string[], correlationId?: s
         Entries: batch.map((guid, idx) => ({
           Id: `msg-${i + idx}`,
           MessageBody: JSON.stringify({ guid }),
+          ...(delaySeconds > 0 ? { DelaySeconds: delaySeconds } : {}),
           ...correlationIdMessageAttributes(correlationId),
         })),
       }),
@@ -781,6 +792,11 @@ const processRecord = async (record: SQSRecord): Promise<void> => {
   }
   const correlationId = correlationIdFromRecord(record) ?? mintCorrelationId(guid);
   logger.appendKeys({ guid, correlationId });
+  // REL-61: the delayed BillDiffer pass, sent after a write. A redelivery sends it even when it writes nothing: an
+  // earlier receive may have written and then failed to send (a Failed entry, an SQS error, a timeout in between).
+  const redelivered = Number(record.attributes?.ApproximateReceiveCount ?? "1") > 1;
+  const sendDelayedDifferPass = () =>
+    enqueueGuids(QUEUE_URL, [guid], correlationId, DIFFER_DELAY_AFTER_ENRICHMENT_SECONDS);
 
   const revision = await rawBillDao.getRevisionByGuid(guid);
   const rawBill = revision.value;
@@ -818,7 +834,10 @@ const processRecord = async (record: SQSRecord): Promise<void> => {
   );
 
   if (!needsHouse && !needsSenate && !incompleteWithoutRef) {
-    await enqueueGuids(QUEUE_URL, [guid], correlationId);
+    // REL-61: nothing to add, so a first receive writes and sends nothing: whoever stored this copy sent it to
+    // BillDiffer then. (Sending it again queued a second summary of the same text for a bill with no processed copy.)
+    logger.info("vote enrichment not needed", { event: "enrichment_not_needed", billGuid: guid, redelivered });
+    if (redelivered) await sendDelayedDifferPass();
     return;
   }
 
@@ -891,7 +910,9 @@ const processRecord = async (record: SQSRecord): Promise<void> => {
   if (mutated) {
     const written = await storeEnrichment(guid, rawBill, revision.etag, fetched, refs, correlationId);
     if (written === "superseded") superseded = true;
-    else await enqueueGuids(QUEUE_URL, [guid], correlationId);
+    else await sendDelayedDifferPass();
+  } else if (redelivered) {
+    await sendDelayedDifferPass();
   }
 
   await emitMetric("CongressApiCallsVoteEnrich", callBudgetUsed);
@@ -921,9 +942,8 @@ const processRecord = async (record: SQSRecord): Promise<void> => {
   }
 
   if (finalizedPartial) {
-    if (!mutated && hadOfficialVotesBefore) {
-      await enqueueGuids(QUEUE_URL, [guid], correlationId);
-    }
+    // REL-61: a partial finalize that wrote nothing sent nothing above (unless redelivered); the stored copy was diffed
+    // when it was stored.
     await emitMetric("EnrichmentPartialFinalized", 1);
     logger.warn("vote enrichment finalized as partial", {
       billGuid: guid,
