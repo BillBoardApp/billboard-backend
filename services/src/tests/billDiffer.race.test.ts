@@ -610,7 +610,7 @@ describe("REL-30: races on an existing bill", () => {
     mockS3.put(RAW_KEY, rawDoc({ text: "v1", fetchedAt: "2026-02-02T00:00:00.000Z" }));
     mockS3.put(PROCESSED_KEY, legacyProcessed("Summary of v1."), { "correlation-id": "old-lambda" });
 
-    await runDiffer({ guid: GUID }); // the UA-28 reconcile, a no-op enrichment send or a redelivery
+    await runDiffer({ guid: GUID }); // the UA-28 reconcile, a hand-sent message or a redelivery
 
     expect(diffLines().at(-1)).toMatchObject({ outcome: "unchanged", decidedBy: "legacy-anchor" });
     expect(take(Q.summarizer)).toEqual([]);
@@ -1074,18 +1074,18 @@ describe("REL-36: the enrichment write races a newer fetch", () => {
 });
 
 describe("REL-33 and the REL-31 repair", () => {
-  it("a no-op enrichment send and a duplicate message write nothing and leave storedAt alone", async () => {
+  it("a no-op enrichment sends nothing, and a hand-sent message and its duplicate write nothing and leave storedAt alone", async () => {
     await existingBill(rawDoc({ actions: [PASSAGE, INTRODUCED] }));
     await enrich();
     await drainDifferOneByOne();
     const before = processed();
     const writes = processedPuts().length;
 
-    await enrich(); // members complete: sends {guid} to BillDifferQueue without writing
+    await enrich(); // members complete: nothing written or sent to BillDifferQueue (REL-61)
     expect(mockS3.contentVersions(RAW_KEY)).toHaveLength(2);
-    const [send] = take(Q.differ);
-    await runDiffer(send.body);
-    await runDiffer(send.body); // duplicate delivery
+    expect(take(Q.differ)).toEqual([]);
+    await runDiffer({ guid: GUID }); // a hand-sent message (RUNBOOK) or the UA-28 reconcile
+    await runDiffer({ guid: GUID }); // duplicate delivery
 
     expect(
       diffLines()

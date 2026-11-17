@@ -498,7 +498,7 @@ describe("enrichOfficialVotes handler", () => {
     expect(JSON.parse(deferred.Entries[0].MessageBody)).toEqual({ guid, attempt: 2 });
   });
 
-  it("finalizes as partial after max deferrals and re-enqueues to bill differ", async () => {
+  it("finalizes as partial after max deferrals, writes, and sends to bill differ late", async () => {
     const guid = "BILLS-119hr12ih";
     getByGuidMock.mockResolvedValue(baseRawBill(guid));
 
@@ -518,6 +518,7 @@ describe("enrichOfficialVotes handler", () => {
     expect(mockSqsSend.mock.calls[0][0].input.QueueUrl).toBe(
       "https://sqs.us-east-1.amazonaws.com/123456789012/bill-differ",
     );
+    expect(mockSqsSend.mock.calls[0][0].input.Entries[0].DelaySeconds).toBe(60);
   });
 
   it("fetches Senate member votes from official XML and patches the Senate chamber", async () => {
@@ -986,6 +987,7 @@ describe("enrichOfficialVotes conditional raw writes (REL-36)", () => {
     expect(members(storeMock.mock.calls[0][0])).toEqual([]); // the first write, over the copy it read
     expect(storeMock).toHaveBeenCalledTimes(1); // nothing written over the fresher copy
     expect(sentToDiffer()).toHaveLength(1);
+    expect(sentToDiffer()[0][0].input.Entries[0].DelaySeconds).toBe(60); // REL-61
     expect(logLines(console.log)).toContainEqual(expect.objectContaining({ event: "enrichment_already_complete" }));
   });
 
@@ -1194,5 +1196,193 @@ describe("Senate member lookup refresh (REL-46)", () => {
     expect(manifestScans()).toBe(1);
     await runOnce();
     expect(manifestScans()).toBe(2);
+  });
+});
+
+describe("enrichOfficialVotes sends to billDiffer only after a write, and late (REL-61)", () => {
+  const DIFFER_QUEUE = "https://sqs.us-east-1.amazonaws.com/123456789012/bill-differ";
+  const houseMembersBody = JSON.stringify({
+    houseRollCallVoteMemberVotes: {
+      results: [
+        { bioguideID: "A000001", firstName: "Jane", lastName: "Doe", voteParty: "D", voteState: "CA", voteCast: "Yea" },
+      ],
+    },
+  });
+  const sentToDiffer = () =>
+    mockSqsSend.mock.calls.map(([command]) => command.input).filter((input) => input.QueueUrl === DIFFER_QUEUE);
+  const reloadWithDelay = (value: string | undefined) => {
+    jest.resetModules();
+    if (value === undefined) delete process.env.DIFFER_DELAY_AFTER_ENRICHMENT_SECONDS;
+    else process.env.DIFFER_DELAY_AFTER_ENRICHMENT_SECONDS = value;
+    handler = require("../handlers/enrichOfficialVotes").handler;
+  };
+
+  it("sends the bill on to billDiffer 60 s after it writes the members", async () => {
+    const guid = "BILLS-119hr10ih";
+    getByGuidMock.mockResolvedValue(baseRawBill(guid));
+    httpResponses.push({ statusCode: 200, body: houseMembersBody });
+
+    const result = await handler(createSQSEvent(guid));
+
+    expect(result.batchItemFailures).toHaveLength(0);
+    expect(storeMock).toHaveBeenCalledTimes(1);
+    const sent = sentToDiffer();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].Entries).toEqual([
+      expect.objectContaining({ MessageBody: JSON.stringify({ guid }), DelaySeconds: 60 }),
+    ]);
+  });
+
+  it.each([
+    ["30", 30],
+    ["1200", 900],
+    ["-5", undefined],
+    ["0", undefined],
+    ["soon", 60],
+  ])(
+    "takes DIFFER_DELAY_AFTER_ENRICHMENT_SECONDS=%s as a delay of %s s (0 to 900, 60 when not a number)",
+    async (value, expected) => {
+      reloadWithDelay(value);
+      const guid = "BILLS-119hr10ih";
+      getByGuidMock.mockResolvedValue(baseRawBill(guid));
+      httpResponses.push({ statusCode: 200, body: houseMembersBody });
+
+      await handler(createSQSEvent(guid));
+
+      const [entry] = sentToDiffer()[0].Entries;
+      expect(entry.DelaySeconds).toBe(expected);
+    },
+  );
+
+  it("writes and sends nothing when the House members are already there", async () => {
+    const guid = "BILLS-119hr10ih";
+    const enriched = baseRawBill(guid);
+    Object.assign(contentOf(enriched).officialVotes!.house!, {
+      memberDataAvailable: true,
+      members: [{ bioguideId: "A000001", displayName: "Doe, Jane", votePosition: "Yea" as const }],
+    });
+    getByGuidMock.mockResolvedValue(enriched);
+
+    const result = await handler(createSQSEvent(guid));
+
+    expect(result.batchItemFailures).toHaveLength(0);
+    expect(storeMock).not.toHaveBeenCalled();
+    expect(mockSqsSend).not.toHaveBeenCalled();
+    expect(mockHttpsRequest).not.toHaveBeenCalled();
+    expect(logLines(console.log)).toContainEqual(
+      expect.objectContaining({
+        message: "vote enrichment not needed",
+        event: "enrichment_not_needed",
+        billGuid: guid,
+      }),
+    );
+  });
+
+  it("writes and sends nothing for a bill with no recorded vote (a voice vote)", async () => {
+    const guid = "BILLS-119hr10ih";
+    const voiceVote = baseRawBill(guid);
+    delete contentOf(voiceVote).officialVotes;
+    contentOf(voiceVote).actions.actions = [
+      {
+        actionCode: "8000",
+        actionDate: "2025-02-01",
+        text: "On motion to suspend the rules and pass the bill Agreed to by voice vote.",
+      },
+    ];
+    getByGuidMock.mockResolvedValue(voiceVote);
+
+    const result = await handler(createSQSEvent(guid));
+
+    expect(result.batchItemFailures).toHaveLength(0);
+    expect(storeMock).not.toHaveBeenCalled();
+    expect(mockSqsSend).not.toHaveBeenCalled();
+    expect(logLines(console.log)).toContainEqual(expect.objectContaining({ event: "enrichment_not_needed" }));
+  });
+
+  it("finalizes a chamber with no roll call as partial without a write, and sends nothing", async () => {
+    const guid = "BILLS-119hr10ih";
+    const noRollCall = baseRawBill(guid);
+    contentOf(noRollCall).actions.actions = [
+      { actionCode: "8000", actionDate: "2025-02-01", text: "On passage Passed by the Yeas and Nays: 220 - 210." },
+    ];
+    getByGuidMock.mockResolvedValue(noRollCall);
+
+    const result = await handler(createSQSEvent(guid));
+
+    expect(result.batchItemFailures).toHaveLength(0);
+    expect(storeMock).not.toHaveBeenCalled();
+    expect(sentToDiffer()).toHaveLength(0);
+    expect(logLines(console.warn)).toContainEqual(
+      expect.objectContaining({ message: "vote enrichment finalized as partial", billGuid: guid }),
+    );
+  });
+
+  const redelivery = (event: SQSEvent): SQSEvent => {
+    event.Records[0].attributes.ApproximateReceiveCount = "2";
+    return event;
+  };
+
+  it("re-sends the delayed pass on a redelivery after its own write whose send failed", async () => {
+    const guid = "BILLS-119hr10ih";
+    getByGuidMock.mockResolvedValue(baseRawBill(guid));
+    httpResponses.push({ statusCode: 200, body: houseMembersBody });
+    mockSqsSend.mockResolvedValueOnce({ Failed: [{ Id: "msg-0", SenderFault: false, Code: "InternalError" }] });
+
+    const first = await handler(createSQSEvent(guid));
+    expect(first.batchItemFailures).toEqual([{ itemIdentifier: "msg-0" }]);
+    expect(storeMock).toHaveBeenCalledTimes(1);
+
+    mockSqsSend.mockClear();
+    getByGuidMock.mockResolvedValue(storeMock.mock.calls[0][0]); // the copy the first receive wrote
+    const second = await handler(redelivery(createSQSEvent(guid)));
+
+    expect(second.batchItemFailures).toHaveLength(0);
+    expect(storeMock).toHaveBeenCalledTimes(1); // nothing written again
+    const sent = sentToDiffer();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].Entries[0].DelaySeconds).toBe(60);
+    expect(logLines(console.log)).toContainEqual(
+      expect.objectContaining({ event: "enrichment_not_needed", redelivered: true }),
+    );
+  });
+
+  it("on a redelivered deferral that writes nothing, sends the delayed pass and defers", async () => {
+    const guid = "BILLS-119s25is";
+    getByGuidMock.mockResolvedValue(baseSenateRawBill(guid));
+    for (let call = 0; call < 3; call += 1) httpResponses.push({ statusCode: 500, body: "" });
+
+    const result = await handler(redelivery(createSQSEvent(guid, 1)));
+
+    expect(result.batchItemFailures).toHaveLength(0);
+    expect(storeMock).not.toHaveBeenCalled();
+    const sent = sentToDiffer();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].Entries[0].DelaySeconds).toBe(60);
+    const deferred = mockSqsSend.mock.calls
+      .map(([command]) => command.input)
+      .filter((input) => input.QueueUrl.endsWith("/vote-enrichment"));
+    expect(deferred).toHaveLength(1);
+    expect(deferred[0].Entries[0].DelaySeconds).toBe(900);
+  });
+
+  it("still sends nothing when a fresher copy names another roll call (superseded)", async () => {
+    const guid = "BILLS-119hr10ih";
+    getByGuidMock.mockResolvedValue(baseRawBill(guid));
+    const newerVote = baseRawBill(guid);
+    contentOf(newerVote).actions.actions[0] = {
+      ...contentOf(newerVote).actions.actions[0],
+      recordedVotes: [{ chamber: "House", congress: 119, sessionNumber: 1, rollNumber: 150 }],
+    };
+    getRevisionByGuidMock
+      .mockImplementationOnce(async () => ({ value: baseRawBill(guid), etag: '"etag-1"' }))
+      .mockImplementationOnce(async () => ({ value: newerVote, etag: '"etag-2"' }));
+    storeMock.mockRejectedValueOnce(
+      Object.assign(new Error("precondition"), { name: "PreconditionFailed", $metadata: { httpStatusCode: 412 } }),
+    );
+    httpResponses.push({ statusCode: 200, body: houseMembersBody });
+
+    await handler(createSQSEvent(guid));
+
+    expect(sentToDiffer()).toHaveLength(0);
   });
 });
