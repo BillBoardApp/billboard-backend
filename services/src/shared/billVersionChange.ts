@@ -13,15 +13,22 @@ import { actionTextWithoutCitations } from "./congressionalRecordCitations";
 //   newActionEntry  another action on that same latest date (since 2026-11-12 an action whose text differs from one
 //                   already there only by Congressional Record citations is the same action: congress.gov adds,
 //                   changes and drops them on existing actions days or months later);
-//   textVersion     the summary was written from other text (the source-text-hash S3 metadata changed: Congress
-//                   published another text, or retitled the bill).
+//   textVersion     the summary was written from other text (the source-text-hash S3 metadata changed) and
+//                   congress.gov listed another text version or retitled the bill between the raw copies the two
+//                   summaries came from. manifestDateMoves sees only the hash; CreateBillsManifest confirms a move for
+//                   the text alone from those two copies (shared/textVersionEvidence.ts; project decision 2026-11-17,
+//                   RUNBOOK 4.9 and 16.1 step 6). Text newly stored or re-fetched for a version already listed
+//                   re-summarizes the bill and keeps its date; when a copy cannot be read the hash alone moves it, as
+//                   before.
 //
 // Everything else keeps the row's date while the row takes the new content: a reprocess or re-summary of the same
 // text, cosponsors, member votes, committees, older actions filled in or removed, tallies, titles, life areas, topics,
 // and any field added later. A first publication (no row) is dated by its document, as always. CreateBillsManifest
 // stores each row's ManifestDateBasis (MANIFEST_DATE_BASIS_ATTRIBUTE) to judge the next version without reading S3
-// (for a row stored with a d1 basis it reads the version before when that basis cannot tell: sameDayActions), and
-// scripts/redateManifestRows.ts plans re-dates by the same rule.
+// (for a row stored with a d1 basis it reads the version before when that basis cannot tell: sameDayActions), except
+// that a move for the text alone reads two raw copies (textVersionEvidence.ts). scripts/redateManifestRows.ts plans
+// re-dates by the same rule, except that it does not read those raw copies yet: it takes a move for the text alone as
+// the hash gives it.
 //
 // The change classes below are older and stay for billContentHash (the row's contentHash, which the re-date script and
 // a rolled-back CreateBillsManifest read) and for the logs:
@@ -253,7 +260,10 @@ export interface ManifestDateBasis {
    * in d2 also without its Congressional Record citations, actionTextWithoutCitations); sorted, without repeats.
    */
   latestActionKeys: string[];
-  /** 16 hex of the SHA-256 of the source-text-hash the summary was written from, or "" when it is unknown (a legacy bill). */
+  /**
+   * 16 hex of the SHA-256 of the source-text-hash the summary was written from (textVersionDigest), or "" when it is
+   * unknown (a legacy bill).
+   */
   textVersion: string;
   /**
    * Only on a basis computed from a document, never stored: each action on the latest date as its d1 key (the text
@@ -267,6 +277,16 @@ export type ManifestDateMove = "status" | "newerAction" | "newActionEntry" | "te
 
 const digest = (text: string, length: number): string =>
   createHash("sha256").update(text).digest("hex").slice(0, length);
+
+/**
+ * The 16-hex text version a date basis holds for a source-text-hash (ManifestDateBasis.textVersion): 64 bits of the
+ * SHA-256 of the trimmed hash, or "" when there is none (a legacy bill). shared/textVersionEvidence.ts matches raw
+ * copies to a row's text version with it, so both sides digest alike; a golden test pins it.
+ */
+export const textVersionDigest = (sourceTextHash: string | null | undefined): string => {
+  const text = typeof sourceTextHash === "string" ? sourceTextHash.trim() : "";
+  return text ? digest(text, 16) : "";
+};
 
 /** A status as the apps show it. */
 export const manifestDateStatus = (value: unknown): string => {
@@ -312,13 +332,12 @@ export const manifestDateBasis = (doc: unknown, sourceTextHash?: string | null):
   const latestActionKeyPairs = Array.from(pairs.values()).sort(([a1, a2], [b1, b2]) =>
     a1 === b1 ? compareStrings(a2, b2) : compareStrings(a1, b1),
   );
-  const text = typeof sourceTextHash === "string" ? sourceTextHash.trim() : "";
   return {
     version: DATE_BASIS_VERSION,
     status: manifestDateStatus(record.billStatus),
     latestActionDate,
     latestActionKeys: Array.from(new Set(latestActionKeyPairs.map(([, d2Key]) => d2Key))).sort(),
-    textVersion: text ? digest(text, 16) : "",
+    textVersion: textVersionDigest(sourceTextHash),
     latestActionKeyPairs,
   };
 };
@@ -409,7 +428,8 @@ export interface ManifestDateJudgement {
  * Why `next` moves a row that reflects `row`, and what its actions on the latest date are. An action dated before the
  * latest one, a removed action, a Congressional Record citation added, changed or removed, or a latest date that went
  * back is not news, and a text version is compared only when both are known (a legacy bill's first text hash is not a
- * new text).
+ * new text). A textVersion move is the hash's verdict only; CreateBillsManifest drops it when the raw copies show the
+ * same text versions and title (textVersionEvidence.ts).
  */
 export const manifestDateJudgement = (row: ManifestDateBasis, next: ManifestDateBasis): ManifestDateJudgement => {
   const moves: ManifestDateMove[] = [];

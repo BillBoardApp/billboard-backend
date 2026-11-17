@@ -39,9 +39,11 @@ import {
 import { rawCongressUpdatedAt, readProcessedSource } from "../../shared/billSourceReconcile";
 import { isCommemorativeResolution, processedBillCommemorativeInput } from "../../shared/commemorativeResolutions";
 import { correlationIdFromMetadata, isRel56BackfillCorrelationId } from "../../shared/correlation";
+import { emitEmbeddedMetrics } from "../../shared/metrics";
 import { buildS3WrappedObjectMessage } from "../../shared/replayCongressVoteProfiles";
 import { backoffDelayMs, sleep } from "../../shared/retry";
 import { processSqsRecords } from "../../shared/sqsBatch";
+import { readTextVersionEvidence, type TextVersionEvidence } from "../../shared/textVersionEvidence";
 import { Readable } from "stream";
 
 const BUCKET_NAME = process.env.BUCKET_NAME!;
@@ -69,6 +71,9 @@ const MAX_ROW_DATE_LAG_MS = 3_000;
 // it), which a kept row's own updatedAt is not. A document older than it is never written over it (upsertManifestEntry).
 // Never served: the manifest builders pick their attributes by name, as for contentHash and dateBasis.
 const DOCUMENT_STORED_AT_ATTRIBUTE = "documentStoredAt";
+// The text version check's metrics (ManifestTextVersionUnconfirmed, ManifestTextVersionReadFailed; RUNBOOK 4.9),
+// beside the companion metrics of the same namespace.
+const MANIFEST_METRIC_NAMESPACE = "BillBoard/BillsManifest";
 
 const normalizeProcessedBillKey = (key: string): string => {
   const match = key.match(/^processed-bills\/([^/]+)\.json$/i);
@@ -360,7 +365,8 @@ const buildManifestItem = (
     cosponsors: { L: (entry.cosponsors ?? []).map((v) => ({ S: String(v) })) },
     voteCount: { N: String(toVoteCount(voteState.voteCount)) },
     // The document this row reflects, so the next version can be judged against it without reading S3
-    // (billVersionChange.ts). Never served: the manifest builders pick their attributes by name.
+    // (billVersionChange.ts; a move for the text alone also reads two raw copies, textVersionEvidence.ts). Never
+    // served: the manifest builders pick their attributes by name.
     [MANIFEST_CONTENT_HASH_ATTRIBUTE]: { S: contentHash },
     [MANIFEST_DATE_BASIS_ATTRIBUTE]: { S: formatDateBasis(dateBasis) },
     [DOCUMENT_STORED_AT_ATTRIBUTE]: { S: documentStoredAt },
@@ -402,7 +408,10 @@ type ManifestRead = {
   versionId?: string;
   /** The pipeline trace id the processed write stored (x-amz-meta-correlation-id, OBS-10), when it has one. */
   correlationId?: string;
-  /** The raw version the document was built from (its source-raw-version metadata, REL-30), when recorded. */
+  /**
+   * The raw version the document was built from (its source-raw-version metadata, REL-30), when recorded; also the new
+   * copy of a text version check (textVersionEvidence.ts).
+   */
   sourceRawVersion?: string;
 };
 
@@ -422,6 +431,8 @@ type DateDecision = {
   basis: DateBasisVersion | null;
   /** For the logs: the version's actions on the latest date against the row's basis (sameDayActions), when it judged them. */
   sameDay: SameDayActions | null;
+  /** For the logs: the raw-copy check of a move for the text alone (textVersionEvidence.ts), or null when none ran. */
+  textVersionCheck: TextVersionEvidence | null;
 };
 
 const asDocument = (value: unknown): Record<string, unknown> | undefined =>
@@ -555,8 +566,9 @@ const reflectsNewerDocument = (row: ManifestRowState, documentAt: string): boole
 
 /**
  * Whether a document newer than the row keeps the row's date: unless it brings news against the document the row
- * reflects (a status, a newer action or another action on the latest date, another text; shared/billVersionChange.ts
- * manifestDateMoves), the row keeps the date its sort key carries. What the row reflects is known, in this order, from:
+ * reflects (a status, a newer action or another action on the latest date, another text version or title;
+ * shared/billVersionChange.ts manifestDateMoves), the row keeps the date its sort key carries. What the row reflects is
+ * known, in this order, from:
  *
  * - its date basis (every row this release writes, d2, and every row the releases of 2026-10-28 to 2026-11-12 wrote,
  *   d1). A d1 basis holds each latest-date action's text with its Congressional Record citations; when it cannot tell
@@ -566,6 +578,11 @@ const reflectsNewerDocument = (row: ManifestRowState, documentAt: string): boole
  * - the S3 version before the one read, when the row reflects it (rowReflects): a row written by an older release;
  * - otherwise the row itself (rowDateMoves): its status, and an action dated after the day it was dated.
  *
+ * A version whose only news is its text (another source-text-hash) is confirmed from the raw copies: the one it names
+ * (source-raw-version) and the newest older one holding the text the row was judged against. When their titles and
+ * text-version lists (type and day) are the same, the text was newly stored for a version already listed, so the row
+ * keeps its date; when a copy cannot be found or read it moves as before (shared/textVersionEvidence.ts; RUNBOOK 4.9).
+ *
  * A first publication has no row and is dated by its document (a REL-56 backfill's by congress.gov's update time,
  * dateFirstPublication), as an equal sort key (a replay) is rewritten in place.
  */
@@ -574,24 +591,31 @@ const decideManifestDate = async (
   row: ManifestRowState,
   existingSk: string,
   previousVersion: () => Promise<PreviousVersion | null>,
+  textVersionEvidence: (baseTextVersion: string) => Promise<TextVersionEvidence>,
 ): Promise<DateDecision> => {
   let changeClass = contentHashChangeClass(row.contentHash, read.contentHash);
   let moves: ManifestDateMove[];
   let decidedBy: DateDecision["decidedBy"];
+  // The text version `moves` was judged against: the row's basis, or the previous S3 version's.
+  let fromTextVersion = "";
   const rowBasis = parseDateBasis(row.dateBasis);
   const judgement = rowBasis ? manifestDateJudgement(rowBasis, read.dateBasis) : null;
   // The S3 version before the one read is needed for a row without a basis whose hash does not settle it, and for a
   // d1 row whose keys cannot tell a citation edit from another action on the latest date (sameDayActions `unknown`).
   // Such a d1 row keeps its date without it (newActionEntry left out): a missed same-day entry costs less than an old
-  // bill re-dated for a citation (RUNBOOK 4.9).
+  // bill re-dated for a citation (RUNBOOK 4.9). The same holds when its text is then its only move and the raw copies
+  // show no new text version or title (below): that move no longer carries such an entry.
   const needsPrevious = judgement ? judgement.sameDay === "unknown" : changeClass !== "bookkeeping_only";
   const previous = needsPrevious && row.updatedAt ? await previousVersion() : null;
   if (previous && rowReflects(row, previous.document)) {
-    moves = manifestDateMoves(manifestDateBasis(previous.document, previous.sourceTextHash), read.dateBasis);
+    const previousBasis = manifestDateBasis(previous.document, previous.sourceTextHash);
+    moves = manifestDateMoves(previousBasis, read.dateBasis);
+    fromTextVersion = previousBasis.textVersion;
     changeClass = classifyBillVersionChange(previous.document, read.document).changeClass;
     decidedBy = "previousVersion";
   } else if (judgement) {
     moves = judgement.moves;
+    fromTextVersion = rowBasis?.textVersion ?? "";
     decidedBy = "dateBasis";
   } else if (changeClass === "bookkeeping_only") {
     // Equal status and actions. A text the summary was not written from always brings a new summary, which is not
@@ -601,6 +625,13 @@ const decideManifestDate = async (
   } else {
     moves = rowDateMoves(row, read.dateBasis);
     decidedBy = "row";
+  }
+  // A move for the text alone needs a new text version or title between the raw copies the two summaries came from
+  // (project decision 2026-11-17, RUNBOOK 4.9): text newly stored for a version already listed keeps the date.
+  let textVersionCheck: TextVersionEvidence | null = null;
+  if (moves.length === 1 && moves[0] === "textVersion") {
+    textVersionCheck = await textVersionEvidence(fromTextVersion);
+    if (textVersionCheck.verdict === "same_text_versions") moves = [];
   }
   const keptUpdatedAt =
     moves.length === 0 && row.updatedAt && manifestSortKey(row.updatedAt, read.entry.guid) === existingSk
@@ -613,6 +644,7 @@ const decideManifestDate = async (
     decidedBy,
     basis: rowBasis?.version ?? null,
     sameDay: judgement?.sameDay ?? null,
+    textVersionCheck,
   };
 };
 
@@ -665,9 +697,10 @@ const formerlyFailedMarkerUpdate = (guid: string, toStatus: string | undefined, 
  * commit: the loser is cancelled whole and re-reads. A bill therefore never gains a second row.
  *
  * A document newer than the row moves the row to the document's date only when it brings news: a status, a newer
- * action or another action on the latest date, another text (decideManifestDate). Any other keeps the row at its date:
- * the row is rewritten in place with every other attribute from the document, like an equal sort key, and the lookup
- * keeps its manifestSk and updatedAt ("kept"; docs/RUNBOOK.md 4.9). Forwarding is the same either way (applyRecord).
+ * action or another action on the latest date, another text version or title (decideManifestDate). Any other keeps the
+ * row at its date: the row is rewritten in place with every other attribute from the document, like an equal sort key,
+ * and the lookup keeps its manifestSk and updatedAt ("kept"; docs/RUNBOOK.md 4.9). Forwarding is the same either way
+ * (applyRecord).
  *
  * A kept write leaves the lookup where it was, so the row's own condition carries what the row reflects (contentHash,
  * dateBasis, documentStoredAt): of two writers holding different versions, the later commit is cancelled and reads
@@ -683,9 +716,22 @@ const upsertManifestEntry = async (read: ManifestRead, nowIso: string): Promise<
   const updatedAt = entry.updatedAt ?? nowIso;
   const newSk = manifestSortKey(updatedAt, entry.guid);
   // Read at most once per upsert, and only for a row with neither a date basis nor the new document's contentHash, or
-  // with a d1 basis that cannot tell a citation edit from another action on the latest date.
+  // with a d1 basis that cannot tell a citation edit from another action on the latest date. The raw copies of a text
+  // version check are read separately, below.
   let previous: Promise<PreviousVersion | null> | undefined;
   const previousVersion = () => (previous ??= readPreviousVersion(read));
+  // Read at most once per upsert and text version the row is judged against, and only for a version whose one move is
+  // its text: the raw-bills listing and at most 1 + TEXT_VERSION_BASE_MAX_GETS copies (decideManifestDate).
+  const textChecks = new Map<string, Promise<TextVersionEvidence>>();
+  const rawKey = buildRawBillRootGuidKey(entry.guid);
+  const textVersionEvidence = (baseTextVersion: string): Promise<TextVersionEvidence> => {
+    let check = textChecks.get(baseTextVersion);
+    if (!check) {
+      check = readTextVersionEvidence(storage, rawKey, { newRawVersion: read.sourceRawVersion, baseTextVersion });
+      textChecks.set(baseTextVersion, check);
+    }
+    return check;
+  };
   // Decided at most once per upsert, and only for a first publication (no lookup); only a backfilled one reads S3.
   let firstDate: Promise<FirstPublicationDate> | undefined;
   const firstPublicationDate = () => (firstDate ??= dateFirstPublication(read, updatedAt));
@@ -709,7 +755,7 @@ const upsertManifestEntry = async (read: ManifestRead, nowIso: string): Promise<
 
     const decision =
       existingSk && existingSk < newSk
-        ? await decideManifestDate(read, observedRow, existingSk, previousVersion)
+        ? await decideManifestDate(read, observedRow, existingSk, previousVersion, textVersionEvidence)
         : null;
     // The row's own version and a version that brings no news keep the row's sort key and date; a first publication
     // takes its own (currentSk).
@@ -781,9 +827,23 @@ const upsertManifestEntry = async (read: ManifestRead, nowIso: string): Promise<
           decidedBy: decision.decidedBy,
           basis: decision.basis,
           sameDay: decision.sameDay,
+          textVersionCheck: decision.textVersionCheck,
           rowUpdatedAt: observedRow.updatedAt ?? null,
           storedAt: updatedAt,
         });
+        // Once per committed upsert, so a retried transaction never counts twice.
+        const check = decision.textVersionCheck;
+        if (check?.verdict === "unconfirmed") {
+          const readFailed = check.reason === "listing_failed" || check.reason === "read_failed";
+          emitEmbeddedMetrics(
+            MANIFEST_METRIC_NAMESPACE,
+            [
+              { name: "ManifestTextVersionUnconfirmed", value: 1 },
+              ...(readFailed ? [{ name: "ManifestTextVersionReadFailed", value: 1 }] : []),
+            ],
+            { properties: { guid: entry.guid, reason: check.reason } },
+          );
+        }
       }
       return decision?.keptUpdatedAt ? "kept" : "written";
     } catch (error) {

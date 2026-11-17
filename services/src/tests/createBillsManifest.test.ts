@@ -16,6 +16,7 @@ import { CURATED_OVERRIDE_CASES } from "./fixtures/curatedCeremonialOverrides";
 import { jsonReadable } from "./fixtures/streams";
 import { applyTestEnv } from "./fixtures/env";
 import { FakeVersionedS3, type FakeS3Command, type FakeS3Input } from "./fakeVersionedS3";
+import { logLines } from "./logLines";
 
 jest.mock("@aws-sdk/client-s3", () => {
   const actual = jest.requireActual("@aws-sdk/client-s3");
@@ -1732,6 +1733,10 @@ describe("createBillsManifest handler", () => {
       ];
 
       it.each(movedCases)("moves the row for %s and forwards it as before", async (_name, doc, meta, moves) => {
+        // A move for the text alone runs the text version check (shared/textVersionEvidence.ts). This version names no
+        // raw copy (no source-raw-version), so it moves as before, with one metric line (EMF, on console.log).
+        const log = jest.spyOn(console, "log").mockImplementation(() => undefined);
+        const textOnly = moves.length === 1 && moves[0] === "textVersion";
         const ddbItems = seedCurrentRow(base, { voteCount: "42" });
         const { handler: loaded, sqsSend } = load(ddbItems);
         s3.put(key, base, TEXT);
@@ -1752,9 +1757,23 @@ describe("createBillsManifest handler", () => {
         });
         expect(JSON.parse(res.body).stats).toMatchObject({ upsertsSucceeded: 1, upsertsKeptDate: 0 });
         expect(dateLines(info)).toEqual([
-          expect.objectContaining({ decision: "moved", moves, decidedBy: "dateBasis" }),
+          expect.objectContaining({
+            decision: "moved",
+            moves,
+            decidedBy: "dateBasis",
+            textVersionCheck: textOnly
+              ? expect.objectContaining({ verdict: "unconfirmed", reason: "no_source_raw_version", gets: 0 })
+              : null,
+          }),
         ]);
         expect(s3.commands("ListObjectVersions")).toEqual([]);
+        expect(s3.commands("GetObject", `raw-bills/${guid}.json`)).toEqual([]);
+        expect(log).toHaveBeenCalledTimes(textOnly ? 1 : 0);
+        expect(logLines(log)).toEqual(
+          textOnly
+            ? [expect.objectContaining({ guid, reason: "no_source_raw_version", ManifestTextVersionUnconfirmed: 1 })]
+            : [],
+        );
         expect(sentTo(sqsSend, NOTIFY_QUEUE)).toEqual([
           { bucket: { name: "test-bucket" }, object: { key, versionId } },
         ]);
@@ -2130,6 +2149,7 @@ describe("createBillsManifest handler", () => {
             decidedBy: "contentHash",
             basis: null,
             sameDay: null,
+            textVersionCheck: null,
             rowUpdatedAt: base.storedAt,
             storedAt: BULK_STORED_AT,
           },
@@ -2170,6 +2190,9 @@ describe("createBillsManifest handler", () => {
       );
 
       it("moves it for a new text version, which the previous version's metadata shows", async () => {
+        // The text version check runs against the previous version's text; this version names no raw copy, so it moves
+        // as before, with one metric line (EMF, on console.log).
+        const log = jest.spyOn(console, "log").mockImplementation(() => undefined);
         const ddbItems = seedRow(base, { contentHash: billContentHash(base) });
         const { handler: loaded } = load(ddbItems);
         s3.put(key, base, TEXT);
@@ -2180,7 +2203,22 @@ describe("createBillsManifest handler", () => {
 
         expect(ddbItems[ddbKey("BILL_GUID", guid)].manifestSk).toEqual({ S: bulkSk });
         expect(dateLines(info)).toEqual([
-          expect.objectContaining({ decision: "moved", moves: ["textVersion"], decidedBy: "previousVersion" }),
+          expect.objectContaining({
+            decision: "moved",
+            moves: ["textVersion"],
+            decidedBy: "previousVersion",
+            textVersionCheck: expect.objectContaining({
+              verdict: "unconfirmed",
+              reason: "no_source_raw_version",
+              gets: 0,
+            }),
+          }),
+        ]);
+        expect(s3.commands("ListObjectVersions", `raw-bills/${guid}.json`)).toEqual([]);
+        expect(s3.commands("GetObject", `raw-bills/${guid}.json`)).toEqual([]);
+        expect(log).toHaveBeenCalledTimes(1);
+        expect(logLines(log)).toEqual([
+          expect.objectContaining({ guid, reason: "no_source_raw_version", ManifestTextVersionUnconfirmed: 1 }),
         ]);
       });
 
