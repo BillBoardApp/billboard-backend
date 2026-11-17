@@ -84,7 +84,11 @@ export const rawCongressUpdatedAt = (rawBill: RawBill | null | undefined): strin
   return times.length > 0 ? new Date(Math.max(...times)).toISOString() : undefined;
 };
 
-/** "v1:" + the SHA-256 (hex) of the title and the bill text: what a summary depends on. */
+/**
+ * "v1:" + the SHA-256 (hex) of the title and the bill text: what a summary depends on; a change re-summarizes the
+ * bill, while the manifest date moves for it only when congress.gov listed a new text version (type and day) or
+ * retitled the bill too (textVersionEvidence.ts, RUNBOOK 4.9).
+ */
 export const sourceTextHash = (rawBill: RawBill): string =>
   `v1:${createHash("sha256")
     .update(JSON.stringify([extractRawBillTitle(rawBill), extractRawBillXml(rawBill)]))

@@ -16,6 +16,7 @@ import {
   parseDateBasis,
   rowDateMoves,
   sameDayActions,
+  textVersionDigest,
   type ManifestDateBasis,
 } from "../shared/billVersionChange";
 import { actionTextWithoutCitations } from "../shared/congressionalRecordCitations";
@@ -582,6 +583,22 @@ describe("manifest dates: only news moves a row (2026-10-28)", () => {
         ["49cf36ae", "81f46a4a"],
       ]);
       expect(legacyBasis(cited)).toBe("d1|New|2026-02-10|27bf6936.49cf36ae|cd038fbd2e83ff3f");
+    });
+
+    it("digests a source-text-hash as the basis holds it (textVersionDigest), pinned", () => {
+      // shared/textVersionEvidence.ts matches raw copies to a row's text version with it, so both must digest alike.
+      expect(textVersionDigest(TEXT)).toBe("cd038fbd2e83ff3f");
+      expect(textVersionDigest(TEXT)).toBe(basis(BILL).textVersion);
+      expect(textVersionDigest(`  ${TEXT}\n`)).toBe("cd038fbd2e83ff3f");
+      // BILLS-119hr7349's two source-text-hashes (its pre-summary patch and its summary of 2026-11-17).
+      const PRE = "v1:3d5e5266166c17010b544001f334ec2efdb95b01af1dcda7569abcecfc8e5947";
+      const RUN = "v1:d2519d9c3e20b7845d391eac0a55044f4ded1bc07d5880b89bb8202f2155eb65";
+      expect(textVersionDigest(PRE)).toBe("d5207dddd4375a46");
+      expect(textVersionDigest(RUN)).toBe("1c9c842c0dd2ba73");
+      expect(manifestDateBasis(BILL, PRE).textVersion).toBe(textVersionDigest(PRE));
+      for (const none of ["", "   ", undefined, null]) expect(textVersionDigest(none)).toBe("");
+      // The goldens above, the rollback guarantee, are unchanged.
+      expect(formatDateBasis(basis(BILL))).toBe("d2|New|2026-02-10|27bf6936.81f46a4a|cd038fbd2e83ff3f");
     });
 
     it("parses what it formats, d1 rows too, and nothing else", () => {
