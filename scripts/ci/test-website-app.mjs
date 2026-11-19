@@ -185,6 +185,30 @@ check("actions as the app lists them: oldest first, each once, no raw codes", ()
   assert.equal(app.timelineActions(undefined).length, 0);
 });
 
+check("actions of one day keep Congress.gov's order, so Latest action is the last thing that happened", () => {
+  // H.R. 5371's enactment day as stored: Congress.gov's order, newest first, with times only on the House's lines.
+  const actions = [
+    { actionCode: "36000", actionDate: "2025-11-12", text: "Became Public Law No: 119-37.", type: "President" },
+    { actionCode: "36000", actionDate: "2025-11-12", text: "Became Public Law No: 119-37.", type: "BecameLaw" },
+    { actionCode: "36000", actionDate: "2025-11-12", text: "Signed by President.", type: "President" },
+    { actionCode: "E30000", actionDate: "2025-11-12", text: "Signed by President.", type: "BecameLaw" },
+    { actionCode: "E20000", actionDate: "2025-11-12", text: "Presented to President.", type: "Floor" },
+    { actionCode: "28000", actionDate: "2025-11-12", text: "Presented to President.", type: "President" },
+    { actionCode: "H38310", actionDate: "2025-11-12", actionTime: "20:21:58", text: "Motion to reconsider laid on the table Agreed to without objection.", type: "ResolvingDifferences" },
+    { actionCode: "H36210", actionDate: "2025-11-12", actionTime: "20:01:11", text: "The previous question was ordered pursuant to the rule.", type: "ResolvingDifferences" },
+    { actionCode: "17000", actionDate: "2025-11-10", text: "Passed Senate with an amendment by Yea-Nay Vote. 60 - 40.", type: "Floor" },
+  ];
+  const lines = plain(app.timelineActions(actions).map((action) => app.timelineText(action)));
+  assert.deepEqual(lines, [
+    "Passed Senate with an amendment by Yea-Nay Vote. 60 - 40.",
+    "The previous question was ordered pursuant to the rule.",
+    "Motion to reconsider laid on the table Agreed to without objection.",
+    "Presented to President.",
+    "Signed by President.",
+    "Became Public Law No: 119-37.",
+  ]);
+});
+
 check("roll calls are worded as the app words them", () => {
   const tallies = app.chamberTallies({
     senate: { yea: 60, nay: 40, present: 0, notVoting: 0, resultText: "Bill Passed" },
