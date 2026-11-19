@@ -162,6 +162,30 @@ const withManifestCompanionGroup = (edit) => (manifest) => ({
 const oneMember = (group) => ({ ...group, memberGuids: [group.primaryGuid] });
 const withoutRelationship = ({ relationship, ...group }) => group;
 
+// ── Vetoed bills (project decision 2026-11-19) ──
+// `vetoed` is sent only as true, beside a billStatus (billState) that keeps its value, on the processed bill as served,
+// the manifest item and the Weekly Brief item; absent means not vetoed, so a body without it (every server before it)
+// must validate, and false or any other value must not. Each of the three fixtures has one bill with it, so
+// check:swift decodes it.
+const WEEKLY_DIGEST = "schemas/entities/weekly-digest.v1.schema.json";
+const withVetoed = (value) => (bill) => ({ ...bill, vetoed: value });
+const withoutVetoed = ({ vetoed, ...rest }) => rest;
+const withManifestBills = (edit) => (manifest) => ({ ...manifest, bills: manifest.bills.map(edit) });
+const withDigestItems = (edit) => (digest) => ({
+  ...digest,
+  sections: digest.sections.map((section) => ({ ...section, items: section.items.map(edit) })),
+});
+const VETOED_MUST_ACCEPT = [
+  [PROCESSED_BILL, "a bill without vetoed", withoutVetoed],
+  [BILLS_MANIFEST, "a manifest item without vetoed", withManifestBills(withoutVetoed)],
+  [WEEKLY_DIGEST, "a brief item without vetoed", withDigestItems(withoutVetoed)],
+];
+const VETOED_MUST_REJECT = [false, "true", 1, null].flatMap((value) => [
+  [PROCESSED_BILL, `vetoed ${JSON.stringify(value)}`, withVetoed(value)],
+  [BILLS_MANIFEST, `vetoed ${JSON.stringify(value)} on a manifest item`, withManifestBills(withVetoed(value))],
+  [WEEKLY_DIGEST, `vetoed ${JSON.stringify(value)} on a brief item`, withDigestItems(withVetoed(value))],
+]);
+
 // ── Member facts (REL-52) ──
 // A member with no stats row (REL-46) or whose stats could not be read has none of the three counts (no 0 for a member
 // with no stats row or for an unknown count; a row with zeros keeps them), and a senator's per-Congress entries are
@@ -558,6 +582,7 @@ const MUST_REJECT = [
   [SNAPSHOT_POINTER, "a relative snapshotUrl", (pointer) => ({ ...pointer, snapshotUrl: "snapshots/bills.json.gz" })],
   [SNAPSHOT_POINTER, "a negative count", (pointer) => ({ ...pointer, count: -1 })],
   [SNAPSHOT_POINTER, "the manifest's bills inline", (pointer) => ({ ...pointer, bills: [] })],
+  ...VETOED_MUST_REJECT,
   ...LABEL_MUST_REJECT,
   ...STATS_MUST_REJECT,
   ...VERIFICATION_MUST_REJECT,
@@ -651,6 +676,7 @@ const MUST_ACCEPT = [
     "an unknown companion relationship in the manifest",
     withManifestCompanionGroup(unknownRelationship),
   ],
+  ...VETOED_MUST_ACCEPT,
   ...MEMBER_MUST_ACCEPT,
   ...LABEL_MUST_ACCEPT,
   ...STATS_MUST_ACCEPT,

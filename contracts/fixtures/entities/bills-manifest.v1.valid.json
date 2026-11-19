@@ -1,6 +1,6 @@
 {
   "generatedAt": "2026-03-06T20:00:00.000Z",
-  "count": 4,
+  "count": 5,
   "bills": [
     {
       "guid": "BILLS-119hr1234ih",
@@ -61,6 +61,20 @@
       "sponsors": ["P000001"],
       "cosponsors": [],
       "billStatus": "New"
+    },
+    {
+      "guid": "BILLS-119hr2207",
+      "billType": "hr",
+      "congress": "119",
+      "billNumber": "2207",
+      "updatedAt": "2026-03-02T15:00:00.000Z",
+      "title": "Rural Water Systems Act",
+      "subCategories": ["Conservation and Natural Resources"],
+      "lifeAreas": ["Utility Bills"],
+      "sponsors": ["W000001"],
+      "cosponsors": ["S000001"],
+      "billStatus": "Failed",
+      "vetoed": true
     }
   ],
   "companionGroups": [

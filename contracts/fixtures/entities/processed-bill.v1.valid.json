@@ -121,5 +121,6 @@
     "primaryGuid": "BILLS-119hr1285",
     "memberGuids": ["BILLS-119hr1285", "BILLS-119s570"],
     "relationship": "identical"
-  }
+  },
+  "vetoed": true
 }
