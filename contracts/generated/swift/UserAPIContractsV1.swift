@@ -61,6 +61,10 @@ nonisolated enum UserAPIContractsV1 {
         let priorityReason: String?
         let priorityExpiresAt: String?
         let billStatus: String?
+        /// Only as true, when the processed bill's actions show a veto that stands (billOutcomes.ts
+        /// deriveBillVetoedFromActions); absent otherwise. billStatus keeps its value. Clients that predate it ignore
+        /// it.
+        let vetoed: Bool?
         let civicProfile: CivicProfileScores?
     }
 
@@ -347,6 +351,9 @@ nonisolated enum UserAPIContractsV1 {
         let reason: String?
         let accent: String
         let billState: String?
+        /// Only as true, when the bill's veto stands (billOutcomes.ts deriveBillVetoedFromActions); absent otherwise.
+        /// billState keeps the status's value. Clients that predate it ignore it.
+        let vetoed: Bool?
         let billGuid: String?
         let primaryMemberBioguideId: String?
     }
@@ -399,6 +406,11 @@ nonisolated enum UserAPIContractsV1 {
         let officialVotes: OfficialVotesBreakdown?
         /// Added by GET /processed-bill and /public/processed-bill when the bill is in a companion group. Never stored.
         let companionGroup: CompanionGroup?
+        /// Added by GET /processed-bill and /public/processed-bill, only as true, when the bill's actions show a veto
+        /// (31000) or pocket veto (30000) and it has not become law or been passed over the veto by both chambers
+        /// (billOutcomes.ts deriveBillVetoedFromActions). billStatus keeps its value (Passed, or Failed once an
+        /// override fails), so clients that predate this field are unaffected. Never stored.
+        let vetoed: Bool?
     }
 
     nonisolated struct ProcessedBillIdentifier: Decodable {

@@ -175,6 +175,11 @@
     "companionGroup": {
       "$ref": "#/$defs/companionGroup",
       "description": "Added by GET /processed-bill and /public/processed-bill when the bill is in a companion group. Never stored."
+    },
+    "vetoed": {
+      "type": "boolean",
+      "const": true,
+      "description": "Added by GET /processed-bill and /public/processed-bill, only as true, when the bill's actions show a veto (31000) or pocket veto (30000) and it has not become law or been passed over the veto by both chambers (billOutcomes.ts deriveBillVetoedFromActions). billStatus keeps its value (Passed, or Failed once an override fails), so clients that predate this field are unaffected. Never stored."
     }
   },
   "$defs": {

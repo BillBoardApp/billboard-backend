@@ -148,6 +148,11 @@
           "type": "string",
           "enum": ["new", "updated", "passed", "failed", "finalized"]
         },
+        "vetoed": {
+          "type": "boolean",
+          "const": true,
+          "description": "Only as true, when the bill's veto stands (billOutcomes.ts deriveBillVetoedFromActions); absent otherwise. billState keeps the status's value. Clients that predate it ignore it."
+        },
         "billGuid": {
           "type": "string",
           "minLength": 1
