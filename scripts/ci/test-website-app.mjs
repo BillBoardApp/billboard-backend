@@ -27,7 +27,7 @@ const context = vm.createContext({
 });
 vm.runInContext(readFileSync(appPath, "utf8"), context, { filename: "website/app.js" });
 const app = vm.runInContext(
-  "({ endedNote, timelineActions, timelineText, timelineTypeLabel, findIntroduction, chamberTallies, tallySpoken, tallyCaption, reportProblemUrl, billSource, congressGovUrl, STATUS_STAMP_CLASSES })",
+  "({ endedNote, timelineActions, timelineText, timelineTypeLabel, findIntroduction, chamberTallies, tallySpoken, tallyCaption, reportProblemUrl, billSource, congressGovUrl, STATUS_STAMP_CLASSES, outcomeStamp })",
   context,
 );
 
@@ -155,6 +155,82 @@ check("no note when the status, the type or the Congress is unknown", () => {
 
 check("only outcomes are stamped", () => {
   assert.deepEqual(plain(Object.keys(app.STATUS_STAMP_CLASSES).sort()), ["Failed", "Finalized", "Passed"]);
+});
+
+// A vetoed bill says VETOED (project decision 2026-11-19): `vetoed` is sent only as true, beside a billStatus that
+// keeps its value, so the stamp is the flag's, in the Failed colour, and never on a law.
+const stampOf = (billStatus, extra = {}) => {
+  const stamp = app.outcomeStamp({ billStatus, ...extra });
+  return stamp ? [stamp.word, stamp.className] : null;
+};
+
+check("a vetoed bill is stamped Vetoed, whatever status it keeps, but never a law", () => {
+  assert.deepEqual(stampOf("Failed", { vetoed: true }), ["Vetoed", "stamp-vetoed"]);
+  assert.deepEqual(stampOf("Passed", { vetoed: true }), ["Vetoed", "stamp-vetoed"]);
+  assert.deepEqual(stampOf("Finalized", { vetoed: true }), ["Became law", "stamp-became-law"]);
+  // Only the boolean true counts.
+  assert.deepEqual(stampOf("Failed", { vetoed: "true" }), ["Failed", "stamp-failed"]);
+  assert.deepEqual(stampOf("Passed", { vetoed: false }), ["Passed", "stamp-passed"]);
+});
+
+check("without the flag the stamps are as before: outcomes only", () => {
+  assert.deepEqual(stampOf("Passed"), ["Passed", "stamp-passed"]);
+  assert.deepEqual(stampOf("Failed"), ["Failed", "stamp-failed"]);
+  assert.deepEqual(stampOf("Finalized"), ["Became law", "stamp-became-law"]);
+  assert.equal(stampOf("New"), null);
+  assert.equal(stampOf("Updated"), null);
+  assert.equal(stampOf(""), null);
+  assert.equal(app.outcomeStamp(null), null);
+});
+
+check("the veto line is labelled Veto by its code, as Congress.gov types it President", () => {
+  const vetoed = { actionCode: "31000", actionDate: "2025-12-29", text: "Vetoed by President.", type: "President" };
+  assert.equal(app.timelineTypeLabel(vetoed), "Veto");
+  assert.equal(app.timelineTypeLabel({ ...vetoed, actionCode: "30000", text: "Pocket vetoed by President." }), "Veto");
+  assert.equal(
+    app.timelineTypeLabel({ actionCode: "28000", actionDate: "2025-12-18", text: "Presented to President.", type: "President" }),
+    "Sent to the President",
+  );
+  // The House's own E30000 line, alone, keeps its type's label: the House gives that code to a signature too.
+  assert.equal(app.timelineTypeLabel({ ...vetoed, actionCode: "E30000" }), "Sent to the President");
+});
+
+check("of a veto's two lines, the coded one is listed, labelled Veto, in the House line's place (H.R. 131)", () => {
+  // H.R. 131 as stored, newest first: the House's E30000 line before the Library of Congress's 31000 one.
+  const actions = [
+    { actionCode: "33000", actionDate: "2026-01-08", text: "Failed of passage in House over veto.", type: "Veto" },
+    { actionCode: "E30000", actionDate: "2025-12-29", text: "Vetoed by President.", type: "President" },
+    { actionCode: "31000", actionDate: "2025-12-29", text: "Vetoed by President.", type: "President" },
+    { actionCode: "E20000", actionDate: "2025-12-18", text: "Presented to President.", type: "Floor" },
+    { actionCode: "28000", actionDate: "2025-12-18", text: "Presented to President.", type: "President" },
+  ];
+  const timeline = app.timelineActions(actions);
+  assert.deepEqual(
+    plain(timeline.map((action) => [app.timelineText(action), app.timelineTypeLabel(action)])),
+    [
+      ["Presented to President.", "Floor action"],
+      ["Vetoed by President.", "Veto"],
+      ["Failed of passage in House over veto.", "Veto"],
+    ],
+  );
+  // Listed in reverse, the coded line comes first and keeps its place.
+  assert.deepEqual(
+    plain(app.timelineActions([...actions].reverse()).map((action) => app.timelineTypeLabel(action))),
+    ["Sent to the President", "Veto", "Veto"],
+  );
+});
+
+check("a vetoed bill gets the ended note as a passed one does: from February 1, did not become law", () => {
+  const vetoedBill = bill("hr", "Failed", {
+    vetoed: true,
+    actions: [
+      { actionCode: "33000", actionDate: "2026-01-08", text: "Failed of passage in House over veto.", type: "Veto" },
+      { actionCode: "E30000", actionDate: "2025-12-29", text: "Vetoed by President.", type: "President" },
+      { actionCode: "31000", actionDate: "2025-12-29", text: "Vetoed by President.", type: "President" },
+    ],
+  });
+  assert.equal(app.endedNote(vetoedBill, NOON), "");
+  assert.equal(app.endedNote(vetoedBill, FEB_1), BILL_NOTE);
 });
 
 check("actions as the app lists them: oldest first, each once, no raw codes", () => {
