@@ -70,10 +70,11 @@ How the schemas map to code:
 - Every schema has a fixture, and every fixture validates against its schema. A few deliberately wrong payloads must
   be rejected (unknown sub-category or life area, a sponsor name instead of a bioguide ID, an extra field, a committee
   without a chamber, an action without a date, a breakdown without `who`, a relative snapshot URL, a companion group
-  with one member or without a `relationship`), and the shapes seen on live bills must be accepted (a committee
-  activity without a date, a committee with only subcommittee activities, an action without `text`, a breakdown
-  without `why` or with an extra key, a cosponsor listed twice), as must the companion-group shapes clients have to
-  keep decoding (no `companionGroup` or `companionGroups`, an empty list, an unknown `relationship`, three members).
+  with one member or without a `relationship`, a `vetoed` other than `true`), and the shapes seen on live bills must be
+  accepted (a committee activity without a date, a committee with only subcommittee activities, an action without
+  `text`, a breakdown without `why` or with an extra key, a cosponsor listed twice), as must the companion-group shapes
+  clients have to keep decoding (no `companionGroup` or `companionGroups`, an empty list, an unknown `relationship`,
+  three members) and each shape without `vetoed`.
 - The OpenAPI component schemas are checked the same way: each `fixtures/openapi/<Component>.valid.json` validates
   against `#/components/schemas/<Component>`, and the label, stats, limit and App Attest cases (`LABEL_*`, `STATS_*`,
   `VERIFICATION_*` and `APP_ATTEST_*` in the script) and UX-32's `CIVIC_PROFILE_*` must be accepted or rejected as
@@ -120,6 +121,26 @@ so clients can show them as one bill. All of it is optional and additive; nothin
   `BillsManifest.companionGroups` in Swift. The app picks them up with `./scripts/syncContracts.sh`.
 - The entity fixtures use the pair `BILLS-119hr1285` and `BILLS-119s570` (the processed-bill fixture is
   `BILLS-119hr1285ih`).
+
+## Vetoed bills (project decision 2026-11-19)
+
+A vetoed bill says VETOED wherever an outcome is labelled. `billStatus` keeps its five values: builds 1.1 and 1.2 read
+an unknown status as New and never lower one, so a new value would put vetoed bills back in their Bills queue. The veto
+is a flag beside the status instead, optional and additive; clients that predate it ignore it.
+
+- `vetoed`: `{"type": "boolean", "const": true}`, sent only as `true`, absent otherwise, on `ProcessedBill` (added by
+  `GET /processed-bill` and `/public/processed-bill`, never stored, so `validate:live` never sees it), on
+  `BillsManifest.bills[]` (a row attribute, in inline, windowed and snapshot manifests alike) and on the Weekly Brief's
+  item (`billState` keeps the status's value).
+- The rule is `services/src/shared/billOutcomes.ts` `deriveBillVetoedFromActions`: an action coded 31000 (or 30000, a
+  pocket veto), no action that records the bill becoming law (36000, E40000), and not both chambers' votes over the
+  veto (32000 and 34000). A vetoed bill is `Passed`, or `Failed` once an override fails; a `Finalized` bill is never
+  vetoed.
+- Clients stamp it VETOED in the Failed colour, in place of the status word, unless the status is `Finalized`.
+- `check-contracts.mjs` accepts each shape without the field and rejects `false`, `"true"`, `1` and `null`
+  (`VETOED_*`). One bill in each of the three fixtures carries it, so `check:swift` decodes it.
+- Generated: `vetoed?: true` in TypeScript and `vetoed: Bool?` in Swift (a boolean `const` is a `Bool`; only a string
+  `const` becomes a `String` enum).
 
 ## Stats, verification limits and labels (C2)
 
