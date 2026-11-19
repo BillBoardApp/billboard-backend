@@ -43,16 +43,21 @@ cover: see `TRADEMARKS.md` at the root of the repository.
 3. **Where it stands**: the introduction's date and the latest action in Congress's words. **How Congress voted**:
    each chamber's roll call from `officialVotes`, worded as the app's `CongressChamberTally`. **Committees** and
    **Actions** as the app lists them (`BillDisplayFormatting.timelineActions`): oldest first, each once, with plain
-   type labels and never a raw code such as `IntroReferral`.
+   type labels and never a raw code such as `IntroReferral`. A veto line (code 31000, or 30000 for a pocket veto) is
+   labelled "Veto", not its type's "Sent to the President": of its two lines, the House's E30000 and the Library of
+   Congress's 31000, the 31000 one is listed.
 4. **Source**: "Read the bill on Congress.gov" from `link`, else GovInfo from the guid, as the app's `BillLinkSection`.
 5. **Results**, drawn sealed, with the invite to vote in the app, the App Store button and, on iPhone and iPad only,
    "Open in app" (`billboard://`).
 
 Rules the page keeps:
 
-- **Stamps only for outcomes.** Passed, Failed and Became law (`Finalized`) are stamped. New and Updated describe
-  Billboard's feed, not the bill, so they get no stamp; Where it stands shows the latest action instead. The status is
-  not repeated as a row.
+- **Stamps only for outcomes.** Passed, Failed, Vetoed and Became law (`Finalized`) are stamped. New and Updated
+  describe Billboard's feed, not the bill, so they get no stamp; Where it stands shows the latest action instead. The
+  status is not repeated as a row.
+- **Vetoed** (project decision 2026-11-19): a response with `vetoed: true` is stamped Vetoed, in the Failed colour with
+  a single rule, whatever status it keeps (Passed, or Failed once an override fails), and never a law. Like any
+  outcome it stands over the ended stamp, as app 1.3 plans to.
 - **The ended note** (REL-46 D16), worked out from the date: "The 119th Congress ended on January 3, 2027. This bill
   did not become law. To move forward it would have to be introduced again." A Congress ends at noon Eastern on
   January 3 of the odd year after it, and the text is built from the bill's Congress, so it works for every Congress.
@@ -84,8 +89,9 @@ properties on `:root`, with a dark set (`prefers-color-scheme: dark`) and an Inc
 
 - Paper below, ink on it. Navy is only the masthead; brand teal only the wordmark's BOARD and the current page in the
   masthead.
-- Colour carries meaning only, and always with the word: the status stamps (Updated, Passed, Failed, Became law) and
-  the Yea and Nay heads and bars of How Congress voted and the sealed Results sheet. Links and buttons are ink.
+- Colour carries meaning only, and always with the word: the status stamps (Updated, Passed, Failed, Vetoed, Became
+  law) and the Yea and Nay heads and bars of How Congress voted and the sealed Results sheet. Links and buttons are
+  ink.
 - One face per job, from the reader's own system fonts (the CSP allows no font files): a condensed sans for
   headlines and the wordmark, a serif for reading text, a monospace for the docket (numbers, dates, stamps), and the
   system sans for everything else.
