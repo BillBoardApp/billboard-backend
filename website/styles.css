@@ -4,7 +4,8 @@
  * The values come from the app's Theme/BillboardTheme.swift (BillboardPalette) and the Civic Record spec
  * (sections 1 and 2): paper below and ink on it, navy only for the masthead, and brand teal only in the
  * wordmark and the current page on navy. Colour carries meaning only: the status stamps (Updated, Passed,
- * Failed, Became law) and the Yea and Nay column heads of the sealed Results sheet. Everything else is ink.
+ * Failed, Vetoed, Became law) and the Yea and Nay column heads of the sealed Results sheet. Everything else
+ * is ink.
  *
  * Faces are the reader's own system fonts (the CSP allows no font files): a condensed sans for headlines,
  * a serif for reading text, a monospace for the docket (bill numbers, dates, stamps), and the system sans
@@ -585,7 +586,10 @@ button:focus-visible {
   color: var(--status-passed);
 }
 
+/* Vetoed (project decision 2026-11-19) takes the Failed colour and a single rule, as in app 1.3: no new
+   colour, so no new contrast pair. */
 .stamp-failed,
+.stamp-vetoed,
 .stamp-danger {
   color: var(--danger);
 }

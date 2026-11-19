@@ -297,8 +297,18 @@ const actionDate = (action) => text(action?.actionDate);
 // timelineText: an action's own text, or its type label when it has none; null when it has neither.
 const timelineText = (action) => text(action?.text) || actionTypeLabel(action?.type);
 
-// timelineTypeLabel: the label under an action's line; null when the line already is the label.
-const timelineTypeLabel = (action) => (text(action?.text) ? actionTypeLabel(action?.type) : null);
+// The Library of Congress's codes of a veto (31000) and a pocket veto (30000). Congress.gov types the line
+// "President", which reads "Sent to the President" under "Vetoed by President."; the code says what it is
+// (project decision 2026-11-19, as the server's billOutcomes.ts reads a veto: by code, never by text).
+const VETO_ACTION_CODES = new Set(["31000", "30000"]);
+const isVetoAction = (action) => VETO_ACTION_CODES.has(text(action?.actionCode));
+
+// timelineTypeLabel: the label under an action's line ("Veto" for a veto, by its code); null when the line
+// already is the label.
+const timelineTypeLabel = (action) => {
+  if (!text(action?.text)) return null;
+  return isVetoAction(action) ? ACTION_TYPE_LABELS.veto : actionTypeLabel(action?.type);
+};
 
 // timelineActions: oldest first, without a repeat of the same date and text (several sources give them).
 // An action without text is listed by its type label only when no action with text shares its date
@@ -307,7 +317,9 @@ const timelineTypeLabel = (action) => (text(action?.text) ? actionTypeLabel(acti
 // page. Many lines carry no time (the Library of Congress's "Presented to President.", "Signed by
 // President.", "Became Public Law ..."), so the stored order is the only one that holds for a whole day.
 // Ordering a day by text put it in alphabetical order, and Latest action could name a procedural step
-// for a bill that had become law.
+// for a bill that had become law. Of a veto's two lines, the House's E30000 and the Library of Congress's
+// 31000 (stored in that order), the 31000 one is listed, in the place of the first, so the line is labelled
+// "Veto" (timelineTypeLabel).
 const timelineActions = (actions) => {
   const list = safeArray(actions).filter((action) => action && typeof action === "object");
   const datesWithText = new Set(list.filter((action) => text(action.text)).map(actionDate));
@@ -321,7 +333,7 @@ const timelineActions = (actions) => {
     })
     .map((entry) => entry.action);
 
-  const seen = new Set();
+  const seen = new Map();
   const out = [];
   newestFirst.forEach((action) => {
     const date = actionDate(action);
@@ -329,8 +341,12 @@ const timelineActions = (actions) => {
     const line = timelineText(action);
     if (!line) return;
     const key = `${date}|${line.toLowerCase()}`;
-    if (seen.has(key)) return;
-    seen.add(key);
+    if (seen.has(key)) {
+      const kept = seen.get(key);
+      if (isVetoAction(action) && !isVetoAction(out[kept])) out[kept] = action;
+      return;
+    }
+    seen.set(key, out.length);
     out.push(action);
   });
   return out.reverse();
@@ -454,12 +470,27 @@ const statusLabel = (value) => {
 };
 
 // The stamp's look (Civic Record spec 3.2): the colour carries the meaning, the word says it. Only the
-// bill's outcomes are stamped: "New" and "Updated" describe Billboard's feed, not the bill (a 2025 bill
-// still in committee reads "New"), so for those the page shows the latest action instead.
+// bill's outcomes are stamped (Passed, Failed, Vetoed and Became law): "New" and "Updated" describe
+// Billboard's feed, not the bill (a 2025 bill still in committee reads "New"), so for those the page shows
+// the latest action instead.
 const STATUS_STAMP_CLASSES = {
   Passed: "stamp-passed",
   Failed: "stamp-failed",
   Finalized: "stamp-became-law",
+};
+
+// A vetoed bill says VETOED (project decision 2026-11-19), in the Failed colour with a single rule, as app 1.3
+// plans to stamp it (Views/Components/StatusStamp.swift). The response's `vetoed` is sent only as true, beside a
+// billStatus that keeps its value: Passed, or Failed once an override fails. Never on a law.
+const VETOED_STAMP = { word: "Vetoed", className: "stamp-vetoed" };
+
+// outcomeStamp: the bill's outcome stamp, { word, className }, or null for none. VETOED replaces the status
+// word of a vetoed bill that is not law, and so, like any outcome, stands over the ended stamp.
+const outcomeStamp = (bill) => {
+  const status = text(bill?.billStatus);
+  if (bill?.vetoed === true && status !== "Finalized") return VETOED_STAMP;
+  if (!Object.prototype.hasOwnProperty.call(STATUS_STAMP_CLASSES, status)) return null;
+  return { word: statusLabel(status), className: STATUS_STAMP_CLASSES[status] };
 };
 
 // Shows a stamp at the docket line's trailing edge. `spokenPrefix` is read by screen readers only
@@ -503,9 +534,9 @@ const renderDocket = (bill, { numberIsHeading, ended }) => {
     target.append(`${billNumber ? " · " : ""}${rest.join(" · ")}`);
   }
 
-  const status = text(bill?.billStatus);
-  if (Object.prototype.hasOwnProperty.call(STATUS_STAMP_CLASSES, status)) {
-    renderStamp(statusLabel(status), STATUS_STAMP_CLASSES[status], "Status: ");
+  const stamp = outcomeStamp(bill);
+  if (stamp) {
+    renderStamp(stamp.word, stamp.className, "Status: ");
   } else if (ended) {
     renderStamp(endedStampWord(bill), "stamp-dim stamp-wrap", "Status: ");
   }
