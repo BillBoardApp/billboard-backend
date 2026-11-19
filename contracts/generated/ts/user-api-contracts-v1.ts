@@ -177,11 +177,11 @@ export interface ProcessedBillV1 {
   billBreakdown: ProcessedBillBreakdownV1;
   internalSchema?: number;
   /**
-   * Sub-category labels. Since Phase C the summarizer writes Civil Rights and Liberties and Heritage and Identity;
-   * until the label switch ends (Phase E) a bill may still carry the legacy names Social Justice and Identity Politics,
-   * which clients show under the new names (LEGACY_SUB_CATEGORY_ALIASES in services/src/models/categories.ts). GET
-   * /processed-bill serves none for a ceremonial resolution (one that designates a day or week, or recognizes, honors
-   * or congratulates someone; since 2026-10-29), as its manifest row has none; the stored document keeps them.
+   * Sub-category labels. The summarizer writes Civil Rights and Liberties and Heritage and Identity; a bill summarized
+   * before those names replaced Social Justice and Identity Politics may still carry the old names, which clients show
+   * under the new names (LEGACY_SUB_CATEGORY_ALIASES in services/src/models/categories.ts). GET /processed-bill serves
+   * none for a ceremonial resolution (one that designates a day or week, or recognizes, honors or congratulates
+   * someone; since 2026-10-29), as its manifest row has none; the stored document keeps them.
    */
   subCategories: string[];
   /**
@@ -234,9 +234,9 @@ export interface BillsManifestItemV1 {
   title?: string;
   /**
    * The processed bill's sub-category labels, except that a ceremonial resolution (one that designates a day or week,
-   * or recognizes, honors or congratulates someone) has none (since 2026-10-29). Until the label switch ends (Phase E)
-   * a bill may still carry the legacy names Social Justice and Identity Politics, which clients show as Civil Rights
-   * and Liberties and Heritage and Identity.
+   * or recognizes, honors or congratulates someone) has none (since 2026-10-29). A bill summarized before Civil Rights
+   * and Liberties and Heritage and Identity replaced Social Justice and Identity Politics may still carry the old
+   * names, which clients show under the new names.
    */
   subCategories?: string[];
   /**
