@@ -303,18 +303,23 @@ const timelineTypeLabel = (action) => (text(action?.text) ? actionTypeLabel(acti
 // timelineActions: oldest first, without a repeat of the same date and text (several sources give them).
 // An action without text is listed by its type label only when no action with text shares its date
 // (Congress.gov gives an Intro-S IntroReferral action no text beside the Senate's own introduction line).
+// Actions of one day keep the stored order, which is Congress.gov's: newest first, as on its All Actions
+// page. Many lines carry no time (the Library of Congress's "Presented to President.", "Signed by
+// President.", "Became Public Law ..."), so the stored order is the only one that holds for a whole day.
+// Ordering a day by text put it in alphabetical order, and Latest action could name a procedural step
+// for a bill that had become law.
 const timelineActions = (actions) => {
   const list = safeArray(actions).filter((action) => action && typeof action === "object");
   const datesWithText = new Set(list.filter((action) => text(action.text)).map(actionDate));
-  const newestFirst = [...list].sort((a, b) => {
-    const da = actionDate(a);
-    const db = actionDate(b);
-    if (da !== db) return da > db ? -1 : 1;
-    const ta = typeof a.text === "string" ? a.text : "";
-    const tb = typeof b.text === "string" ? b.text : "";
-    if (ta === tb) return 0;
-    return ta > tb ? -1 : 1;
-  });
+  const newestFirst = list
+    .map((action, index) => ({ action, index }))
+    .sort((a, b) => {
+      const da = actionDate(a.action);
+      const db = actionDate(b.action);
+      if (da !== db) return da > db ? -1 : 1;
+      return a.index - b.index;
+    })
+    .map((entry) => entry.action);
 
   const seen = new Set();
   const out = [];
