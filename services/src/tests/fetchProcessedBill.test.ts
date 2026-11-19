@@ -607,6 +607,140 @@ describe("fetchProcessedBill companion group (APPF-23)", () => {
   });
 });
 
+// A vetoed bill says VETOED (project decision 2026-11-19): `vetoed`, only as true, derived from the stored actions on
+// every request (billOutcomes.ts deriveBillVetoedFromActions), on /processed-bill and /public/processed-bill alike.
+describe("fetchProcessedBill vetoed (project decision 2026-11-19)", () => {
+  // H.R. 131's lines as stored, newest first: vetoed, and the House's override failed (billStatus Failed).
+  const HR131_ACTIONS = [
+    {
+      actionCode: "33000",
+      actionDate: "2026-01-08",
+      text: "Failed of passage in House over veto On passage, the objections of the President to the contrary notwithstanding Failed by the Yeas and Nays: (2/3 required): 248 - 177, 1 Present (Roll no. 9).",
+      type: "Veto",
+    },
+    { actionCode: "E30000", actionDate: "2025-12-29", text: "Vetoed by President.", type: "President" },
+    { actionCode: "31000", actionDate: "2025-12-29", text: "Vetoed by President.", type: "President" },
+    { actionCode: "28000", actionDate: "2025-12-18", text: "Presented to President.", type: "President" },
+    { actionCode: "17000", actionDate: "2025-12-16", text: "Passed/agreed to in Senate.", type: "Floor" },
+    { actionCode: "8000", actionDate: "2025-07-21", text: "Passed/agreed to in House.", type: "Floor" },
+  ];
+  const OVERRIDDEN_ACTIONS = [
+    { actionCode: "34000", actionDate: "2026-01-20", text: "Passed Senate over veto.", type: "Veto" },
+    { actionCode: "32000", actionDate: "2026-01-08", text: "Passed House over veto.", type: "Veto" },
+    ...HR131_ACTIONS.slice(1),
+  ];
+  const stored = (guid: string, actions: unknown[], extra: Record<string, unknown> = {}) => ({
+    schemaVersion: 1,
+    kind: "processed",
+    storedAt: "2026-11-13T05:00:00.000Z",
+    identifier: { congress: "119", billType: "hr", billNumber: "131" },
+    guid,
+    title: "Headline of H.R. 131",
+    link: "https://example.com/bill",
+    soWhat: "Why it matters",
+    billBreakdown: { who: "", what: "", how: "", when: "", where: "", why: "" },
+    subCategories: [],
+    lifeAreas: [],
+    sponsors: [],
+    cosponsors: [],
+    actions,
+    committees: [],
+    billStatus: "Failed",
+    ...extra,
+  });
+
+  let restoreEnv: (() => void) | undefined;
+  let s3Send: jest.Mock;
+  let ddbSend: jest.Mock;
+  let fetchHandler: typeof handler;
+
+  beforeEach(() => {
+    restoreEnv = applyTestEnv({ BUCKET_NAME: "test-bucket" });
+    jest.resetModules();
+    s3Send = jest.requireMock("@aws-sdk/client-s3").__mockSend;
+    ddbSend = jest.requireMock("@aws-sdk/client-dynamodb").__mockSend;
+    s3Send.mockReset();
+    ddbSend.mockReset();
+    // No companion groups row: the bill is served on its own.
+    ddbSend.mockResolvedValue({});
+    fetchHandler = require("../handlers/fetchProcessedBill").handler;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    restoreEnv?.();
+  });
+
+  const serve = (document: unknown) =>
+    s3Send.mockResolvedValueOnce({
+      Body: { transformToString: jest.fn().mockResolvedValue(JSON.stringify(document)) },
+    });
+  const bodyOf = (result: { body: string }) => JSON.parse(result.body);
+
+  it("adds vetoed: true for a vetoed bill, by plain or suffixed guid and by locator, and changes nothing else", async () => {
+    const document = stored("BILLS-119hr131", HR131_ACTIONS);
+    serve(document);
+    const plain = await fetchHandler(asApiGatewayEvent({ queryStringParameters: { guid: "BILLS-119hr131" } }));
+    expect(plain.statusCode).toBe(200);
+    // billStatus keeps its value: apps 1.1 and 1.2 ignore the new key and still read Failed.
+    expect(bodyOf(plain)).toEqual({ ...document, vetoed: true });
+
+    serve(stored("BILLS-119hr131enr", HR131_ACTIONS));
+    const suffixed = await fetchHandler(asApiGatewayEvent({ queryStringParameters: { guid: "BILLS-119hr131enr" } }));
+    expect(bodyOf(suffixed)).toMatchObject({ guid: "BILLS-119hr131", billStatus: "Failed", vetoed: true });
+
+    serve(stored("BILLS-119hr131enr", HR131_ACTIONS.slice(1), { billStatus: "Passed" }));
+    const byLocator = await fetchHandler(
+      asApiGatewayEvent({ queryStringParameters: { congress: "119", type: "hr", bill_id: "131" } }),
+    );
+    expect(bodyOf(byLocator)).toMatchObject({ billStatus: "Passed", vetoed: true });
+
+    // Only reads: no S3 write, and DynamoDB only for the companion groups.
+    expect(s3Send.mock.calls.map(([command]) => command.constructor.name)).toEqual([
+      "GetObjectCommand",
+      "GetObjectCommand",
+      "GetObjectCommand",
+    ]);
+    expect(ddbSend.mock.calls.every(([command]: [DdbCommand]) => command.input?.TableName === "BillsManifest")).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    ["a bill that is not vetoed", stored("BILLS-119hr224", [HR131_ACTIONS[3], ...HR131_ACTIONS.slice(4)])],
+    ["a bill passed over the veto by both chambers", stored("BILLS-119hr131", OVERRIDDEN_ACTIONS)],
+    [
+      "a bill that became law after the override",
+      stored("BILLS-119hr131", [
+        { actionCode: "36000", actionDate: "2026-01-21", text: "Became Public Law No: 119-90.", type: "BecameLaw" },
+        ...OVERRIDDEN_ACTIONS,
+      ]),
+    ],
+    ["a bill with no actions", stored("BILLS-119hr131", [])],
+  ])("adds no vetoed key for %s", async (_label, document) => {
+    serve(document);
+    const result = await fetchHandler(asApiGatewayEvent({ queryStringParameters: { guid: document.guid } }));
+    expect(result.statusCode).toBe(200);
+    expect(bodyOf(result)).toEqual(document);
+    expect(bodyOf(result)).not.toHaveProperty("vetoed");
+  });
+
+  it("never serves a stored vetoed key as it is: the actions decide", async () => {
+    const notVetoed = stored("BILLS-119hr131", OVERRIDDEN_ACTIONS, { vetoed: true });
+    serve(notVetoed);
+    const stale = await fetchHandler(asApiGatewayEvent({ queryStringParameters: { guid: "BILLS-119hr131" } }));
+    expect(bodyOf(stale)).not.toHaveProperty("vetoed");
+
+    serve(stored("BILLS-119hr131", HR131_ACTIONS, { vetoed: false }));
+    const vetoed = await fetchHandler(asApiGatewayEvent({ queryStringParameters: { guid: "BILLS-119hr131" } }));
+    expect(bodyOf(vetoed).vetoed).toBe(true);
+
+    serve(stored("BILLS-119hr131", [], { vetoed: "true" }));
+    const stray = await fetchHandler(asApiGatewayEvent({ queryStringParameters: { guid: "BILLS-119hr131" } }));
+    expect(bodyOf(stray)).not.toHaveProperty("vetoed");
+  });
+});
+
 // INT-11: results (every aggregate of Billboard users' votes) are served only by the Cognito GET /bill-stats,
 // after the caller's own vote. This handler also answers the share site's unauthenticated
 // /public/processed-bill, which CloudFront caches and cannot gate per user, so it must never carry them.
@@ -635,14 +769,29 @@ describe("the public processed bill carries no Billboard-user vote data (INT-11)
     expect(Object.keys(schema.properties)).toContain("officialVotes");
   });
 
-  it("serves only contract fields, with a priority and a companion group merged in", async () => {
+  it.each([
+    ["with a priority and a companion group merged in", []],
+    // The flag added for a vetoed bill (project decision 2026-11-19) is a contract field too.
+    [
+      "and the vetoed flag for a vetoed bill",
+      [{ actionCode: "31000", actionDate: "2026-03-02", text: "Vetoed by President.", type: "President" }],
+    ],
+  ])("serves only contract fields, %s", async (_label, addedActions) => {
     restoreEnv = applyTestEnv({
       BUCKET_NAME: "test-bucket",
       PRIORITY_TABLE_NAME: "BillPriority",
       PRIORITY_TABLE_PARTITION_KEY: "guid",
     });
-    const stored = { ...fixture };
-    for (const merged of ["companionGroup", "isPriority", "priorityRank", "priorityReason", "priorityExpiresAt"]) {
+    const stored = { ...fixture, actions: [...addedActions, ...fixture.actions] };
+    // What the handler adds, never stored (the fixture is a response).
+    for (const merged of [
+      "companionGroup",
+      "isPriority",
+      "priorityRank",
+      "priorityReason",
+      "priorityExpiresAt",
+      "vetoed",
+    ]) {
       delete stored[merged];
     }
 
@@ -687,6 +836,7 @@ describe("the public processed bill carries no Billboard-user vote data (INT-11)
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(result.body);
     expect(body).toMatchObject({ isPriority: true, companionGroup: { primaryGuid: "BILLS-119hr1285" } });
+    expect(body.vetoed).toBe(addedActions.length > 0 ? true : undefined);
     expect(Object.keys(body).filter((key) => !(key in schema.properties))).toEqual([]);
     expect(body.officialVotes).toEqual(fixture.officialVotes);
     // Only the priority row and the companion groups row are read: no vote row, no stats document.

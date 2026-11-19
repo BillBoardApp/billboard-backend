@@ -36,6 +36,7 @@ import {
   type ManifestDateMove,
   type SameDayActions,
 } from "../../shared/billVersionChange";
+import { deriveBillVetoedFromActions } from "../../shared/billOutcomes";
 import { rawCongressUpdatedAt, readProcessedSource } from "../../shared/billSourceReconcile";
 import { isCommemorativeResolution, processedBillCommemorativeInput } from "../../shared/commemorativeResolutions";
 import { correlationIdFromMetadata, isRel56BackfillCorrelationId } from "../../shared/correlation";
@@ -377,6 +378,10 @@ const buildManifestItem = (
   }
   if (entry.billStatus) {
     ddbItem.billStatus = { S: entry.billStatus };
+  }
+  // Only as true (project decision 2026-11-19): a row without it is not vetoed, and a whole-row Put drops it.
+  if (entry.vetoed === true) {
+    ddbItem.vetoed = { BOOL: true };
   }
   if (entry.civicProfile && Object.keys(entry.civicProfile).length > 0) {
     ddbItem.civicProfile = {
@@ -1011,6 +1016,15 @@ const readManifestEntry = async (key: string, nowIso: string): Promise<ManifestR
 
   const billStatus = (rawSnapshot?.billStatus ?? parsed?.billStatus ?? undefined) as string | undefined;
   const validStatuses = new Set(["New", "Updated", "Passed", "Failed", "Finalized"]);
+  // A vetoed bill's row says so (project decision 2026-11-19; billOutcomes.ts deriveBillVetoedFromActions), from the
+  // actions of the object the status is read from: the top-level ones of every document the summarizer writes, as
+  // GET /processed-bill serves them. Every write of the row derives it again, a kept one too, so a law line or the
+  // second override vote drops it at the row's next write. Nothing of the date decision reads it.
+  const actions: unknown[] = Array.isArray(rawSnapshot?.actions)
+    ? rawSnapshot.actions
+    : Array.isArray(parsed?.actions)
+      ? parsed.actions
+      : [];
 
   // Extract civicProfile scores (object with axis name keys and number values)
   const rawCivicProfile = rawSnapshot?.civicProfile ?? parsed?.civicProfile;
@@ -1039,6 +1053,7 @@ const readManifestEntry = async (key: string, nowIso: string): Promise<ManifestR
     ...(billStatus && validStatuses.has(billStatus)
       ? { billStatus: billStatus as BillManifestEntry["billStatus"] }
       : {}),
+    ...(deriveBillVetoedFromActions(actions) ? { vetoed: true as const } : {}),
     ...(civicProfile && Object.keys(civicProfile).length > 0 ? { civicProfile } : {}),
   };
   const versionId = typeof getResp.VersionId === "string" && getResp.VersionId.length > 0 ? getResp.VersionId : null;

@@ -141,6 +141,13 @@ export interface ProcessedBillDocument extends BillDocument {
    * Never stored: the groups live in the manifest table (adapters/billCompanionDao.ts).
    */
   companionGroup?: CompanionGroup;
+  /**
+   * Only as true, when the bill's veto stands (shared/billOutcomes.ts deriveBillVetoedFromActions; project decision
+   * 2026-11-19), added by GET /processed-bill and /public/processed-bill. Never stored: it is derived from the actions
+   * wherever they are read, so the summarizer, billDiffer and the content hash never see it. billStatus keeps its
+   * value.
+   */
+  vetoed?: true;
 }
 
 /** Bills grouped as one because Congress.gov lists them as identical (APPF-23). */

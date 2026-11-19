@@ -327,6 +327,31 @@ describe("publishBillsManifest handler", () => {
     );
   });
 
+  it("rewrites the snapshot when a row gains the vetoed flag (project decision 2026-11-19)", async () => {
+    queuePages();
+    s3Send.mockRejectedValueOnce(notFound()).mockResolvedValueOnce({});
+    await publish.handler();
+    const firstMetadata = putCalls()[0].input.Metadata;
+
+    s3Send.mockReset();
+    const vetoedRow = { ...manifestItem("BILLS-119s3is", 0, "2026-09-20T00:00:00.000Z"), vetoed: { BOOL: true } };
+    queuePages([PAGES[0], { Items: [vetoedRow] }]);
+    s3Send.mockResolvedValueOnce({ Metadata: firstMetadata }).mockResolvedValueOnce({});
+
+    const summary = await publish.handler();
+
+    // The row keeps its date (a kept or in-place rewrite), so only the flag changed: still news to clients.
+    expect(summary.outcome).toBe("written");
+    const [put] = putCalls();
+    expect(put.input.Metadata.sha256).not.toBe(firstMetadata.sha256);
+    const written = JSON.parse(gunzipSync(put.input.Body).toString("utf8"));
+    expect(written.bills.map((bill: BillsManifestItemV1) => [bill.guid, bill.vetoed])).toEqual([
+      ["BILLS-119s3is", true],
+      ["BILLS-119hr1ih", undefined],
+      ["BILLS-119hr2ih", undefined],
+    ]);
+  });
+
   it("keeps the snapshot when only a bill's vote count changed: it is not in the manifest (INT-11)", async () => {
     queuePages();
     s3Send.mockRejectedValueOnce(notFound()).mockResolvedValueOnce({});

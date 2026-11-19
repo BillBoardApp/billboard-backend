@@ -3255,6 +3255,196 @@ describe("createBillsManifest handler", () => {
       });
     });
 
+    describe("the vetoed flag (project decision 2026-11-19)", () => {
+      // The veto as congress.gov lists it: the House's E30000 line, then the Library of Congress's 31000 one.
+      const VETO = [
+        { actionCode: "E30000", actionDate: "2026-03-02", text: "Vetoed by President.", type: "President" },
+        { actionCode: "31000", actionDate: "2026-03-02", text: "Vetoed by President.", type: "President" },
+      ];
+      const PASSAGES = [
+        { actionCode: "17000", actionDate: "2026-02-25", text: "Passed/agreed to in Senate.", type: "Floor" },
+        { actionCode: "8000", actionDate: "2026-02-20", text: "Passed/agreed to in House.", type: "Floor" },
+      ];
+      const VETOED_AT = "2026-03-02T21:00:00.000Z";
+      /** The bill once vetoed, as billDiffer stores it: Passed, the veto its latest action. */
+      const vetoedDoc = (storedAt = VETOED_AT, changes: Record<string, unknown> = {}) => ({
+        ...base,
+        storedAt,
+        billStatus: "Passed",
+        actions: [...VETO, ...PASSAGES, ...base.actions],
+        ...changes,
+      });
+      const vetoedSk = `${VETOED_AT}#${guid}`;
+      /** A row this release wrote for `doc`: with the flag when the document gives it. */
+      const seedFlaggedRow = (doc: BillDoc): Items => {
+        const items = seedCurrentRow(doc);
+        items[ddbKey("BILL", `${doc.storedAt}#${guid}`)].vetoed = { BOOL: true };
+        return items;
+      };
+      /** The row the lookup names. */
+      const rowAt = (ddbItems: Items) => ddbItems[ddbKey("BILL", ddbItems[ddbKey("BILL_GUID", guid)].manifestSk.S!)];
+
+      it.each([
+        ["a vetoed bill", vetoedDoc(), true],
+        [
+          "a bill with the House's E30000 veto line only",
+          vetoedDoc(VETOED_AT, { actions: [VETO[0], ...PASSAGES] }),
+          false,
+        ],
+        ["a bill that is not vetoed", { ...base, storedAt: VETOED_AT }, false],
+      ])("writes vetoed {BOOL: true} only on a vetoed bill's row: %s", async (_name, doc, isVetoed) => {
+        const ddbItems: Items = {};
+        const { handler: loaded } = load(ddbItems);
+        s3.put(key, doc, TEXT);
+
+        await loaded(event());
+
+        expect(ddbItems[ddbKey("BILL", vetoedSk)].vetoed).toEqual(isVetoed ? { BOOL: true } : undefined);
+        // The status stays as stored; the lookup row never carries the flag.
+        expect(ddbItems[ddbKey("BILL", vetoedSk)].billStatus).toEqual({ S: doc.billStatus });
+        expect(ddbItems[ddbKey("BILL_GUID", guid)].vetoed).toBeUndefined();
+      });
+
+      it("drops the flag when the bill becomes law, or both chambers pass it over the veto, and keeps it for one", async () => {
+        const LAW = {
+          actionCode: "36000",
+          actionDate: "2026-03-20",
+          text: "Became Public Law No: 119-90.",
+          type: "BecameLaw",
+        };
+        const HOUSE_OVERRIDE = {
+          actionCode: "32000",
+          actionDate: "2026-03-10",
+          text: "Passed House over veto.",
+          type: "Veto",
+        };
+        const SENATE_OVERRIDE = {
+          actionCode: "34000",
+          actionDate: "2026-03-18",
+          text: "Passed Senate over veto.",
+          type: "Veto",
+        };
+        const vetoed = vetoedDoc();
+        const cases: Array<[BillDoc, boolean]> = [
+          [vetoedDoc("2026-03-10T21:00:00.000Z", { actions: [HOUSE_OVERRIDE, ...vetoed.actions!] }), true],
+          [
+            vetoedDoc("2026-03-18T21:00:00.000Z", { actions: [SENATE_OVERRIDE, HOUSE_OVERRIDE, ...vetoed.actions!] }),
+            false,
+          ],
+          [
+            vetoedDoc("2026-03-20T21:00:00.000Z", {
+              billStatus: "Finalized",
+              actions: [LAW, SENATE_OVERRIDE, HOUSE_OVERRIDE, ...vetoed.actions!],
+            }),
+            false,
+          ],
+        ];
+        for (const [doc, stillVetoed] of cases) {
+          s3 = new FakeVersionedS3("2026-03-19T16:57:53.000Z");
+          const ddbItems = seedFlaggedRow(vetoed);
+          const { handler: loaded } = load(ddbItems);
+          s3.put(key, vetoed, TEXT);
+          const versionId = s3.put(key, doc, TEXT);
+
+          await loaded(event(versionId));
+
+          // Each is news (a newer action), so the row moves to the version's date, written whole from it.
+          expect(ddbItems[ddbKey("BILL_GUID", guid)].manifestSk).toEqual({ S: `${doc.storedAt}#${guid}` });
+          expect(rowAt(ddbItems).vetoed).toEqual(stillVetoed ? { BOOL: true } : undefined);
+          expect(rowAt(ddbItems).billStatus).toEqual({ S: doc.billStatus });
+        }
+      });
+
+      it("writes the flag on a row written before it, at the row's own key: in place, or kept for a version without news", async () => {
+        // A replay of the document the row reflects (an equal sort key): rewritten in place, with no date decision.
+        const doc = vetoedDoc();
+        const replayed = seedCurrentRow(doc, { voteCount: "4" });
+        const { handler: replay } = load(replayed);
+        s3.put(key, doc, TEXT);
+
+        await replay(event());
+
+        expect(rowKeys(replayed)).toEqual([ddbKey("BILL", vetoedSk), ddbKey("BILL_GUID", guid)].sort());
+        expect(replayed[ddbKey("BILL", vetoedSk)]).toMatchObject({ vetoed: { BOOL: true }, voteCount: { N: "4" } });
+        expect(dateLines(info)).toEqual([]);
+
+        // A newer version without news (a cosponsor refill): the row keeps its date, and now carries the flag.
+        s3 = new FakeVersionedS3("2026-03-19T16:57:53.000Z");
+        const refilled = vetoedDoc(BULK_STORED_AT, { cosponsors: cosponsors(177) });
+        const kept = seedCurrentRow(doc, { voteCount: "4" });
+        const { handler: loaded } = load(kept);
+        s3.put(key, doc, TEXT);
+        const versionId = s3.put(key, refilled, TEXT);
+
+        const res = await loaded(event(versionId));
+
+        expect(rowKeys(kept)).toEqual([ddbKey("BILL", vetoedSk), ddbKey("BILL_GUID", guid)].sort());
+        expect(kept[ddbKey("BILL", vetoedSk)]).toMatchObject({
+          updatedAt: { S: VETOED_AT },
+          vetoed: { BOOL: true },
+          voteCount: { N: "4" },
+          // The flag is no part of what dates the row: the hash and basis are the document's own.
+          contentHash: { S: billContentHash(refilled) },
+          dateBasis: { S: basisOf(refilled) },
+          documentStoredAt: { S: BULK_STORED_AT },
+        });
+        expect(JSON.parse(res.body).stats).toMatchObject({ upsertsKeptDate: 1 });
+        expect(dateLines(info)).toEqual([expect.objectContaining({ decision: "kept", moves: [] })]);
+      });
+
+      it("never lets the flag change the contentHash, the date basis or the date decision", async () => {
+        // A row that already carries the flag, and a version without news: kept, as a row without the flag would be,
+        // with the hash and basis of the document alone (the flag is never stored in it).
+        const doc = vetoedDoc();
+        const refilled = vetoedDoc(BULK_STORED_AT, { cosponsors: cosponsors(30) });
+        const ddbItems = seedFlaggedRow(doc);
+        const { handler: loaded } = load(ddbItems);
+        s3.put(key, doc, TEXT);
+        const versionId = s3.put(key, refilled, TEXT);
+
+        await loaded(event(versionId));
+
+        expect(ddbItems[ddbKey("BILL_GUID", guid)].manifestSk).toEqual({ S: vetoedSk });
+        expect(ddbItems[ddbKey("BILL", vetoedSk)]).toMatchObject({
+          vetoed: { BOOL: true },
+          contentHash: { S: billContentHash(refilled) },
+          dateBasis: { S: basisOf(refilled) },
+        });
+        expect(dateLines(info)).toEqual([
+          expect.objectContaining({ decision: "kept", moves: [], decidedBy: "dateBasis" }),
+        ]);
+
+        // The same version over the same row without the flag is judged alike: kept, at the same key.
+        s3 = new FakeVersionedS3("2026-03-19T16:57:53.000Z");
+        info.mockClear();
+        const unflagged = seedCurrentRow(doc);
+        const { handler: again } = load(unflagged);
+        s3.put(key, doc, TEXT);
+        await again(event(s3.put(key, refilled, TEXT)));
+
+        const { vetoed: _flag, ...flaggedRow } = ddbItems[ddbKey("BILL", vetoedSk)];
+        const { vetoed: _none, ...unflaggedRow } = unflagged[ddbKey("BILL", vetoedSk)];
+        expect(unflaggedRow).toEqual(flaggedRow);
+        expect(dateLines(info)).toEqual([
+          expect.objectContaining({ decision: "kept", moves: [], decidedBy: "dateBasis" }),
+        ]);
+      });
+
+      it("derives the flag from the actions of a document wrapped in content.rawSnapshot", async () => {
+        const ddbItems: Items = {};
+        const { handler: loaded } = load(ddbItems);
+        const doc = vetoedDoc();
+        s3.put(key, { kind: "processed", storedAt: doc.storedAt, actions: [], content: { rawSnapshot: doc } }, TEXT);
+
+        await loaded(event());
+
+        expect(ddbItems[ddbKey("BILL", vetoedSk)]).toMatchObject({
+          billStatus: { S: "Passed" },
+          vetoed: { BOOL: true },
+        });
+      });
+    });
+
     describe("the formerly failed marker (REL-50, INT-11): a row that leaves Failed for an open status", () => {
       const AMENDMENT = {
         actionDate: "2026-10-27",

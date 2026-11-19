@@ -124,6 +124,10 @@ export const FAILED_SIXTY_VOTES_TEXT = "Senate vote fell short of 60";
 // Nothing else is Finalized:
 //   - a vetoed bill is not law ("Vetoed by President.", 31000 and E30000): it stays Passed, and a failed override
 //     (33000, 35000) makes it Failed as before; a pocket veto (30000) has no enactment action either;
+//   - a bill both chambers passed over the veto (32000 "Passed House over veto", 34000 "Passed Senate over veto") is
+//     law from the second vote, but it stays Passed until the 36000 or E40000 line that follows arrives, as after a
+//     signature; it is no longer vetoed from that vote (deriveBillVetoedFromActions, below), so it shows PASSED in
+//     between and never VETOED;
 //   - "Presented to President." (28000, E20000) and "Sent to Archivist of the United States unsigned." (E30000) come
 //     before the law: the bill turns Finalized when the 36000 or E40000 line that follows arrives. The House's own
 //     "Signed by President." line is coded E30000 too, so it counts only through its 36000 twin;
@@ -262,6 +266,41 @@ export const isEnactmentAction = (action: unknown): boolean => {
   );
 };
 
+// Vetoed (project decision 2026-11-19): a vetoed bill says VETOED wherever an outcome is labelled. billStatus keeps its
+// five values: apps 1.1 and 1.2 read an unknown status as New and never lower a status they hold, so a new value
+// would put vetoed bills back in their Bills queue. The veto is a flag beside the status instead, `vetoed`, sent only
+// as true: on the processed bill as GET /processed-bill and /public/processed-bill serve it (never stored), on the
+// bills manifest row (CreateBillsManifest writes it from the document) and on the Weekly Brief item. Clients that
+// predate it ignore it.
+//
+// Like the outcomes above, it is read from the Library of Congress's coding, never from text: 31000 "Vetoed by
+// President." and 30000, a pocket veto. The House's own line for a veto is coded E30000, which the House also gives
+// "Signed by President." and "Sent to Archivist of the United States unsigned.", so it counts only through its 31000
+// twin: when the E30000 line arrives a poll before the 31000 one, nothing is stamped yet. A vetoed bill keeps its
+// status, Passed, or Failed once an override fails (33000, 35000). It is no longer vetoed:
+//   - once an action records it becoming law (isEnactmentAction: 36000, E40000), which makes it Finalized;
+//   - once both chambers passed it over the veto, 32000 "Passed House over veto" and 34000 "Passed Senate over veto":
+//     it is law from the second vote and stays Passed until its law line arrives (REL-44, above), so VETOED never
+//     shows on a law, and VETOED and BECAME LAW never show together. The House's vote alone leaves it vetoed, as the
+//     Senate may still sustain the veto.
+// The codes of an override are those of H.R. 6395 (116th Congress), made law over a veto, as its GovInfo BILLSTATUS
+// record codes it: 31000 for the veto, 32000 and 34000 for the two votes, then 36000 and E40000 for the law.
+// Any law line or pair of override lines clears the flag, whatever its date: either can only follow a veto, and the
+// status reads a law line the same way (deriveBillStatusFromActions).
+const VETO_ACTION_CODES = new Set(["31000", "30000"]);
+/** "Passed House over veto" and "Passed Senate over veto": with both, the bill is law (the rule is above). */
+const OVERRIDE_PASSED_ACTION_CODES = ["32000", "34000"] as const;
+/** "Failed of passage in House over veto" and "... in Senate over veto": the veto stands. */
+const FAILED_OVERRIDE_ACTION_CODES = new Set(["33000", "35000"]);
+
+/** True for an action that records a veto: 31000, or 30000 for a pocket veto (the rule is above VETO_ACTION_CODES). */
+export const isVetoAction = (action: unknown): boolean =>
+  VETO_ACTION_CODES.has(toTrimmedString(asAction(action).actionCode));
+
+/** True for the bill's failed vote to pass it over the veto: 33000 in the House, 35000 in the Senate (REL-50 rules). */
+export const isFailedOverrideAction = (action: unknown): boolean =>
+  FAILED_OVERRIDE_ACTION_CODES.has(toTrimmedString(asAction(action).actionCode)) && isBillFailureAction(action);
+
 const toBillOutcomeAction = (action: RawBillAction, rule: BillOutcomeRule): BillOutcomeAction | null => {
   const kind = rule(action);
   if (!kind) return null;
@@ -341,11 +380,12 @@ export const billStatusForOutcome = (outcome: Pick<BillOutcomeAction, "kind"> | 
   return outcome.kind === "passed" ? "Passed" : "Failed";
 };
 
-/** The most recent action that records the bill becoming law, or null (for reports; the status needs only one). */
-export const latestEnactmentAction = (
+/** The most recent action that passes `test`, described as reports name it, or null. */
+const latestActionWhere = (
   actions: unknown[] | null | undefined,
+  test: (action: unknown) => boolean,
 ): Omit<BillOutcomeAction, "kind"> | null => {
-  const action = sortMostRecentFirst(normalizeActions(actions)).find(isEnactmentAction);
+  const action = sortMostRecentFirst(normalizeActions(actions)).find(test);
   if (!action) return null;
   return {
     actionCode: toOptionalString(action.actionCode),
@@ -354,6 +394,14 @@ export const latestEnactmentAction = (
     text: toOptionalString(action.text),
   };
 };
+
+/** The most recent action that records the bill becoming law, or null (for reports; the status needs only one). */
+export const latestEnactmentAction = (actions: unknown[] | null | undefined): Omit<BillOutcomeAction, "kind"> | null =>
+  latestActionWhere(actions, isEnactmentAction);
+
+/** The most recent veto action (isVetoAction), or null (for reports, such as list:vetoed-bills; the flag needs one). */
+export const latestVetoAction = (actions: unknown[] | null | undefined): Omit<BillOutcomeAction, "kind"> | null =>
+  latestActionWhere(actions, isVetoAction);
 
 /**
  * The bill's status from its actions: Finalized once any action records it becoming law (a law stays law, whatever
@@ -364,6 +412,19 @@ export const deriveBillStatusFromActions = (actions: unknown[] | null | undefine
   const latestOutcome = latestBillOutcomeAction(actions);
   if (!latestOutcome) return "New";
   return latestOutcome.kind === "passed" ? "Passed" : "Failed";
+};
+
+/**
+ * Whether the bill's veto stands, from its actions (the rule is above VETO_ACTION_CODES): an action records a veto
+ * (31000, or 30000 for a pocket veto), none records the bill becoming law, and it does not have both chambers' votes to
+ * pass it over the veto (32000 and 34000). It never changes the status: a vetoed bill is Passed, or Failed once an
+ * override fails.
+ */
+export const deriveBillVetoedFromActions = (actions: unknown[] | null | undefined): boolean => {
+  const list = normalizeActions(actions);
+  if (!list.some(isVetoAction) || list.some(isEnactmentAction)) return false;
+  const codes = new Set(list.map((action) => toTrimmedString(asAction(action).actionCode)));
+  return !OVERRIDE_PASSED_ACTION_CODES.every((code) => codes.has(code));
 };
 
 /** True for the House's failed vote on a motion to suspend the rules and pass the bill (or agree to it). */
