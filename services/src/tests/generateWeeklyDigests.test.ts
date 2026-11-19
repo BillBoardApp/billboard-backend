@@ -5,6 +5,7 @@ import {
   WEEKLY_DIGEST_TEST_ENV,
   WEEKLY_DIGEST_TEST_NOW,
   WEEKLY_DIGEST_TEST_WINDOW_ID,
+  buildManifestDdbRows,
   preferencesItems,
   processedBillS3Route,
   s3GetKeys,
@@ -274,6 +275,47 @@ describe("generateWeeklyDigests handler", () => {
           },
         ],
       });
+    });
+
+    test("takes a bill's vetoed flag from its manifest row when its processed bill cannot be read (project decision 2026-11-19)", async () => {
+      // H.R. 22, Passed, carries the flag on its row; H.R. 23's row has another value, which is not the flag.
+      const rows = buildManifestDdbRows().map((row) =>
+        row.guid.S === "BILLS-119hr22ih"
+          ? { ...row, vetoed: { BOOL: true } }
+          : row.guid.S === "BILLS-119hr23ih"
+            ? { ...row, vetoed: { S: "true" } }
+            : row,
+      );
+      routeDynamo((command) =>
+        command.__type === "QueryCommand" && command.input?.TableName === "bill-manifest-table"
+          ? Promise.resolve({ Items: rows })
+          : undefined,
+      );
+      // Neither processed bill can be read, so each item is built from its row.
+      mockS3Send.mockImplementation(async (command: Parameters<typeof processedBillS3Route>[0]) =>
+        command.input?.Key === "processed-bills/BILLS-119hr22.json" ||
+        command.input?.Key === "processed-bills/BILLS-119hr23.json"
+          ? Promise.reject(Object.assign(new Error("NoSuchKey"), { name: "NoSuchKey" }))
+          : processedBillS3Route(command),
+      );
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+      const { handler } = require("../handlers/generateWeeklyDigests");
+
+      const response = await handler({});
+
+      expect(JSON.parse(response.body)).toEqual(expect.objectContaining({ stored: 1, failed: 0 }));
+      const putCall = mockDynamoSend.mock.calls.find(([command]) => command.__type === "PutItemCommand");
+      const stored: WeeklyDigest = JSON.parse(putCall?.[0].input.Item.payload.S);
+      const byGuid = new Map(stored.sections.flatMap((section) => section.items).map((item) => [item.id, item]));
+      expect(byGuid.get("bill|BILLS-119hr22ih")).toMatchObject({
+        billState: "passed",
+        vetoed: true,
+        eyebrow: "Passed Mar 19",
+        summary: "Vetoed by the President.",
+      });
+      expect(byGuid.get("bill|BILLS-119hr23ih")).toMatchObject({ billState: "new", summary: "New this week." });
+      expect(byGuid.get("bill|BILLS-119hr23ih")).not.toHaveProperty("vetoed");
+      warn.mockRestore();
     });
 
     describe("the user's votes (INT-11: a 1.0 or 1.1 dismissal is not one)", () => {

@@ -964,3 +964,151 @@ describe("a bill that became law in the brief (REL-44)", () => {
     ).toBeNull();
   });
 });
+
+describe("a vetoed bill in the brief (project decision 2026-11-19)", () => {
+  const GUID = "BILLS-119hr131";
+  // The test week is Mar 15-21, 2026. The veto as congress.gov lists it, the House's line first.
+  const vetoLines = (actionDate: string) => [
+    { actionCode: "E30000", actionDate, text: "Vetoed by President.", type: "President" },
+    { actionCode: "31000", actionDate, text: "Vetoed by President.", type: "President" },
+  ];
+  const failedOverride = (actionDate: string) => ({
+    actionCode: "33000",
+    actionDate,
+    text: "Failed of passage in House over veto On passage, the objections of the President to the contrary notwithstanding Failed by the Yeas and Nays: (2/3 required): 248 - 177, 1 Present (Roll no. 9).",
+    type: "Veto",
+  });
+  const PASSAGES = [
+    { actionCode: "17000", actionDate: "2026-02-25", text: "Passed/agreed to in Senate.", type: "Floor" },
+    { actionCode: "8000", actionDate: "2026-02-20", text: "Passed/agreed to in House.", type: "Floor" },
+  ];
+  /** A loaded bill that says nothing of what it does, so a line of the week falls back to the item's own words. */
+  const silent = (actions: unknown[]) => processed({ soWhat: "", billBreakdown: { what: "" }, actions });
+  /** The same line with no text (the contract allows one): the item says the week's news in its own words. */
+  const untexted = ({ text: _text, ...action }: Record<string, unknown>) => action;
+
+  const itemFor = async (bill: Processed | undefined, fields: Partial<BillManifestEntry> = {}) =>
+    items(await build({ items: [entry(GUID, fields)], bills: bill ? { [GUID]: bill } : {} }))[0];
+
+  it("adds vetoed: true to a loaded vetoed bill, keeping billState and the eyebrow's status word", async () => {
+    const item = await itemFor(
+      processed({ actions: [failedOverride("2026-03-18"), ...vetoLines("2026-03-05"), ...PASSAGES] }),
+      {
+        billStatus: "Failed",
+      },
+    );
+
+    expect(item).toMatchObject({ billState: "failed", vetoed: true, eyebrow: "Failed Mar 18" });
+    expect(item.summary).toMatch(/^Mar 18: Failed of passage in House over veto/);
+    // Item order as the contract lists it: billState, then vetoed, then billGuid.
+    expect(Object.keys(item).slice(-4, -1)).toEqual(["billState", "vetoed", "billGuid"]);
+  });
+
+  it.each([
+    [
+      "a failed override is dated in the week",
+      [untexted(failedOverride("2026-03-18")), ...vetoLines("2026-03-05")],
+      "Veto override failed this week.",
+    ],
+    ["the veto is dated in the week", vetoLines("2026-03-17").map(untexted), "Vetoed this week."],
+    [
+      "both are, the override being the later news",
+      [untexted(failedOverride("2026-03-20")), ...vetoLines("2026-03-16").map(untexted)],
+      "Veto override failed this week.",
+    ],
+    ["neither is", [failedOverride("2026-03-12"), ...vetoLines("2026-03-05")], "Vetoed by the President."],
+  ])("says what the veto news was when %s", async (_name, actions, line) => {
+    const item = await itemFor(silent([...actions, ...PASSAGES]), { billStatus: "Failed" });
+    expect(item).toMatchObject({ summary: line, vetoed: true, billState: "failed" });
+  });
+
+  it("takes the row's flag for a bill it cannot load, and says it was vetoed", async () => {
+    const item = await itemFor(undefined, { billStatus: "Failed", vetoed: true });
+    expect(item).toMatchObject({
+      summary: "Vetoed by the President.",
+      vetoed: true,
+      billState: "failed",
+      eyebrow: "Failed Mar 18",
+    });
+
+    const notVetoed = await itemFor(undefined, { billStatus: "Failed" });
+    expect(notVetoed).toMatchObject({ summary: "Failed this week." });
+    expect(notVetoed).not.toHaveProperty("vetoed");
+  });
+
+  it("goes by the loaded bill's actions over its row: an override clears a stale flag, a veto sets a missing one", async () => {
+    const overridden = [
+      { actionCode: "34000", actionDate: "2026-03-19", text: "Passed Senate over veto.", type: "Veto" },
+      { actionCode: "32000", actionDate: "2026-03-17", text: "Passed House over veto.", type: "Veto" },
+      ...vetoLines("2026-03-05"),
+      ...PASSAGES,
+    ];
+    const stale = await itemFor(processed({ actions: overridden }), { billStatus: "Passed", vetoed: true });
+    expect(stale).toMatchObject({ billState: "passed", summary: "Mar 19: Passed Senate over veto." });
+    expect(stale).not.toHaveProperty("vetoed");
+
+    // A row written before the flag: the loaded bill's veto still shows.
+    const missing = await itemFor(processed({ actions: [...vetoLines("2026-03-18"), ...PASSAGES] }), {
+      billStatus: "Passed",
+    });
+    expect(missing).toMatchObject({ billState: "passed", vetoed: true, eyebrow: "Passed Mar 18" });
+  });
+
+  it("never flags a law", async () => {
+    const law = await itemFor(undefined, { billStatus: "Finalized", vetoed: true });
+    expect(law).toMatchObject({ billState: "finalized", summary: "Became law this week." });
+    expect(law).not.toHaveProperty("vetoed");
+
+    const loaded = await itemFor(
+      processed({
+        billStatus: "Finalized",
+        actions: [
+          { actionCode: "36000", actionDate: "2026-03-19", text: "Became Public Law No: 119-90.", type: "BecameLaw" },
+          ...vetoLines("2026-03-05"),
+          ...PASSAGES,
+        ],
+      }),
+      { billStatus: "Finalized", vetoed: true },
+    );
+    expect(loaded).toMatchObject({ billState: "finalized" });
+    expect(loaded).not.toHaveProperty("vetoed");
+  });
+
+  describe("a companion pair (APPF-23): the vetoed member stands for the group over a partner that only passed", () => {
+    const house = "BILLS-119hr131";
+    const senate = "BILLS-119s296";
+    const pair = async (houseFields: Partial<BillManifestEntry>, senateFields: Partial<BillManifestEntry>) =>
+      items(
+        await build({
+          items: [
+            entry(house, { updatedAt: "2026-03-17T15:00:00.000Z", ...houseFields }),
+            entry(senate, { updatedAt: "2026-03-19T15:00:00.000Z", ...senateFields }),
+          ],
+          companions: [[house, senate]],
+        }),
+      ).map((item) => [item.billGuid, item.billState, item.vetoed]);
+
+    it("shows the vetoed Failed bill, not the Passed partner that moved later (Passed 3 would beat Failed 2)", async () => {
+      expect(await pair({ billStatus: "Failed", vetoed: true }, { billStatus: "Passed" })).toEqual([
+        [house, "failed", true],
+      ]);
+      // Without the flag, as before: the Passed bill.
+      expect(await pair({ billStatus: "Failed" }, { billStatus: "Passed" })).toEqual([[senate, "passed", undefined]]);
+    });
+
+    it("shows a vetoed Passed bill over a Passed partner that moved later", async () => {
+      expect(await pair({ billStatus: "Passed", vetoed: true }, { billStatus: "Passed" })).toEqual([
+        [house, "passed", true],
+      ]);
+    });
+
+    it("still shows a law over a vetoed partner", async () => {
+      expect(
+        await pair(
+          { billStatus: "Failed", vetoed: true, updatedAt: "2026-03-19T15:00:00.000Z" },
+          { billStatus: "Finalized", updatedAt: "2026-03-17T15:00:00.000Z" },
+        ),
+      ).toEqual([[senate, "finalized", undefined]]);
+    });
+  });
+});

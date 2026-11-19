@@ -1172,6 +1172,99 @@ describe("notificationType", () => {
     });
   });
 
+  // Vetoed bills say VETOED (project decision 2026-11-19), from a flag beside the status; pushes are unchanged. A veto
+  // is an action like any other (an alert), and the votes over it are no passage or failure of the bill's own: only a
+  // failed override (33000, 35000) is the bill's failure, as before.
+  describe("a veto and the votes over it (project decision 2026-11-19: pushes unchanged)", () => {
+    const key = "processed-bills/BILLS-119hr131.json";
+    const summary = {
+      guid: "BILLS-119hr131",
+      title: "T",
+      billBreakdown: { who: "T", what: "T", how: "T", when: "T", where: "Not Applicable", why: "T" },
+      soWhat: "W",
+    };
+    const presented = [
+      { actionCode: "28000", actionDate: "2025-12-18", text: "Presented to President.", type: "President" },
+      { actionCode: "17000", actionDate: "2025-12-16", text: "Passed/agreed to in Senate.", type: "Floor" },
+    ];
+    const veto = [
+      { actionCode: "E30000", actionDate: "2025-12-29", text: "Vetoed by President.", type: "President" },
+      { actionCode: "31000", actionDate: "2025-12-29", text: "Vetoed by President.", type: "President" },
+    ];
+    const houseOverride = {
+      actionCode: "32000",
+      actionDate: "2026-01-08",
+      text: "Passed House over veto.",
+      type: "Veto",
+    };
+    const senateOverride = {
+      actionCode: "34000",
+      actionDate: "2026-01-14",
+      text: "Passed Senate over veto.",
+      type: "Veto",
+    };
+    const body = (doc: unknown) => ({ Body: { transformToString: jest.fn().mockResolvedValue(JSON.stringify(doc)) } });
+    const twoVersions = (current: unknown, previous: unknown) => {
+      mockS3Send.mockResolvedValueOnce(body(current));
+      mockS3Send.mockResolvedValueOnce({
+        IsTruncated: false,
+        Versions: [
+          { Key: key, VersionId: "v2", IsLatest: true, LastModified: "2026-01-15T03:00:01Z" },
+          { Key: key, VersionId: "v1", IsLatest: false, LastModified: "2025-12-19T18:37:58Z" },
+        ],
+        DeleteMarkers: [],
+      });
+      mockS3Send.mockResolvedValueOnce(body(previous));
+    };
+    const run = () => require("../handlers/notificationType").handler(sqsWrappedS3Keys([key], { versionId: "v2" }));
+    const sentMessages = () =>
+      mockSQSSend.mock.calls.flatMap(([cmd]) =>
+        cmd.input.Entries.map((entry: { MessageBody: string }) => JSON.parse(entry.MessageBody)),
+      );
+
+    it("sends only an alert for the veto lines, naming the latest", async () => {
+      twoVersions(
+        { ...summary, billStatus: "Passed", actions: [...veto, ...presented] },
+        { ...summary, billStatus: "Passed", actions: presented },
+      );
+      mockSQSSend.mockResolvedValueOnce({ Failed: [] });
+
+      await run();
+
+      expect(sentMessages()).toEqual([
+        expect.objectContaining({
+          notificationType: "alert",
+          alert: expect.objectContaining({ text: "Vetoed by President.", actionDate: "2025-12-29" }),
+        }),
+      ]);
+    });
+
+    it("sends no outcome push for the votes that pass it over the veto, the House's and then the Senate's", async () => {
+      twoVersions(
+        { ...summary, billStatus: "Passed", actions: [houseOverride, ...veto, ...presented] },
+        { ...summary, billStatus: "Passed", actions: [...veto, ...presented] },
+      );
+      mockSQSSend.mockResolvedValueOnce({ Failed: [] });
+      await run();
+      expect(sentMessages()).toEqual([
+        expect.objectContaining({ notificationType: "alert", alert: expect.objectContaining({ actionCode: "32000" }) }),
+      ]);
+
+      jest.resetModules();
+      mockS3Send.mockReset();
+      mockSQSSend.mockReset();
+      twoVersions(
+        { ...summary, billStatus: "Passed", actions: [senateOverride, houseOverride, ...veto, ...presented] },
+        { ...summary, billStatus: "Passed", actions: [houseOverride, ...veto, ...presented] },
+      );
+      mockSQSSend.mockResolvedValueOnce({ Failed: [] });
+      await run();
+      expect(sentMessages()).toEqual([
+        expect.objectContaining({ notificationType: "alert", alert: expect.objectContaining({ actionCode: "34000" }) }),
+      ]);
+    });
+  });
+
   describe("Congressional Record citations are not news (project decision 2026-11-12)", () => {
     // H.R. 9614 as stored on 2026-11-10 at 18:29Z: passed by voice vote on 2026-11-09, no citation yet. congress.gov
     // added the citations over the next day, then the Senate received the bill.

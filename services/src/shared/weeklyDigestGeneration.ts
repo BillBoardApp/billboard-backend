@@ -155,6 +155,9 @@ function toBillManifestEntry(item: Record<string, AttributeValue> | undefined): 
     ...(billStatus && validStatuses.has(billStatus)
       ? { billStatus: billStatus as BillManifestEntry["billStatus"] }
       : {}),
+    // Only as true, as CreateBillsManifest writes it (project decision 2026-11-19): a bill the brief cannot load
+    // takes its veto from the row (weeklyDigestBuilder.ts billIsVetoed).
+    ...(item.vetoed?.BOOL === true ? { vetoed: true as const } : {}),
   };
 }
 

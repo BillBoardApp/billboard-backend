@@ -576,6 +576,24 @@ describe("billsManifestBuilder", () => {
     expect(JSON.stringify(withHash.bills)).toBe(JSON.stringify(without.bills));
   });
 
+  it("serves vetoed only as true, after billStatus, as CreateBillsManifest writes it (project decision 2026-11-19)", async () => {
+    const vetoed = manifestItem({ billStatus: { S: "Failed" }, vetoed: { BOOL: true } });
+    expect(toManifestEntry(vetoed)).toEqual({
+      ...toManifestEntry(manifestItem({ billStatus: { S: "Failed" } })),
+      vetoed: true,
+    });
+    expect(Object.keys(toManifestEntry(vetoed)!).slice(-2)).toEqual(["billStatus", "vetoed"]);
+
+    for (const value of [{ BOOL: false }, { S: "true" }, { N: "1" }, { NULL: true } as AttributeValue]) {
+      expect(toManifestEntry(manifestItem({ vetoed: value }))).not.toHaveProperty("vetoed");
+    }
+    expect(toManifestEntry(manifestItem())).not.toHaveProperty("vetoed");
+
+    // Through the builder, so inline and windowed loads and the snapshot carry it.
+    const manifest = await buildBillsManifest(sourceFor(MANIFEST_ENV, { Items: [vetoed] }).source);
+    expect(manifest.bills[0].vetoed).toBe(true);
+  });
+
   it("drops items without a guid or billType", () => {
     expect(toManifestEntry(undefined)).toBeNull();
     expect(toManifestEntry(manifestItem({ guid: { S: "" } }))).toBeNull();

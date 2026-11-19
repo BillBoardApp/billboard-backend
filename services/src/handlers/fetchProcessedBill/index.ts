@@ -12,6 +12,7 @@ import { isValidProcessedBillGuid } from "../../adapters/processedBillKeys";
 import { BillPriorityDao } from "../../adapters/billPriorityDao";
 import type { CompanionGroupV1 } from "../../contracts";
 import { companionIndex, plainBillGuid, type CompanionIndex } from "../../shared/billCompanions";
+import { deriveBillVetoedFromActions } from "../../shared/billOutcomes";
 import { mergePriorityIntoProcessedBill } from "../../shared/billPriority";
 import { isCommemorativeResolution } from "../../shared/commemorativeResolutions";
 import { logger } from "../../shared/logger";
@@ -128,11 +129,20 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         : served;
 
     const companionGroup = await readCompanionGroup([served.guid, guid]);
+    // A vetoed bill says VETOED (project decision 2026-11-19): `vetoed`, only as true, from the stored actions
+    // (billOutcomes.ts deriveBillVetoedFromActions), on both routes. It is never stored, so a stored key of that name
+    // is never served as it is.
+    const { vetoed: _storedVetoed, ...body } = enrichedBill;
+    const vetoed = deriveBillVetoedFromActions(plain.actions);
 
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(companionGroup ? { ...enrichedBill, companionGroup } : enrichedBill),
+      body: JSON.stringify({
+        ...body,
+        ...(companionGroup ? { companionGroup } : {}),
+        ...(vetoed ? { vetoed: true } : {}),
+      }),
     };
   } catch (err) {
     console.error(err);

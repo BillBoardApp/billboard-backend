@@ -152,6 +152,8 @@ export const toManifestEntry = (item: ManifestItem | null | undefined): BillMani
     ...(billStatus && VALID_BILL_STATUSES.has(billStatus)
       ? { billStatus: billStatus as BillManifestEntry["billStatus"] }
       : {}),
+    // Only as true, as CreateBillsManifest writes it (project decision 2026-11-19); any other value is left out.
+    ...(item.vetoed?.BOOL === true ? { vetoed: true as const } : {}),
     ...(civicProfile ? { civicProfile } : {}),
   };
 };

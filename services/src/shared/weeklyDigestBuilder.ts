@@ -3,6 +3,7 @@ import type { BillManifestEntry, BillStatusValue, ProcessedBillDocument } from "
 import { canonicalSubCategory } from "../models/categories";
 import type { WeeklyDigest, WeeklyDigestAccent, WeeklyDigestBillState, WeeklyDigestItem } from "../models/weeklyDigest";
 import { plainBillGuid } from "./billCompanions";
+import { deriveBillVetoedFromActions, isFailedOverrideAction, isVetoAction } from "./billOutcomes";
 import type { BillContentTypePreference } from "./billContentTypes";
 import { billTypeMatchesContentPreferences } from "./billContentTypes";
 import { officialBillNumber } from "./billNumbers";
@@ -35,6 +36,10 @@ import {
  * - A ceremonial resolution (shared/commemorativeResolutions.ts) never counts as a topic or life-area match,
  *   never shows in "Worth a quick look" and ranks last, unless the user watches it or voted on it. The official
  *   title decides once the bill is loaded; before that, a headline that reads as ceremonial only ranks it last.
+ * - A vetoed bill (project decision 2026-11-19) keeps its status everywhere here: its bucket, its rank, `billState`
+ *   and the eyebrow's status word, which both apps strip. Its item adds `vetoed: true` for app 1.3's VETOED stamp, and
+ *   the lines that would say "Passed this week" or "Failed this week" say what the veto news of the week was instead
+ *   (vetoNews). A companion group shows its vetoed member over a partner that only passed (COMPANION_STATUS_RANK).
  * Nothing here reads other users' votes (INT-11): the only votes in the input are the user's own.
  */
 
@@ -370,7 +375,12 @@ function digestState(status: BillStatusValue): WeeklyDigestBillState {
   }
 }
 
-function defaultChangeLine(status: BillStatusValue): string {
+/** The item's line when nothing else says what happened: a vetoed bill's veto news (vetoNews), else its status's. */
+function defaultChangeLine(status: BillStatusValue, veto: string | null): string {
+  if (veto) {
+    return `${veto}.`;
+  }
+
   switch (status) {
     case "Passed":
       return "Passed this week.";
@@ -384,6 +394,52 @@ function defaultChangeLine(status: BillStatusValue): string {
     default:
       return "New this week.";
   }
+}
+
+/** The bill's actions, as the processed bill holds them; none for a placeholder. */
+function actionsOf(bill: ProcessedBillLike): unknown[] {
+  return Array.isArray(bill.actions) ? bill.actions : [];
+}
+
+/**
+ * Whether the item says VETOED (project decision 2026-11-19; billOutcomes.ts deriveBillVetoedFromActions): never for
+ * a law. A loaded bill decides by its own actions, which may be newer than its manifest row (a row written before the
+ * veto flag, or before an override); a placeholder, which has no actions, takes the row's flag.
+ */
+function billIsVetoed(bill: ProcessedBillLike, manifest: BillManifestEntry, status: BillStatusValue): boolean {
+  if (status === "Finalized") {
+    return false;
+  }
+
+  const actions = actionsOf(bill);
+  return actions.length > 0 ? deriveBillVetoedFromActions(actions) : manifest.vetoed === true;
+}
+
+/**
+ * What a vetoed bill's week brought, for the lines that say what happened without quoting Congress: "Veto override
+ * failed this week" when a failed override vote (33000, 35000) is dated in the week, the later news when the veto is
+ * too, "Vetoed this week" when the veto (31000, 30000) is, else "Vetoed by the President", as for a placeholder, which
+ * has no actions. Days as latestActionInWeek reads them. One line for every week would misdate the news: in the week
+ * of 2026-01-08 H.R. 131's news was its failed override, not its veto of 2025-12-29.
+ */
+function vetoNews(bill: ProcessedBillLike, window: WeeklyDigestPublicationWindow): string {
+  const firstDay = weeklyDigestDayKey(window.start);
+  const lastDay = weeklyDigestDayKey(window.end);
+  const inWeek = (action: unknown): boolean => {
+    const actionRecord = (action ?? {}) as Record<string, unknown>;
+    const day = weeklyDigestDayKeyOf(actionRecord.actionDate ?? actionRecord.action_date ?? actionRecord.date);
+    return day !== null && day >= firstDay && day <= lastDay;
+  };
+  const actions = actionsOf(bill);
+  if (actions.some((action) => isFailedOverrideAction(action) && inWeek(action))) {
+    return "Veto override failed this week";
+  }
+
+  if (actions.some((action) => isVetoAction(action) && inWeek(action))) {
+    return "Vetoed this week";
+  }
+
+  return "Vetoed by the President";
 }
 
 function parseDate(value: unknown): Date | null {
@@ -482,19 +538,23 @@ function whatItDoes(bill: ProcessedBillLike, title: string): string | undefined 
   return text && !sameText(text, title) ? clip(text, CONTEXT_TEXT_MAX_CHARS) : undefined;
 }
 
-/** The bill's item text: `summary` for both apps, `detail` for 1.1 (see the module comment). */
+/**
+ * The bill's item text: `summary` for both apps, `detail` for 1.1 (see the module comment). `veto` is the vetoed bill's
+ * news of the week (vetoNews), or null for a bill that is not vetoed.
+ */
 function billItemText(
   bill: ProcessedBillLike,
   title: string,
   status: BillStatusValue,
   window: WeeklyDigestPublicationWindow,
+  veto: string | null,
 ): { summary: string; detail?: string } {
   const action = latestActionInWeek(bill, window);
   const does = whatItDoes(bill, title);
   const bottomLine = firstNonEmpty(bill.soWhat);
   const summary = action
     ? `${formatWeeklyDigestDay(action.day)}: ${clip(action.text, ACTION_TEXT_MAX_CHARS)}`
-    : (does ?? defaultChangeLine(status));
+    : (does ?? defaultChangeLine(status, veto));
   const detail = [action ? does : undefined, bottomLine ? clip(bottomLine, CONTEXT_TEXT_MAX_CHARS) : undefined].find(
     (text): text is string => text !== undefined && !sameText(text, summary) && !sameText(text, title),
   );
@@ -515,7 +575,9 @@ function makeBillItem(
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .join(" ");
   const title = firstNonEmpty(bill.title, candidate.manifest.title, guid) ?? guid;
-  const { summary, detail } = billItemText(bill, title, status, window);
+  const vetoed = billIsVetoed(bill, candidate.manifest, status);
+  const veto = vetoed ? vetoNews(bill, window) : null;
+  const { summary, detail } = billItemText(bill, title, status, window, veto);
 
   const reason = (() => {
     if (candidate.watched) {
@@ -543,6 +605,10 @@ function makeBillItem(
       return `Matches your life area: ${candidate.lifeAreaMatches[0]}`;
     }
 
+    if (veto) {
+      return veto;
+    }
+
     if (status === "Passed") {
       return "Passed this week";
     }
@@ -566,6 +632,7 @@ function makeBillItem(
     reason,
     accent,
     billState: digestState(status),
+    ...(vetoed ? { vetoed: true as const } : {}),
     billGuid: guid,
     primaryMemberBioguideId: candidate.matchingMemberIds[0],
   };
@@ -778,25 +845,42 @@ function companionGroupCandidate(representative: Candidate, members: Candidate[]
 }
 
 /**
- * A status's rank among a companion group's members, as app 1.2's companion card ranks them
- * (`CompanionGroupIndex.statusLead` in the iOS app): Finalized 4, Passed 3, Failed 2, Updated 1, New 0. Passed and
- * Failed are not tied: a Passed/Failed pair shows as the Passed bill, whichever moved later.
+ * A status's rank among a companion group's members, as app 1.3's companion card ranks them
+ * (`CompanionGroupIndex.statusLead` in the iOS app): Finalized 5, Passed 3, Failed 2, Updated 1, New 0, and a vetoed
+ * member that is not Finalized 4 (COMPANION_VETOED_RANK). Passed and Failed are not tied: a Passed/Failed pair shows as
+ * the Passed bill, whichever moved later.
  */
 const COMPANION_STATUS_RANK: Record<BillStatusValue, number> = {
   New: 0,
   Updated: 1,
   Failed: 2,
   Passed: 3,
-  Finalized: 4,
+  Finalized: 5,
 };
 
 /**
- * APPF-23: one candidate per companion group. The member with the highest status stands for the
+ * A vetoed member's rank (project decision 2026-11-19), above Passed and below Finalized: a vetoed bill whose override
+ * failed is Failed, and ranked by its status it lost to a partner that had only passed its own chamber, so the group
+ * hid the veto. App 1.2 ranks by the status alone, so in that rare case its card shows the partner while the brief
+ * names the vetoed bill.
+ */
+const COMPANION_VETOED_RANK = 4;
+
+/** A member's rank in its companion group, from its manifest row (the rank is above COMPANION_STATUS_RANK). */
+function companionRank(candidate: Candidate): number {
+  return candidate.status !== "Finalized" && candidate.manifest.vetoed === true
+    ? COMPANION_VETOED_RANK
+    : COMPANION_STATUS_RANK[candidate.status];
+}
+
+/**
+ * APPF-23: one candidate per companion group. The member with the highest rank stands for the
  * group (its bill, status and billGuid), as the apps show one card for the pair with that status:
- * a law (REL-44) whose twin moved later still reads "Became law", and a Passed bill stands over its
- * Failed twin. Among equal statuses, the member that moved most recently in the window; a tie goes
- * to the primary. The group takes the best priority bucket of its members and the union of their
- * matches; watched and voted already cover the whole group. Ungrouped candidates are unchanged.
+ * a law (REL-44) whose twin moved later still reads "Became law", a vetoed bill stands over a twin
+ * that only passed (companionRank), and a Passed bill stands over its Failed twin. Among equal
+ * ranks, the member that moved most recently in the window; a tie goes to the primary. The group
+ * takes the best priority bucket of its members and the union of their matches; watched and voted
+ * already cover the whole group. Ungrouped candidates are unchanged.
  */
 function collapseCompanionCandidates(
   candidates: Candidate[],
@@ -826,7 +910,7 @@ function collapseCompanionCandidates(
     if (members.length === 1) return members;
 
     const representative = members.reduce((best, member) => {
-      const rank = COMPANION_STATUS_RANK[member.status] - COMPANION_STATUS_RANK[best.status];
+      const rank = companionRank(member) - companionRank(best);
       if (rank !== 0) return rank > 0 ? member : best;
       const delta = member.updatedAt.getTime() - best.updatedAt.getTime();
       return delta > 0 || (delta === 0 && isPrimary(member) && !isPrimary(best)) ? member : best;

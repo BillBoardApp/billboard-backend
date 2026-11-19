@@ -4,14 +4,18 @@ import {
   billOutcomeTextForAction,
   billStatusForOutcome,
   deriveBillStatusFromActions,
+  deriveBillVetoedFromActions,
   FAILED_SIXTY_VOTES_TEXT,
   FAILED_SUSPENSION_TEXT,
   firstBillOutcomeDate,
   isBillFailureAction,
   isEnactmentAction,
+  isFailedOverrideAction,
+  isVetoAction,
   latestBillOutcomeAction,
   latestEnactmentAction,
   latestNewBillOutcomeAction,
+  latestVetoAction,
   newBillActions,
   normalizeBillActionKey,
   notBillFailureReason,
@@ -734,6 +738,197 @@ describe("billOutcomes: Finalized (REL-44)", () => {
 
   it("finds no new passed or failed outcome when only the law lines are new (no 'passed' push for a law)", () => {
     expect(latestNewBillOutcomeAction(HR224_PRESENTED, [...HJRES131_LAW.slice(0, 4), ...HR224_PRESENTED])).toBeNull();
+  });
+});
+
+// H.R. 504: vetoed the same day as H.R. 131, and its override failed the same day too. Its own passage dates; the
+// texts of the later lines are H.R. 131's.
+const HR504_VETOED = HR131_VETOED.map((action) =>
+  action.actionCode === "17000"
+    ? { ...action, actionDate: "2025-12-11" }
+    : action.actionCode === "8000"
+      ? { ...action, actionDate: "2025-07-14" }
+      : action,
+);
+
+// The House's own steps on a veto message, coded with its H-codes (texts shortened): never a veto of their own.
+const HOUSE_VETO_MESSAGE_STEPS = ["H40300", "H43100", "H43110", "H43410"].map((actionCode) => ({
+  actionCode,
+  actionDate: "2026-01-08",
+  text: "Veto message considered in the House.",
+  type: "Veto",
+}));
+
+// H.R. 6395 (116th Congress), made law over a veto, with the codes its GovInfo BILLSTATUS record gives (texts
+// shortened): the veto, the House's vote over it, then the Senate's and the law lines on one day.
+const HR6395_VETO = { actionCode: "31000", actionDate: "2020-12-23", text: "Vetoed by President.", type: "President" };
+const HR6395_HOUSE_OVERRIDE = {
+  actionCode: "32000",
+  actionDate: "2020-12-28",
+  text: "Passed House over veto: On passage, the objections of the President to the contrary notwithstanding Passed by the Yeas and Nays: (2/3 required): 322 - 87.",
+  type: "Veto",
+};
+const HR6395_SENATE_OVERRIDE = {
+  actionCode: "34000",
+  actionDate: "2021-01-01",
+  text: "Passed Senate over veto by Yea-Nay Vote. 81 - 13.",
+  type: "Veto",
+};
+const HR6395_LAW = {
+  actionCode: "36000",
+  actionDate: "2021-01-01",
+  text: "Became Public Law No: 116-283.",
+  type: "BecameLaw",
+};
+const HR6395_HOUSE_LAW = { ...HR6395_LAW, actionCode: "E40000", type: "President" };
+// Its passages, by their codes only.
+const HR6395_PASSED = [
+  { actionCode: "17000", actionDate: "2020-07-23", text: "Passed/agreed to in Senate.", type: "Floor" },
+  { actionCode: "8000", actionDate: "2020-07-21", text: "Passed/agreed to in House.", type: "Floor" },
+];
+
+describe("billOutcomes: vetoed (project decision 2026-11-19)", () => {
+  it("counts 31000 and a pocket veto (30000) as a veto, by code only", () => {
+    expect(isVetoAction({ actionCode: "31000", text: "Vetoed by President.", type: "President" })).toBe(true);
+    expect(isVetoAction({ actionCode: "30000", text: "Pocket vetoed by President.", type: "President" })).toBe(true);
+    expect(isVetoAction({ actionCode: " 31000 " })).toBe(true);
+  });
+
+  it.each([
+    ["the House's E30000 veto line", { actionCode: "E30000", text: "Vetoed by President.", type: "President" }],
+    ["the veto's text without a code", { text: "Vetoed by President.", type: "President" }],
+    ["a numeric code", { actionCode: 31000, text: "Vetoed by President." }],
+    ["the House's veto-message steps", HOUSE_VETO_MESSAGE_STEPS[0]],
+    ["another veto-message step", HOUSE_VETO_MESSAGE_STEPS[3]],
+    ["the presentment", { actionCode: "28000", text: "Presented to President.", type: "President" }],
+    ["a failed override", HR131_VETOED[0]],
+    ["the House's override vote", HR6395_HOUSE_OVERRIDE],
+  ])("does not count %s as a veto", (_label, action) => {
+    expect(isVetoAction(action)).toBe(false);
+  });
+
+  it("is vetoed with the real actions of H.R. 131 and H.R. 504, while the status stays Failed", () => {
+    for (const actions of [HR131_VETOED, HR504_VETOED, [...HOUSE_VETO_MESSAGE_STEPS, ...HR131_VETOED]]) {
+      expect(deriveBillVetoedFromActions(actions)).toBe(true);
+      expect(deriveBillStatusFromActions(actions)).toBe("Failed");
+    }
+    expect(deriveBillVetoedFromActions([...HR131_VETOED].reverse())).toBe(true);
+  });
+
+  it("is vetoed before an override vote, while the status stays Passed", () => {
+    const awaitingOverride = HR131_VETOED.slice(1);
+    expect(deriveBillVetoedFromActions(awaitingOverride)).toBe(true);
+    expect(deriveBillStatusFromActions(awaitingOverride)).toBe("Passed");
+  });
+
+  it("is vetoed after a pocket veto (30000), which no override follows", () => {
+    const pocket = [
+      { actionCode: "30000", actionDate: "2026-01-20", text: "Pocket vetoed by President.", type: "President" },
+      ...HR224_PRESENTED,
+    ];
+    expect(deriveBillVetoedFromActions(pocket)).toBe(true);
+    expect(deriveBillStatusFromActions(pocket)).toBe("Passed");
+  });
+
+  it("is not vetoed once both chambers passed it over the veto, before its law line: Passed (H.R. 6395)", () => {
+    const overridden = [HR6395_SENATE_OVERRIDE, HR6395_HOUSE_OVERRIDE, HR6395_VETO, ...HR6395_PASSED];
+    expect(deriveBillVetoedFromActions(overridden)).toBe(false);
+    expect(deriveBillStatusFromActions(overridden)).toBe("Passed");
+    // In either order.
+    expect(deriveBillVetoedFromActions([...overridden].reverse())).toBe(false);
+  });
+
+  it("is still vetoed after the House's override vote alone: the Senate may sustain the veto", () => {
+    const houseOnly = [HR6395_HOUSE_OVERRIDE, HR6395_VETO, ...HR6395_PASSED];
+    expect(deriveBillVetoedFromActions(houseOnly)).toBe(true);
+    expect(deriveBillStatusFromActions(houseOnly)).toBe("Passed");
+    // The Senate's line alone does not clear it either.
+    expect(deriveBillVetoedFromActions([HR6395_SENATE_OVERRIDE, HR6395_VETO, ...HR6395_PASSED])).toBe(true);
+  });
+
+  it.each([
+    ["36000", HR6395_LAW],
+    ["E40000", HR6395_HOUSE_LAW],
+  ])("is not vetoed once the law line arrives after the override (%s): Finalized", (_code, law) => {
+    const madeLaw = [law, HR6395_SENATE_OVERRIDE, HR6395_HOUSE_OVERRIDE, HR6395_VETO, ...HR6395_PASSED];
+    expect(deriveBillVetoedFromActions(madeLaw)).toBe(false);
+    expect(deriveBillStatusFromActions(madeLaw)).toBe("Finalized");
+  });
+
+  it("reads the override by its codes, never its text: uncoded override lines leave it vetoed until coded", () => {
+    const uncoded = [HR6395_SENATE_OVERRIDE, HR6395_HOUSE_OVERRIDE, HR6395_VETO, ...HR6395_PASSED].map((action) =>
+      action.type === "Veto" ? { ...action, actionCode: undefined } : action,
+    );
+    expect(deriveBillVetoedFromActions(uncoded)).toBe(true);
+  });
+
+  it("is not vetoed by the House's E30000 line alone, whatever it says", () => {
+    for (const text of [
+      "Signed by President.",
+      "Vetoed by President.",
+      "Sent to Archivist of the United States unsigned.",
+    ]) {
+      const actions = [{ actionCode: "E30000", actionDate: "2025-12-29", text, type: "President" }, ...HR224_PRESENTED];
+      expect(deriveBillVetoedFromActions(actions)).toBe(false);
+    }
+  });
+
+  it("is not vetoed with a law line, whatever its date", () => {
+    const lawFirst = [
+      { actionCode: "31000", actionDate: "2025-12-29", text: "Vetoed by President.", type: "President" },
+      { actionCode: "36000", actionDate: "2025-12-01", text: "Became Public Law No: 119-40.", type: "BecameLaw" },
+      ...HR224_PRESENTED,
+    ];
+    expect(deriveBillVetoedFromActions(lawFirst)).toBe(false);
+    expect(deriveBillStatusFromActions(lawFirst)).toBe("Finalized");
+  });
+
+  it("is not vetoed without actions, or with empty and malformed entries", () => {
+    expect(deriveBillVetoedFromActions(undefined)).toBe(false);
+    expect(deriveBillVetoedFromActions(null)).toBe(false);
+    expect(deriveBillVetoedFromActions([])).toBe(false);
+    expect(deriveBillVetoedFromActions([null, {}, "31000", 31000, { actionCode: 31000 }])).toBe(false);
+    expect(isVetoAction(null)).toBe(false);
+    expect(isVetoAction("31000")).toBe(false);
+  });
+
+  it("names the latest veto for reports, as latestEnactmentAction names the law", () => {
+    expect(latestVetoAction(HR131_VETOED)).toEqual({
+      actionCode: "31000",
+      actionDate: "2025-12-29",
+      actionType: "President",
+      text: "Vetoed by President.",
+    });
+    expect(latestVetoAction(HR224_PRESENTED)).toBeNull();
+    expect(latestVetoAction(undefined)).toBeNull();
+  });
+
+  it("tells a failed override (33000, 35000) from any other failure, by code", () => {
+    expect(isFailedOverrideAction(HR131_VETOED[0])).toBe(true);
+    expect(
+      isFailedOverrideAction({
+        actionCode: "35000",
+        actionDate: "2026-02-03",
+        text: "Failed of passage in Senate over veto by Yea-Nay Vote. 60 - 38.",
+        type: "Veto",
+      }),
+    ).toBe(true);
+    expect(isFailedOverrideAction({ ...HR131_VETOED[0], actionCode: undefined })).toBe(false);
+    expect(isFailedOverrideAction({ ...HR131_VETOED[0], actionCode: "9000" })).toBe(false);
+    expect(isFailedOverrideAction(HR6395_HOUSE_OVERRIDE)).toBe(false);
+    expect(isFailedOverrideAction(HR6395_VETO)).toBe(false);
+    // An override's own vote is not on a motion: a 33000 line about one is not the override failing (REL-50 rules).
+    expect(isFailedOverrideAction({ ...HR131_VETOED[0], text: "Motion to refer the veto message failed." })).toBe(
+      false,
+    );
+  });
+
+  it("sends no outcome of its own: the veto and the override votes are not passages or failures to push", () => {
+    expect(billOutcomeKindForAction(HR6395_VETO)).toBeNull();
+    expect(billOutcomeKindForAction(HR6395_HOUSE_OVERRIDE)).toBeNull();
+    expect(billOutcomeKindForAction(HR6395_SENATE_OVERRIDE)).toBeNull();
+    expect(billOutcomeTextForAction(HR6395_VETO)).toBeNull();
+    expect(latestNewBillOutcomeAction(HR131_VETOED.slice(3), HR131_VETOED.slice(1))).toBeNull();
   });
 });
 
