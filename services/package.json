@@ -36,6 +36,7 @@
         "refetch:stale-bills": "node -r ts-node/register/transpile-only scripts/refetchStaleBills.ts",
         "list:skipped-bill-updates": "node -r ts-node/register/transpile-only scripts/listSkippedBillUpdates.ts",
         "list:backfill-leftovers": "node -r ts-node/register/transpile-only scripts/listBackfillLeftovers.ts",
+        "list:vetoed-bills": "node -r ts-node/register/transpile-only scripts/listVetoedBills.ts",
         "redate:manifest-rows": "node -r ts-node/register/transpile-only scripts/redateManifestRows.ts",
         "reprocess:congress-members": "node -r ts-node/register/transpile-only scripts/reprocessCongressMembers.ts",
         "send:district-notice": "node -r ts-node/register/transpile-only scripts/sendDistrictNotice.ts",
