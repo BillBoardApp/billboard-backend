@@ -277,7 +277,8 @@ export const isEnactmentAction = (action: unknown): boolean => {
 // President." and 30000, a pocket veto. The House's own line for a veto is coded E30000, which the House also gives
 // "Signed by President." and "Sent to Archivist of the United States unsigned.", so it counts only through its 31000
 // twin: when the E30000 line arrives a poll before the 31000 one, nothing is stamped yet. A vetoed bill keeps its
-// status, Passed, or Failed once an override fails (33000, 35000). It is no longer vetoed:
+// status, Passed, or Failed once an override fails (33000, 35000), or a stored Updated, which billDiffer keeps as it
+// is (billSourceReconcile.ts MANAGED_BILL_STATUSES): the flag never reads the status. It is no longer vetoed:
 //   - once an action records it becoming law (isEnactmentAction: 36000, E40000), which makes it Finalized;
 //   - once both chambers passed it over the veto, 32000 "Passed House over veto" and 34000 "Passed Senate over veto":
 //     it is law from the second vote and stays Passed until its law line arrives (REL-44, above), so VETOED never
@@ -417,8 +418,8 @@ export const deriveBillStatusFromActions = (actions: unknown[] | null | undefine
 /**
  * Whether the bill's veto stands, from its actions (the rule is above VETO_ACTION_CODES): an action records a veto
  * (31000, or 30000 for a pocket veto), none records the bill becoming law, and it does not have both chambers' votes to
- * pass it over the veto (32000 and 34000). It never changes the status: a vetoed bill is Passed, or Failed once an
- * override fails.
+ * pass it over the veto (32000 and 34000). It never reads or changes the status: a vetoed bill derives Passed, or
+ * Failed once an override fails, and keeps a stored Updated.
  */
 export const deriveBillVetoedFromActions = (actions: unknown[] | null | undefined): boolean => {
   const list = normalizeActions(actions);
