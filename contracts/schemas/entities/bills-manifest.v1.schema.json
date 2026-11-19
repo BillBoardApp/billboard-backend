@@ -43,7 +43,7 @@
         "title": { "type": "string" },
         "subCategories": {
           "type": "array",
-          "description": "The processed bill's sub-category labels, except that a ceremonial resolution (one that designates a day or week, or recognizes, honors or congratulates someone) has none (since 2026-10-29). Until the label switch ends (Phase E) a bill may still carry the legacy names Social Justice and Identity Politics, which clients show as Civil Rights and Liberties and Heritage and Identity.",
+          "description": "The processed bill's sub-category labels, except that a ceremonial resolution (one that designates a day or week, or recognizes, honors or congratulates someone) has none (since 2026-10-29). A bill summarized before Civil Rights and Liberties and Heritage and Identity replaced Social Justice and Identity Politics may still carry the old names, which clients show under the new names.",
           "items": { "$ref": "processed-bill.v1.schema.json#/$defs/subCategory" }
         },
         "lifeAreas": {
