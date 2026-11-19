@@ -56,11 +56,12 @@
           "kind": "bill",
           "title": "Affordable Child Care Access Act",
           "eyebrow": "Passed Mar 19",
-          "summary": "Mar 19: Passed Senate with an amendment by Unanimous Consent.",
+          "summary": "Mar 19: Vetoed by President.",
           "detail": "Expands child care grants and adds rural providers to those who qualify.",
           "reason": "Matches your topic: Child Care",
           "accent": "movement",
           "billState": "passed",
+          "vetoed": true,
           "billGuid": "BILLS-119s512es"
         }
       ]
