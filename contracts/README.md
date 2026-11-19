@@ -134,8 +134,9 @@ is a flag beside the status instead, optional and additive; clients that predate
   item (`billState` keeps the status's value).
 - The rule is `services/src/shared/billOutcomes.ts` `deriveBillVetoedFromActions`: an action coded 31000 (or 30000, a
   pocket veto), no action that records the bill becoming law (36000, E40000), and not both chambers' votes over the
-  veto (32000 and 34000). A vetoed bill is `Passed`, or `Failed` once an override fails; a `Finalized` bill is never
-  vetoed.
+  veto (32000 and 34000). It never reads the status: a vetoed bill derives `Passed`, or `Failed` once an override
+  fails, but `billDiffer` keeps a stored `Updated` as it is, so a vetoed bill can be `Updated` too (and `New` when its
+  passage lines carry no code); a `Finalized` bill is never vetoed.
 - Clients stamp it VETOED in the Failed colour, in place of the status word, unless the status is `Finalized`.
 - `check-contracts.mjs` accepts each shape without the field and rejects `false`, `"true"`, `1` and `null`
   (`VETOED_*`). One bill in each of the three fixtures carries it, so `check:swift` decodes it.
