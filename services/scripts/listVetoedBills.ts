@@ -9,10 +9,16 @@
 //
 // Strictly read-only: one consistent Query of the BILL partition (--guid: only those bills' rows), then one GetObject
 // of processed-bills/<plain guid>.json per candidate. No other AWS call, and no write: the only file it writes is the
-// local keys file. A candidate is a row whose billStatus is Passed, Failed or absent (a vetoed bill is Passed, or
-// Failed once an override fails) and whose billType is a bill or a joint resolution (hr, s, hjres, sjres;
-// normalizeBillTypeCode, so the slugs a March row may carry count too), and any row that carries the flag, whatever
-// its status or type, to find a stale one. A row whose document cannot be read is "unreadable" (exit code 1).
+// local keys file. A candidate is a row whose billType is a bill or a joint resolution (hr, s, hjres, sjres;
+// normalizeBillTypeCode, so the slugs a March row may carry count too) and whose billStatus is anything but Finalized,
+// absent or unknown included, and any row that carries the flag, whatever its status or type, to find a stale one.
+// The flag never reads the status, so neither does the choice: a vetoed bill derives Passed, or Failed once an
+// override fails, but billDiffer keeps a stored Updated as it is (billSourceReconcile.ts MANAGED_BILL_STATUSES), and a
+// veto whose passage lines are not coded derives New. Each of those rows gets the flag at its next write, and a row
+// left out here would be neither listed nor counted, so missing=0 could pass while it lacks the flag. A Finalized row
+// is the one left out: no client says VETOED on a law, whatever its row carries. So nearly every BILL row's document
+// is read, one GetObject each: a few minutes for a whole Congress at the default concurrency. A row whose document
+// cannot be read is "unreadable" (exit code 1).
 //
 // Each vetoed bill prints its guid and status, the veto's date and code (latestVetoAction), whether its row carries
 // the flag, the row's date-basis version (d2, d1 or none), whether its contentHash is the document's billContentHash,
@@ -92,8 +98,8 @@ const KEYS_FILE_PREFIX = "vetoed-bills-keys-";
 /** A row dated this long after its document's storedAt was dated by it (CreateBillsManifest's MAX_ROW_DATE_LAG_MS). */
 const MAX_ROW_DATE_LAG_MS = 3_000;
 
-/** The statuses a vetoed bill can hold, and none (a row without one). */
-const CANDIDATE_STATUSES = new Set(["Passed", "Failed", ""]);
+/** The one status whose rows are not read: a law, which no client stamps VETOED (the candidates are at the top). */
+const LAW_STATUS = "Finalized";
 /** The types the President can veto: bills and joint resolutions. */
 const CANDIDATE_TYPES = new Set(["hr", "s", "hjres", "sjres"]);
 
@@ -150,8 +156,10 @@ const USAGE = [
   "  --guid <guid>        Only this bill (repeatable; a text-version suffix is ignored)",
   `  --concurrency <n>    Processed bills read at once (default ${DEFAULT_CONCURRENCY}, at most ${MAX_CONCURRENCY})`,
   "",
-  "AWS calls: one consistent Query of the BILL partition and one GetObject per candidate row. Nothing is written to",
-  "AWS. Exit codes: 0 done; 1 a processed bill could not be read, or a usage error.",
+  "AWS calls: one consistent Query of the BILL partition and one GetObject per candidate row: every bill or joint",
+  "resolution whose status is not Finalized (Updated, New, unknown or none included; the flag never reads the",
+  "status), and every row that carries the flag. Nothing is written to AWS.",
+  "Exit codes: 0 done; 1 a processed bill could not be read, or a usage error.",
   "",
   "Environment: AWS_PROFILE, AWS_REGION / AWS_DEFAULT_REGION, BILL_STORE_BUCKET (or BUCKET_NAME),",
   "PROCESSED_BILLS_PREFIX, MANIFEST_TABLE_NAME, MANIFEST_PRIMARY_KEY, MANIFEST_PK_VALUE",
@@ -163,13 +171,14 @@ const USAGE = [
 export const rowCarriesVetoed = (row: Item): boolean => row.vetoed?.BOOL === true;
 
 /**
- * Whether the row's processed bill is read: a bill or joint resolution whose status is Passed, Failed or absent, or
- * any row that carries the flag.
+ * Whether the row's processed bill is read: a bill or joint resolution whose status is anything but Finalized (a
+ * stored Updated, a New, an unknown value or none included, as the flag never reads the status), or any row that
+ * carries the flag.
  */
 export const isCandidate = (row: Item): boolean => {
   if (rowCarriesVetoed(row)) return true;
   const code = normalizeBillTypeCode(row.billType?.S);
-  return code !== null && CANDIDATE_TYPES.has(code) && CANDIDATE_STATUSES.has(row.billStatus?.S ?? "");
+  return code !== null && CANDIDATE_TYPES.has(code) && row.billStatus?.S !== LAW_STATUS;
 };
 
 const guidOfRow = (row: Item): string => row.guid?.S ?? "";
@@ -446,8 +455,8 @@ export const runListVetoedBills = async ({
       : allRows;
   const candidates = rows.filter(isCandidate);
   log(
-    `Read ${rows.length} BILL rows: ${candidates.length} candidates (Passed, Failed or no status, a bill or joint ` +
-      `resolution, or carrying the flag); reading their processed bills under s3://${config.bucket}/` +
+    `Read ${rows.length} BILL rows: ${candidates.length} candidates (a bill or joint resolution that is not ` +
+      `Finalized, or carrying the flag); reading their processed bills under s3://${config.bucket}/` +
       config.processedPrefix,
   );
   const assessments = (

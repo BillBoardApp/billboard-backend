@@ -13,6 +13,9 @@ import {
   runListVetoedBills,
   summaryLine,
 } from "../../scripts/listVetoedBills";
+import type { ProcessedBillDocument, RawBill } from "../models/bill";
+import { deriveBillVetoedFromActions } from "../shared/billOutcomes";
+import { applyDerivedFields } from "../shared/billSourceReconcile";
 import { billContentHash, formatDateBasis, manifestDateBasis } from "../shared/billVersionChange";
 
 /*
@@ -58,6 +61,8 @@ const PASSAGES = [
   { actionCode: "8000", actionDate: "2025-07-21", text: "Passed/agreed to in House.", type: "Floor" },
 ];
 const LAW = { actionCode: "36000", actionDate: "2026-01-20", text: "Became Public Law No: 119-90.", type: "BecameLaw" };
+// A veto whose passage lines carry no Library of Congress code: its actions derive New.
+const PRESENTED_ONLY = [PASSAGES[0]];
 
 const numberOf = (guid: string): string => guid.replace(/^BILLS-\d{3}[a-z]+/, "");
 const typeOf = (guid: string): string => guid.replace(/^BILLS-\d{3}([a-z]+)\d+.*$/, "$1");
@@ -193,8 +198,10 @@ const NEWS = "BILLS-119hjres11"; // vetoed, its row reflects the version before 
 const SKIPPED = "BILLS-119s20"; // vetoed, its row dated after its document
 const SLUG = "BILLS-119hr21"; // vetoed, a March row typed by its slug and dated 0.7 s after its document
 const STALE = "BILLS-119hr700"; // the row carries the flag, but the bill became law after the override
+const UPDATED = "BILLS-119hr301"; // vetoed, stored Updated (billDiffer keeps it as stored), no flag yet
+const UNCODED = "BILLS-119s302"; // vetoed, its passage lines not coded so it derives New, no flag yet
 const OPEN = "BILLS-119hr224"; // Passed and presented, not vetoed
-const NEW_BILL = "BILLS-119hr900"; // New: not a candidate
+const NEW_BILL = "BILLS-119hr900"; // New and not vetoed: read, not listed
 const RESOLUTION = "BILLS-119hres5"; // a simple resolution: never vetoed, not a candidate
 const LAW_BILL = "BILLS-119hr800"; // Finalized: not a candidate
 
@@ -211,6 +218,8 @@ const world = () => {
     [SKIPPED]: doc(SKIPPED, "2026-01-09T05:00:00.000Z", "Failed", vetoedActions),
     [SLUG]: doc(SLUG, "2026-03-19T16:57:53.915Z", "Passed", [...VETO, ...PASSAGES]),
     [STALE]: doc(STALE, "2026-01-21T05:00:00.000Z", "Finalized", [LAW, ...VETO, ...PASSAGES]),
+    [UPDATED]: doc(UPDATED, "2026-11-18T05:00:00.000Z", "Updated", vetoedActions),
+    [UNCODED]: doc(UNCODED, "2026-01-09T05:00:00.000Z", "New", [...VETO, ...PRESENTED_ONLY]),
     [OPEN]: doc(OPEN, "2026-01-13T05:00:00.000Z", "Passed", PASSAGES),
     [NEW_BILL]: doc(NEW_BILL, "2026-01-13T05:00:00.000Z", "New", []),
     [RESOLUTION]: doc(RESOLUTION, "2026-01-13T05:00:00.000Z", "Passed", PASSAGES),
@@ -230,6 +239,8 @@ const world = () => {
     }),
     row(docs[SLUG], { updatedAt: "2026-03-19T16:57:54.669Z", billType: "house-bill", legacy: true }),
     row(docs[STALE], { vetoed: true }),
+    row(docs[UPDATED]),
+    row(docs[UNCODED]),
     row(docs[OPEN]),
     row(docs[NEW_BILL]),
     row(docs[RESOLUTION]),
@@ -267,7 +278,7 @@ describe("parseArgs", () => {
 describe("isCandidate", () => {
   const candidate = (fields: Item) => isCandidate({ guid: { S: "BILLS-119hr1" }, ...fields });
 
-  it("reads bills and joint resolutions that are Passed, Failed or have no status, slugs included", () => {
+  it("reads bills and joint resolutions of every status but Finalized, none or unknown included, slugs included", () => {
     for (const billType of [
       "hr",
       "s",
@@ -278,24 +289,39 @@ describe("isCandidate", () => {
       "house-joint-resolution",
       "S.J.Res.",
     ]) {
-      for (const billStatus of ["Passed", "Failed", undefined]) {
-        expect(candidate({ billType: { S: billType }, ...(billStatus ? { billStatus: { S: billStatus } } : {}) })).toBe(
-          true,
-        );
+      // The flag never reads the status: a stored Updated (which billDiffer keeps), a New whose passage lines carry
+      // no code, or a value no release writes still gets it at the row's next write, so missing= must count the row.
+      for (const billStatus of ["Passed", "Failed", "Updated", "New", "", "Pending", undefined]) {
+        expect(
+          candidate({
+            billType: { S: billType },
+            ...(billStatus !== undefined ? { billStatus: { S: billStatus } } : {}),
+          }),
+        ).toBe(true);
       }
+      expect(candidate({ billType: { S: billType }, billStatus: { NULL: true } })).toBe(true);
     }
   });
 
-  it("leaves out other statuses and types, unless the row carries the flag", () => {
-    for (const billStatus of ["New", "Updated", "Finalized"]) {
-      expect(candidate({ billType: { S: "hr" }, billStatus: { S: billStatus } })).toBe(false);
-      expect(candidate({ billType: { S: "hr" }, billStatus: { S: billStatus }, vetoed: { BOOL: true } })).toBe(true);
-    }
+  it("leaves out a law and the other types, unless the row carries the flag", () => {
+    expect(candidate({ billType: { S: "hr" }, billStatus: { S: "Finalized" } })).toBe(false);
+    expect(candidate({ billType: { S: "hr" }, billStatus: { S: "Finalized" }, vetoed: { BOOL: true } })).toBe(true);
     for (const billType of ["hres", "sres", "hconres", "sconres", "house-resolution", "", "xyz"]) {
-      expect(candidate({ billType: { S: billType }, billStatus: { S: "Passed" } })).toBe(false);
+      for (const billStatus of ["Passed", "Updated", "New"]) {
+        expect(candidate({ billType: { S: billType }, billStatus: { S: billStatus } })).toBe(false);
+      }
     }
     expect(candidate({ billType: { S: "hres" }, vetoed: { BOOL: true } })).toBe(true);
-    expect(candidate({ billType: { S: "hr" }, billStatus: { S: "New" }, vetoed: { BOOL: false } })).toBe(false);
+    expect(candidate({ billType: { S: "hr" }, billStatus: { S: "Finalized" }, vetoed: { BOOL: false } })).toBe(false);
+  });
+
+  it("reads a vetoed bill whose stored Updated status billDiffer keeps when the veto arrives", () => {
+    const stored = doc(UPDATED, "2025-12-19T05:00:00.000Z", "Updated", PASSAGES) as unknown as ProcessedBillDocument;
+    const rawBill = { content: { actions: { actions: [...VETO, ...PASSAGES] } } } as unknown as RawBill;
+    const next = applyDerivedFields(stored, rawBill);
+    expect(next.billStatus).toBe("Updated");
+    expect(deriveBillVetoedFromActions(next.actions)).toBe(true);
+    expect(isCandidate(row(next as unknown as Doc))).toBe(true);
   });
 });
 
@@ -418,20 +444,22 @@ describe("the listing", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.summary).toEqual({
-      rows: 12,
-      candidates: 9,
-      vetoed: 7,
-      missing: 6,
+      rows: 14,
+      candidates: 12,
+      vetoed: 9,
+      missing: 8,
       stale: 1,
       unpredictable: 3,
       unreadable: 0,
     });
     // Sorted, one key per line, as backfill:bills-manifest --keys-file reads them: the missing rows a replay
-    // rewrites at their own key, and the stale one. Not the flagged row, nor the rows a replay may move or skips.
-    expect(fs.store.get("keys.txt")).toBe([IN_PLACE, SLUG, KEPT, STALE].map(keyOf).sort().join("\n") + "\n");
-    expect(result.keys).toEqual([IN_PLACE, SLUG, KEPT, STALE].map(keyOf).sort());
+    // rewrites at their own key (the Updated and New ones too), and the stale one. Not the flagged row, nor the rows
+    // a replay may move or skips.
+    const replayed = [IN_PLACE, SLUG, KEPT, UPDATED, UNCODED, STALE];
+    expect(fs.store.get("keys.txt")).toBe(replayed.map(keyOf).sort().join("\n") + "\n");
+    expect(result.keys).toEqual(replayed.map(keyOf).sort());
     expect(lines[lines.length - 1]).toBe(
-      "Vetoed rows: rows=12 candidates=9 vetoed=7 missing=6 stale=1 unpredictable=3 unreadable=0",
+      "Vetoed rows: rows=14 candidates=12 vetoed=9 missing=8 stale=1 unpredictable=3 unreadable=0",
     );
   });
 
@@ -463,13 +491,22 @@ describe("the listing", () => {
       `  stale ${STALE} Finalized: veto 2025-12-29 (31000); row flag yes; basis d2; hash equal yes; ` +
         "row after document no; replay: in place (dated by this document)",
     );
+    // A vetoed bill keeps a stored Updated, and one whose passage lines carry no code derives New: both are listed.
+    expect(lines).toContain(
+      `  missing ${UPDATED} Updated: veto 2025-12-29 (31000); row flag no; basis d2; hash equal yes; ` +
+        "row after document no; replay: in place (dated by this document)",
+    );
+    expect(lines).toContain(
+      `  missing ${UNCODED} New: veto 2025-12-29 (31000); row flag no; basis d2; hash equal yes; ` +
+        "row after document no; replay: in place (dated by this document)",
+    );
     expect(lines.find((line) => line.includes(`missing ${NEWS} `))).toContain(
       "replay: may move (news against the d2 basis: newerAction)",
     );
     expect(lines.find((line) => line.startsWith("Not in the keys file"))).toContain(
       `${NEWS} (may move), ${SKIPPED} (skipped), ${MAY_MOVE} (may move)`,
     );
-    // A bill that is not vetoed, and the rows that are not candidates, are not listed.
+    // A bill that is not vetoed (whatever its status), and the rows that are not candidates, are not listed.
     for (const guid of [OPEN, NEW_BILL, RESOLUTION, LAW_BILL]) {
       expect(lines.some((line) => line.includes(guid))).toBe(false);
     }
@@ -481,9 +518,11 @@ describe("the listing", () => {
 
     expect(new Set(table.names)).toEqual(new Set(["QueryCommand"]));
     expect(new Set(s3.names)).toEqual(new Set(["GetObjectCommand"]));
-    // The non-candidates' documents are never read.
+    // Every bill's and joint resolution's document but a law's is read, and the non-candidates' never are.
     expect(s3.keys.sort()).toEqual(
-      [IN_PLACE, KEPT, FLAGGED, MAY_MOVE, NEWS, SKIPPED, SLUG, STALE, OPEN].map(keyOf).sort(),
+      [IN_PLACE, KEPT, FLAGGED, MAY_MOVE, NEWS, SKIPPED, SLUG, STALE, UPDATED, UNCODED, OPEN, NEW_BILL]
+        .map(keyOf)
+        .sort(),
     );
   });
 
@@ -501,7 +540,7 @@ describe("the listing", () => {
     const { result, lines, s3 } = await run(["--keys-file", "keys.txt"], rows, docs);
 
     expect(result.exitCode).toBe(1);
-    expect(result.summary).toMatchObject({ unreadable: 1, missing: 5 });
+    expect(result.summary).toMatchObject({ unreadable: 1, missing: 7 });
     expect(lines).toContain(`  unreadable ${KEPT}: NoSuchKey: The specified key does not exist.`);
     expect(new Set(s3.names)).toEqual(new Set(["GetObjectCommand"]));
   });
