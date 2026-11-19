@@ -85,6 +85,11 @@
           "type": "string",
           "enum": ["New", "Updated", "Passed", "Failed", "Finalized"]
         },
+        "vetoed": {
+          "type": "boolean",
+          "const": true,
+          "description": "Only as true, when the processed bill's actions show a veto that stands (billOutcomes.ts deriveBillVetoedFromActions); absent otherwise. billStatus keeps its value. Clients that predate it ignore it."
+        },
         "civicProfile": {
           "title": "CivicProfileScoresV1",
           "type": "object",
