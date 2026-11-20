@@ -99,8 +99,10 @@ export const VERIFICATION_LIMITS_MODE: 'watch' | 'enforce' = 'watch';
 export const VOTE_RESTAMP_MODE: 'plan' | 'apply' = 'plan';
 
 /** INT-05 (PreSignUpCheck): 'watch' lets every sign-up through and emits SignUpFilterHit on a disposable
- * domain or a second account on one base address; 'enforce' refuses them. Claims are written in both. */
-export const SIGNUP_FILTER_MODE: 'watch' | 'enforce' = 'watch';
+ * domain or a second account on one base address; 'enforce' refuses them. Claims are written in both.
+ * 'enforce' since the 2026-11 flip: the watch-period hits were one person's retries before the claim-retry
+ * fix, which the project accepted as explained. */
+export const SIGNUP_FILTER_MODE: 'watch' | 'enforce' = 'enforce';
 
 /** 7B (the user API web ACL's CognitoSignUpRateLimit rule): 'count' only counts an IP's SignUp,
  * ResendConfirmationCode or ForgotPassword calls over COGNITO_SIGN_UP_RATE_LIMIT in its window; 'block' refuses

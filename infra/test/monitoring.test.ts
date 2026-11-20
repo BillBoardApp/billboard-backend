@@ -1835,7 +1835,7 @@ describe("MonitoringStack", () => {
       expect(descriptions["Billboard-Integrity-AddressVerificationBurst"]).toContain("Real accounts verify rarely, so a burst can be address farming.");
       expect(descriptions["Billboard-Integrity-AddressVerificationBurst"]).not.toMatch(/\d+ verified accounts at/);
       expect(descriptions["Billboard-Integrity-AddressCapSignal"]).toMatch(/VERIFICATION_LIMITS_MODE=watch.*\/aws\/lambda\/DistrictVerification/);
-      expect(descriptions["Billboard-Integrity-SignUpFilterHits"]).toMatch(/SIGNUP_FILTER_MODE=watch.*\/aws\/lambda\/PreSignUpCheck/);
+      expect(descriptions["Billboard-Integrity-SignUpFilterHits"]).toMatch(/SIGNUP_FILTER_MODE=enforce.*\/aws\/lambda\/PreSignUpCheck.*back to watch/);
       expect(descriptions["Billboard-Integrity-SignUpFilterErrors"]).toMatch(/fails open.*PRE_SIGN_UP_TRIGGER_ENABLED=false/);
       expect(descriptions["Billboard-Integrity-SignUpFilterCheckFailed"]).toMatch(
         /SignUpFilterCheckFailed \+ SignUpFilterCheckSwept.*\/aws\/lambda\/SignUpFilterCheck.*RUNBOOK 14\.12.*SIGNUP_FILTER_CHECK_ENABLED/,
