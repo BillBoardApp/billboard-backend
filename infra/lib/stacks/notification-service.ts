@@ -416,7 +416,8 @@ export class NotificationServiceStack extends cdk.Stack {
     );
     pendingNotificationsTable.grantReadWriteData(notificationDispatcherFn);
     userNotifierQueue.grantSendMessages(notificationDispatcherFn);
-    // Reads AppleCertificateExpirationDate to publish ApnsCertificateDaysRemaining (REC-04).
+    // Reads AppleCertificateExpirationDate to publish ApnsCertificateDaysRemaining (REC-04), or sees token-based
+    // authentication, which has no expiry and publishes nothing (UA-08).
     notificationDispatcherFn.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['sns:GetPlatformApplicationAttributes'],

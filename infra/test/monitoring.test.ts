@@ -572,10 +572,29 @@ describe("MonitoringStack", () => {
         MetricName: "ApnsCertificateDaysRemaining",
         Dimensions: Match.absent(),
         Statistic: "Minimum",
+        Period: 86400,
         Threshold: 30,
         ComparisonOperator: "LessThanThreshold",
+        EvaluationPeriods: 1,
+        DatapointsToAlarm: 1,
         TreatMissingData: "notBreaching",
+        AlarmActions: [alarmTopicRef],
+        OKActions: Match.absent(),
       });
+    });
+
+    // UA-08: with a .p8 signing key NotificationDispatcher publishes no ApnsCertificateDaysRemaining, so the switch
+    // must read as OK: not ALARM (breaching), not INSUFFICIENT_DATA (missing) and not a frozen state (ignore).
+    test("reads the missing datapoints of token-based authentication as OK and says so", () => {
+      const [alarm] = Object.values(
+        templates.monitoringTemplate.findResources("AWS::CloudWatch::Alarm", {
+          Properties: { AlarmName: "Billboard-Notifications-ApnsCertificateExpiry" },
+        }),
+      ) as Array<{ Properties: Record<string, unknown> }>;
+
+      expect(alarm.Properties.TreatMissingData).toBe("notBreaching");
+      expect(alarm.Properties.AlarmDescription).toContain("token-based authentication");
+      expect(alarm.Properties.AlarmDescription).toContain("stays OK");
     });
 
     test("alarms when the weekly digest fails for any user and points at the worker and its DLQ", () => {
