@@ -1,3 +1,4 @@
+import { generateKeyPairSync, KeyObject } from "node:crypto";
 import * as cdk from "aws-cdk-lib";
 import * as ddb from "aws-cdk-lib/aws-dynamodb";
 import { Match, Template } from "aws-cdk-lib/assertions";
@@ -563,8 +564,11 @@ describe("APNs platform application custom resource", () => {
     logSpy.mockRestore();
   });
 
-  /** Loads index.js with the AWS SDK clients replaced by in-memory fakes. */
-  function loadHandler(getSecretValue: () => Promise<unknown>): { handler: Handler; snsCommands: SentCommand[] } {
+  /** Loads index.js with the AWS SDK clients replaced by in-memory fakes. `snsError` makes every SNS call fail. */
+  function loadHandler(
+    getSecretValue: () => Promise<unknown>,
+    snsError?: Error,
+  ): { handler: Handler; snsCommands: SentCommand[] } {
     const snsCommands: SentCommand[] = [];
     const command = (name: string) =>
       class {
@@ -577,6 +581,7 @@ describe("APNs platform application custom resource", () => {
         SNSClient: class {
           async send(cmd: { commandName: string; input: Record<string, any> }) {
             snsCommands.push({ name: cmd.commandName, input: cmd.input });
+            if (snsError) throw snsError;
             return cmd.commandName === "CreatePlatformApplicationCommand"
               ? { PlatformApplicationArn: APP_ARN }
               : {};
@@ -687,5 +692,229 @@ describe("APNs platform application custom resource", () => {
     );
 
     await expect(handler({ RequestType: "Create", ResourceProperties: properties })).rejects.toThrow("denied");
+  });
+
+  test("SNS refusing certificate credentials still fails the deployment, as before", async () => {
+    const { handler } = loadHandler(
+      secretString(JSON.stringify({ PlatformPrincipal: CERT, PlatformCredential: KEY })),
+      Object.assign(new Error("Invalid parameter"), { name: "InvalidParameterException" }),
+    );
+
+    await expect(
+      handler({
+        RequestType: "Update",
+        PhysicalResourceId: APP_ARN,
+        ResourceProperties: properties,
+        OldResourceProperties: properties,
+      }),
+    ).rejects.toThrow("Invalid parameter");
+  });
+
+  // UA-08: an APNs auth key (.p8) instead of the certificate that expires 2027-01-27.
+  describe("token-based (.p8) credentials", () => {
+    const pkcs8 = (key: KeyObject) => key.export({ type: "pkcs8", format: "pem" }).toString().trim();
+    const p256 = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey;
+    // Apple's own fictional IDs from its token documentation, and a reserved example domain.
+    const SIGNING_KEY = pkcs8(p256);
+    const KEY_ID = "ABC123DEFG";
+    const TEAM_ID = "DEF123GHIJ";
+    const BUNDLE_ID = "com.example.app";
+    const TOKEN_SECRET = { SigningKey: `${SIGNING_KEY}\n`, SigningKeyId: KEY_ID, TeamId: TEAM_ID, BundleId: BUNDLE_ID };
+    const TOKEN_ATTRIBUTES = {
+      PlatformCredential: SIGNING_KEY,
+      PlatformPrincipal: KEY_ID,
+      ApplePlatformTeamID: TEAM_ID,
+      ApplePlatformBundleID: BUNDLE_ID,
+    };
+    const updateEvent = {
+      RequestType: "Update",
+      PhysicalResourceId: APP_ARN,
+      ResourceProperties: { ...properties, SyncToken: "2026-12-01-1" },
+      OldResourceProperties: { ...properties, SyncToken: "2025-12-28-3" },
+    };
+
+    /** Every line of every value in the secret (PEM armor aside) must stay out of the logs. */
+    const expectNoSecretInLogs = (secret: Record<string, unknown>) => {
+      const lines = Object.values(secret)
+        .flatMap((value) => String(value).split("\n"))
+        .map((line) => line.trim())
+        .filter((line) => line.length >= 8 && !line.startsWith("-----"));
+      expect(lines.length).toBeGreaterThan(0);
+      const logged = loggedText();
+      for (const line of lines) expect(logged).not.toContain(line);
+    };
+
+    test("Create with a token secret creates the application with the four token attributes", async () => {
+      const { handler, snsCommands } = loadHandler(secretString(JSON.stringify(TOKEN_SECRET)));
+
+      await expect(handler({ RequestType: "Create", ResourceProperties: properties })).resolves.toEqual({
+        PhysicalResourceId: APP_ARN,
+        Data: { PlatformApplicationArn: APP_ARN },
+      });
+      expect(snsCommands).toEqual([
+        {
+          name: "CreatePlatformApplicationCommand",
+          input: { Name: "BillboardApnsProduction", Platform: "APNS", Attributes: TOKEN_ATTRIBUTES },
+        },
+      ]);
+      expect(loggedText()).toContain("with token credentials");
+      expectNoSecretInLogs(TOKEN_SECRET);
+    });
+
+    test("Update switches an existing certificate application to token credentials in place", async () => {
+      const { handler, snsCommands } = loadHandler(secretString(JSON.stringify(TOKEN_SECRET)));
+
+      await expect(handler(updateEvent)).resolves.toEqual({
+        PhysicalResourceId: APP_ARN,
+        Data: { PlatformApplicationArn: APP_ARN },
+      });
+      expect(snsCommands).toEqual([
+        {
+          name: "SetPlatformApplicationAttributesCommand",
+          input: { PlatformApplicationArn: APP_ARN, Attributes: TOKEN_ATTRIBUTES },
+        },
+      ]);
+      expect(loggedText()).toContain("Setting token credentials");
+      expectNoSecretInLogs(TOKEN_SECRET);
+    });
+
+    test("Update of a resource whose creation was skipped creates the application with token credentials", async () => {
+      const { handler, snsCommands } = loadHandler(secretString(JSON.stringify(TOKEN_SECRET)));
+
+      await expect(handler({ ...updateEvent, PhysicalResourceId: "none" })).resolves.toEqual({
+        PhysicalResourceId: APP_ARN,
+        Data: { PlatformApplicationArn: APP_ARN },
+      });
+      expect(snsCommands.map(({ name, input }) => ({ name, attributes: input.Attributes }))).toEqual([
+        { name: "CreatePlatformApplicationCommand", attributes: TOKEN_ATTRIBUTES },
+      ]);
+    });
+
+    test("takes the PEM block out of the key file and trims the IDs", async () => {
+      const secret = {
+        SigningKey: `AuthKey file\n\n${SIGNING_KEY}\n\n`,
+        SigningKeyId: ` ${KEY_ID}\n`,
+        TeamId: `${TEAM_ID} `,
+        BundleId: `\t${BUNDLE_ID}\n`,
+      };
+      const { handler, snsCommands } = loadHandler(secretString(JSON.stringify(secret)));
+
+      await handler(updateEvent);
+
+      expect(snsCommands.map(({ input }) => input.Attributes)).toEqual([TOKEN_ATTRIBUTES]);
+    });
+
+    const without = (field: keyof typeof TOKEN_SECRET) => {
+      const { [field]: _omitted, ...rest } = TOKEN_SECRET;
+      return rest;
+    };
+    const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
+    const p384 = generateKeyPairSync("ec", { namedCurve: "secp384r1" }).privateKey;
+
+    test.each([
+      ["no SigningKey", without("SigningKey"), "SigningKey is not"],
+      ["a SigningKey that is not PEM", { ...TOKEN_SECRET, SigningKey: SENTINEL }, "SigningKey is not"],
+      // KEY is a PKCS#8 PEM shape around a body that is not a key.
+      [
+        "a PKCS#8 PEM that does not parse",
+        { ...TOKEN_SECRET, SigningKey: KEY.replace("MIIEfakekey", SENTINEL) },
+        "SigningKey is not",
+      ],
+      ["an RSA key", { ...TOKEN_SECRET, SigningKey: pkcs8(rsa) }, "SigningKey is not"],
+      ["a P-384 key", { ...TOKEN_SECRET, SigningKey: pkcs8(p384) }, "SigningKey is not"],
+      [
+        "a SEC1 (BEGIN EC PRIVATE KEY) key",
+        { ...TOKEN_SECRET, SigningKey: p256.export({ type: "sec1", format: "pem" }).toString() },
+        "SigningKey is not",
+      ],
+      [
+        "an encrypted PKCS#8 key",
+        {
+          ...TOKEN_SECRET,
+          SigningKey: p256
+            .export({ type: "pkcs8", format: "pem", cipher: "aes-256-cbc", passphrase: SENTINEL })
+            .toString(),
+        },
+        "SigningKey is not",
+      ],
+      ["no SigningKeyId", without("SigningKeyId"), "SigningKeyId is not"],
+      ["a lower-case SigningKeyId", { ...TOKEN_SECRET, SigningKeyId: KEY_ID.toLowerCase() }, "SigningKeyId is not"],
+      ["a 9-character TeamId", { ...TOKEN_SECRET, TeamId: TEAM_ID.slice(0, 9) }, "TeamId is not"],
+      ["a numeric TeamId", { ...TOKEN_SECRET, TeamId: 1234567890 }, "TeamId is not"],
+      ["no BundleId", without("BundleId"), "BundleId is not"],
+      ["a BundleId without a dot", { ...TOKEN_SECRET, BundleId: SENTINEL }, "BundleId is not"],
+      [
+        "token and certificate fields at once",
+        { ...TOKEN_SECRET, PlatformPrincipal: CERT, PlatformCredential: KEY },
+        "both token and certificate fields",
+      ],
+      [
+        "a certificate alias next to the token fields",
+        { ...TOKEN_SECRET, certificate: CERT },
+        "both token and certificate fields",
+      ],
+    ])("a token secret with %s changes nothing and logs why, never a value", async (_label, secret, reason) => {
+      const { handler, snsCommands } = loadHandler(secretString(JSON.stringify(secret)));
+
+      await expect(handler({ RequestType: "Create", ResourceProperties: properties })).resolves.toEqual({
+        PhysicalResourceId: "none",
+        Data: { PlatformApplicationArn: "" },
+      });
+      await expect(handler(updateEvent)).resolves.toEqual({
+        PhysicalResourceId: APP_ARN,
+        Data: { PlatformApplicationArn: APP_ARN },
+      });
+      expect(snsCommands).toEqual([]);
+      expect(loggedText()).toContain("not configured yet");
+      expect(loggedText()).toContain(reason);
+      expectNoSecretInLogs(secret);
+      expect(loggedText()).not.toContain(SENTINEL);
+    });
+
+    test("names every malformed field at once", async () => {
+      const { handler } = loadHandler(
+        secretString(JSON.stringify({ SigningKey: SENTINEL, SigningKeyId: "", TeamId: null, BundleId: "x" })),
+      );
+
+      await handler(updateEvent);
+
+      const logged = loggedText();
+      for (const field of ["SigningKey is not", "SigningKeyId is not", "TeamId is not", "BundleId is not"]) {
+        expect(logged).toContain(field);
+      }
+      expect(logged).not.toContain(SENTINEL);
+    });
+
+    test("SNS refusing the token credentials as invalid keeps the application and logs no message", async () => {
+      const { handler, snsCommands } = loadHandler(
+        secretString(JSON.stringify(TOKEN_SECRET)),
+        Object.assign(new Error(`Invalid parameter: ${SENTINEL}`), { name: "InvalidParameterException" }),
+      );
+
+      await expect(handler(updateEvent)).resolves.toEqual({
+        PhysicalResourceId: APP_ARN,
+        Data: { PlatformApplicationArn: APP_ARN },
+      });
+      await expect(handler({ RequestType: "Create", ResourceProperties: properties })).resolves.toEqual({
+        PhysicalResourceId: "none",
+        Data: { PlatformApplicationArn: "" },
+      });
+      expect(snsCommands.map(({ name }) => name)).toEqual([
+        "SetPlatformApplicationAttributesCommand",
+        "CreatePlatformApplicationCommand",
+      ]);
+      expect(loggedText()).toContain("SNS refused the token credentials: InvalidParameterException");
+      expect(loggedText()).not.toContain(SENTINEL);
+      expectNoSecretInLogs(TOKEN_SECRET);
+    });
+
+    test("other SNS errors with token credentials still fail the deployment", async () => {
+      const { handler } = loadHandler(
+        secretString(JSON.stringify(TOKEN_SECRET)),
+        Object.assign(new Error("throttled"), { name: "ThrottlingException" }),
+      );
+
+      await expect(handler(updateEvent)).rejects.toThrow("throttled");
+    });
   });
 });
