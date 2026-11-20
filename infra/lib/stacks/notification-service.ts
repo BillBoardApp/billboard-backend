@@ -260,7 +260,7 @@ export class NotificationServiceStack extends cdk.Stack {
       properties: {
         SecretId: apnsCredentialsSecret.secretArn,
         ApplicationName: APNS_PLATFORM_APPLICATION_NAME,
-        SyncToken: '2025-12-28-3',
+        SyncToken: '2026-11-20-1',
       },
     });
     this.apnsPlatformApplicationArn = platformApp.getAttString('PlatformApplicationArn');
