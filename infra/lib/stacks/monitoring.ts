@@ -69,7 +69,6 @@ import {
   MAX_VERIFIED_ACCOUNTS_PER_ADDRESS,
   STREET_CLUSTER_FLAG_THRESHOLD,
   UNCONFIRMED_SIGNUP_MAX_AGE_HOURS,
-  VOTE_DAILY_CAP_ENFORCE_READY_MAX,
   VOTE_DAILY_LIMIT,
   type DetectionThreshold,
 } from '../config/abuse-limits';
@@ -825,7 +824,7 @@ export class MonitoringStack extends cdk.Stack {
     // their 24-hour lifetime. In normal running none reaches 24 hours, so any datapoint is worth a look.
     notify('service', new cloudwatch.Alarm(this, 'NotificationsExpiredUndeliveredAlarm', {
       alarmName: 'Billboard-Notifications-ExpiredUndelivered',
-      alarmDescription: 'UserNotifier found pending pushes past their 24-hour lifetime in the last day. With PENDING_EXPIRY_MODE=watch they were still sent and deleted as before (log outcome "would_expire"); with enforce they were deleted unsent (outcome "expired"). After a push outage longer than 24 hours this is expected. Otherwise suspect a unit mismatch between the rows\' ttl/createdAt and the clock, and do not flip to enforce: check /aws/lambda/UserNotifier for "Bill notification outcome" lines with ageSeconds.',
+      alarmDescription: 'UserNotifier found pending pushes past their 24-hour lifetime in the last day and, with PENDING_EXPIRY_MODE=enforce (since the 2026-11 flip), deleted them unsent (log outcome "expired"; watch would have sent them, outcome "would_expire"). After a push outage longer than 24 hours this is expected. Otherwise suspect a unit mismatch between the rows\' ttl/createdAt and the clock, and set the mode back to watch: check /aws/lambda/UserNotifier for "Bill notification outcome" lines with ageSeconds.',
       metric: new cloudwatch.Metric({
         namespace: NOTIFICATIONS_METRIC_NAMESPACE,
         metricName: 'NotificationsExpiredUndelivered',
@@ -939,7 +938,7 @@ export class MonitoringStack extends cdk.Stack {
     integrityAlarm(
       'IntegrityVoteDailyCapExceededAlarm',
       'VoteDailyCapExceeded',
-      `An account made more than ${VOTE_DAILY_LIMIT} vote writes in one UTC day (INT-06). With VOTE_DAILY_CAP_MODE=watch every vote was still written; with enforce the extra writes got 429 VOTE_DAILY_LIMIT. /aws/lambda/SetFeedback has the account (userId, voteDay, voteDayCount on the VoteDailyCapExceeded lines). Old app builds record a swipe-left as an Abstain write, so check the pattern before any flip: enforce waits until no account went above ${VOTE_DAILY_CAP_ENFORCE_READY_MAX} writes on any day.`,
+      `An account made more than ${VOTE_DAILY_LIMIT} vote writes in one UTC day (INT-06). With VOTE_DAILY_CAP_MODE=enforce (since the 2026-11 flip) the extra writes got 429 VOTE_DAILY_LIMIT; with watch they were still written. /aws/lambda/SetFeedback has the account (userId, voteDay, voteDayCount on the VoteDailyCapExceeded lines). Old app builds record a swipe-left as an Abstain write: if a real person hit the cap, check that pattern and set the mode back to watch.`,
       integrityMetric('VoteDailyCapExceeded', detectionPeriod(voteDailyCapExceeded)),
       voteDailyCapExceeded.threshold,
     );
