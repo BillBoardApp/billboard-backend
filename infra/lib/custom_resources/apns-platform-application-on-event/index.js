@@ -7,11 +7,15 @@
 //     "SigningKey": "<the .p8 file's contents: its PEM text, header and footer lines included>",
 //     "SigningKeyId": "<the key's 10-character Key ID>",
 //     "TeamId": "<the 10-character Apple team ID>",
-//     "BundleId": "<the app's bundle ID>"
+//     "BundleId": "<the app's bundle ID: exactly APNS_BUNDLE_ID, this function's environment variable>"
 //   }
 //   SNS takes them as PlatformCredential (the signing key), PlatformPrincipal (the signing key ID),
 //   ApplePlatformTeamID and ApplePlatformBundleID ("Apple Services using token credentials" in the
 //   CreatePlatformApplication and SetPlatformApplicationAttributes API references).
+//   Nothing checks the bundle ID before the first push, and a wrong one (a typo, the wrong case) makes APNs refuse
+//   every push (DeviceTokenNotForTopic), and SNS then disables the endpoints it pushed to. So BundleId must equal
+//   APNS_BUNDLE_ID, which the stack sets from its constants. That variable is not a custom resource property: changing
+//   it does not re-run this handler (a SyncToken bump does).
 //
 // Certificate mode (the rollback path, unchanged):
 //   { "PlatformPrincipal": "<certificate PEM>", "PlatformCredential": "<private key PEM>" }
@@ -19,8 +23,9 @@
 //   from platformCredential, keyPem, privateKeyPem, key or privateKey.
 //
 // Any token field selects token mode. A secret that has token and certificate fields at once, a token secret with a
-// field missing or malformed, and token credentials SNS refuses as invalid are all "not configured": the handler logs
-// why, never a value, and leaves the platform application as it is, so pushes keep their current credentials.
+// field missing or malformed or a BundleId other than APNS_BUNDLE_ID, and token credentials SNS refuses as invalid are
+// all "not configured": the handler logs why, never a value, and leaves the platform application as it is, so pushes
+// keep their current credentials.
 
 const crypto = require('node:crypto');
 
@@ -50,8 +55,6 @@ const TOKEN_FIELDS = ['SigningKey', 'SigningKeyId', 'TeamId', 'BundleId'];
 
 // Apple's key IDs and team IDs are 10 characters, upper-case letters and digits.
 const APPLE_TEN_CHARACTER_ID = /^[A-Z0-9]{10}$/;
-// A bundle ID is two or more dot-separated parts of letters, digits and hyphens.
-const BUNDLE_ID = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
 
 function extractFirstPemBlock(value, label) {
   if (typeof value !== 'string') return null;
@@ -104,6 +107,17 @@ function matchingTrimmed(value, pattern) {
   return pattern.test(text) ? text : null;
 }
 
+// The app's bundle ID, compared exactly (case included), since only the app's own value is known to work as the APNs
+// topic. Read per call. A mismatch names the field and the variable, never the secret's value.
+function appBundleId(value) {
+  const expected = (process.env.APNS_BUNDLE_ID || '').trim();
+  if (!expected) return { problem: 'APNS_BUNDLE_ID is not set on this function, so BundleId cannot be checked' };
+  if (typeof value !== 'string' || value.trim() !== expected) {
+    return { problem: "BundleId is not the app's bundle ID (APNS_BUNDLE_ID)" };
+  }
+  return { bundleId: expected };
+}
+
 // Never log the secret value, only why it was skipped.
 function logNotConfigured(reason) {
   console.log(
@@ -147,13 +161,13 @@ function tokenCredentials(parsed) {
   const signingKey = normalizeApnsSigningKey(parsed.SigningKey);
   const signingKeyId = matchingTrimmed(parsed.SigningKeyId, APPLE_TEN_CHARACTER_ID);
   const teamId = matchingTrimmed(parsed.TeamId, APPLE_TEN_CHARACTER_ID);
-  const bundleId = matchingTrimmed(parsed.BundleId, BUNDLE_ID);
+  const { bundleId, problem: bundleIdProblem } = appBundleId(parsed.BundleId);
 
   const problems = [];
   if (!signingKey) problems.push('SigningKey is not an unencrypted PKCS#8 P-256 private key (a .p8 file)');
   if (!signingKeyId) problems.push('SigningKeyId is not a 10-character key ID');
   if (!teamId) problems.push('TeamId is not a 10-character team ID');
-  if (!bundleId) problems.push('BundleId is not a bundle ID');
+  if (bundleIdProblem) problems.push(bundleIdProblem);
   if (problems.length > 0) {
     logNotConfigured('token secret: ' + problems.join('; '));
     return null;

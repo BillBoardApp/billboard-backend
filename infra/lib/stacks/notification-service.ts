@@ -28,6 +28,7 @@ import {
   USER_DEVICES_SORT_KEY
 } from '../config/user-store-constants';
 import {
+  APNS_BUNDLE_ID,
   APNS_PLATFORM_APPLICATION_NAME,
   BACKFILL_PUSH_MODE,
   DISPATCH_SHARD_COUNT,
@@ -229,6 +230,9 @@ export class NotificationServiceStack extends cdk.Stack {
       ),
       handler: 'handler',
       timeout: cdk.Duration.minutes(2),
+      // A token secret's BundleId must equal this (UA-08). The environment is not a custom resource property, so a
+      // change here does not re-run the handler; the next SyncToken bump does.
+      environment: { APNS_BUNDLE_ID },
     });
 
     apnsCredentialsSecret.grantRead(onEvent);

@@ -66,4 +66,9 @@ export const PUSH_PACE_HOURS = 3;
 export const BACKFILL_PUSH_MODE: 'skip' | 'push' = 'skip';
 
 export const APNS_PLATFORM_APPLICATION_NAME = 'BillboardApnsProduction';
+// UA-08: the app's bundle ID (the app target's PRODUCT_BUNDLE_IDENTIFIER in billboard-ios; APP_BUNDLE_ID in
+// services/src/shared/appAttest/config.ts). The APNs custom resource gets it as APNS_BUNDLE_ID and refuses a token
+// secret whose BundleId differs, since APNs would refuse every push to the wrong topic and SNS would then disable the
+// endpoints.
+export const APNS_BUNDLE_ID = 'com.billboardproject.app';
 export const NOTIFICATIONS_METRIC_NAMESPACE = 'BillBoard/Notifications';

@@ -1,8 +1,11 @@
 import { generateKeyPairSync, KeyObject } from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import * as cdk from "aws-cdk-lib";
 import * as ddb from "aws-cdk-lib/aws-dynamodb";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import {
+  APNS_BUNDLE_ID,
   BACKFILL_PUSH_MODE,
   DISPATCH_SHARD_COUNT,
   NOTIFICATION_FANOUT_ENABLED,
@@ -231,6 +234,36 @@ describe("NotificationServiceStack reliability", () => {
       GenerateSecretString: Match.exact({}),
       SecretString: Match.absent(),
     });
+  });
+
+  // UA-08: the handler refuses a token secret whose BundleId is not the app's. It gets the value as an environment
+  // variable, not a custom resource property, so a change to it does not re-run the handler by itself.
+  test("gives the APNs custom resource the app's bundle ID, outside the custom resource's properties", () => {
+    const template = notificationTemplate();
+    const onEvent = Object.entries(template.findResources("AWS::Lambda::Function")).filter(([id]) =>
+      id.startsWith("ApnsPlatformApplicationOnEvent"),
+    );
+    expect(onEvent).toHaveLength(1);
+    expect(onEvent[0][1].Properties.Environment.Variables).toEqual({ APNS_BUNDLE_ID: "com.billboardproject.app" });
+
+    const platformApps = Object.values(template.findResources("AWS::CloudFormation::CustomResource")).filter(
+      (resource) => resource.Properties.ApplicationName === "BillboardApnsProduction",
+    );
+    expect(platformApps).toHaveLength(1);
+    expect(Object.keys(platformApps[0].Properties).sort()).toEqual([
+      "ApplicationName",
+      "SecretId",
+      "ServiceToken",
+      "SyncToken",
+    ]);
+  });
+
+  test("the APNs bundle ID matches the app's APP_BUNDLE_ID in services/src/shared/appAttest/config.ts", () => {
+    const services = fs.readFileSync(
+      path.join(__dirname, "..", "..", "services", "src", "shared", "appAttest", "config.ts"),
+      "utf8",
+    );
+    expect(/export const APP_BUNDLE_ID = "([^"]+)";/.exec(services)?.[1]).toBe(APNS_BUNDLE_ID);
   });
 
   test("lets the dispatcher read the APNs certificate expiry and publish its metric", () => {
@@ -733,6 +766,15 @@ describe("APNs platform application custom resource", () => {
       OldResourceProperties: { ...properties, SyncToken: "2025-12-28-3" },
     };
 
+    // The stack sets the app's own bundle ID; these tests use the example one.
+    beforeEach(() => {
+      process.env.APNS_BUNDLE_ID = BUNDLE_ID;
+    });
+
+    afterEach(() => {
+      delete process.env.APNS_BUNDLE_ID;
+    });
+
     /** Every line of every value in the secret (PEM armor aside) must stay out of the logs. */
     const expectNoSecretInLogs = (secret: Record<string, unknown>) => {
       const lines = Object.values(secret)
@@ -841,8 +883,12 @@ describe("APNs platform application custom resource", () => {
       ["a lower-case SigningKeyId", { ...TOKEN_SECRET, SigningKeyId: KEY_ID.toLowerCase() }, "SigningKeyId is not"],
       ["a 9-character TeamId", { ...TOKEN_SECRET, TeamId: TEAM_ID.slice(0, 9) }, "TeamId is not"],
       ["a numeric TeamId", { ...TOKEN_SECRET, TeamId: 1234567890 }, "TeamId is not"],
-      ["no BundleId", without("BundleId"), "BundleId is not"],
-      ["a BundleId without a dot", { ...TOKEN_SECRET, BundleId: SENTINEL }, "BundleId is not"],
+      ["no BundleId", without("BundleId"), "BundleId is not the app's bundle ID"],
+      ["a BundleId without a dot", { ...TOKEN_SECRET, BundleId: SENTINEL }, "BundleId is not the app's bundle ID"],
+      // Well-formed but not the app's: APNs would refuse every push and SNS would disable the endpoints.
+      ["a BundleId in the wrong case", { ...TOKEN_SECRET, BundleId: "com.example.App" }, "BundleId is not the app's"],
+      ["another app's BundleId", { ...TOKEN_SECRET, BundleId: "com.example.app.widget" }, "BundleId is not the app's"],
+      ["a numeric BundleId", { ...TOKEN_SECRET, BundleId: 42 }, "BundleId is not the app's bundle ID"],
       [
         "token and certificate fields at once",
         { ...TOKEN_SECRET, PlatformPrincipal: CERT, PlatformCredential: KEY },
@@ -883,6 +929,32 @@ describe("APNs platform application custom resource", () => {
         expect(logged).toContain(field);
       }
       expect(logged).not.toContain(SENTINEL);
+    });
+
+    test("without APNS_BUNDLE_ID a token secret changes nothing, since its BundleId cannot be checked", async () => {
+      delete process.env.APNS_BUNDLE_ID;
+      const { handler, snsCommands } = loadHandler(secretString(JSON.stringify(TOKEN_SECRET)));
+
+      await expect(handler(updateEvent)).resolves.toEqual({
+        PhysicalResourceId: APP_ARN,
+        Data: { PlatformApplicationArn: APP_ARN },
+      });
+      expect(snsCommands).toEqual([]);
+      expect(loggedText()).toContain("APNS_BUNDLE_ID is not set");
+      expectNoSecretInLogs(TOKEN_SECRET);
+    });
+
+    test("certificate credentials need no APNS_BUNDLE_ID", async () => {
+      delete process.env.APNS_BUNDLE_ID;
+      const { handler, snsCommands } = loadHandler(
+        secretString(JSON.stringify({ PlatformPrincipal: CERT, PlatformCredential: KEY })),
+      );
+
+      await handler(updateEvent);
+
+      expect(snsCommands.map(({ input }) => input.Attributes)).toEqual([
+        { PlatformPrincipal: CERT, PlatformCredential: KEY },
+      ]);
     });
 
     test("SNS refusing the token credentials as invalid keeps the application and logs no message", async () => {
