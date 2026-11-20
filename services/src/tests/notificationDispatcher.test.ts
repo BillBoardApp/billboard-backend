@@ -862,6 +862,86 @@ describe("notificationDispatcher APNs certificate expiry metric", () => {
     expect(mockCloudWatchSend).not.toHaveBeenCalled();
   });
 
+  // UA-08: a .p8 signing key does not expire, so token mode publishes no ApnsCertificateDaysRemaining at all.
+  describe("with token-based authentication", () => {
+    const tokenLogMessage =
+      "APNs platform application uses token-based authentication; no certificate expiry to publish";
+    const leftoverExpiry = new Date(START_MS + 12.5 * DAY_MS).toISOString();
+
+    it.each([
+      [
+        "AuthenticationMethod Token",
+        { AuthenticationMethod: "Token", ApplePlatformTeamID: "DEF123GHIJ", ApplePlatformBundleID: "com.example.app" },
+      ],
+      ["AuthenticationMethod in another case", { AuthenticationMethod: " token " }],
+      [
+        "AuthenticationMethod Token and a leftover certificate expiry",
+        { AuthenticationMethod: "Token", AppleCertificateExpirationDate: leftoverExpiry },
+      ],
+      [
+        "no AuthenticationMethod, the token attributes and a leftover certificate expiry",
+        { ApplePlatformTeamID: "DEF123GHIJ", AppleCertificateExpirationDate: leftoverExpiry },
+      ],
+      ["no AuthenticationMethod and only a bundle ID", { ApplePlatformBundleID: "com.example.app" }],
+    ])("publishes no metric for %s", async (_label, attributes) => {
+      mockSnsSend.mockResolvedValue({ Attributes: { Enabled: "true", ...attributes } });
+
+      await expect(handler(buildEventBridgeEvent())).resolves.toEqual({
+        status: "ok",
+        distinctUsers: 0,
+        batchesSent: 0,
+      });
+
+      expect(mockSnsSend).toHaveBeenCalledTimes(1);
+      expect(mockCloudWatchSend).not.toHaveBeenCalled();
+      expect(logLines(console.log)).toContainEqual(expect.objectContaining({ message: tokenLogMessage }));
+      expect(logLines(console.warn)).not.toContainEqual(
+        expect.objectContaining({ message: "APNs platform application has no AppleCertificateExpirationDate" }),
+      );
+    });
+
+    it("still reads the attributes only every 6 hours, so a switch back to a certificate is seen", async () => {
+      mockSnsSend.mockResolvedValueOnce({ Attributes: { AuthenticationMethod: "Token" } });
+      await handler(buildEventBridgeEvent());
+      nowMs += 5 * 60 * 1000;
+      await handler(buildEventBridgeEvent());
+      expect(mockSnsSend).toHaveBeenCalledTimes(1);
+      expect(mockCloudWatchSend).not.toHaveBeenCalled();
+
+      // Rolled back to the certificate: the next read publishes its days again.
+      nowMs = START_MS + 6 * 60 * 60 * 1000;
+      await handler(buildEventBridgeEvent());
+      expect(mockSnsSend).toHaveBeenCalledTimes(2);
+      expect(emittedDatums()).toEqual([
+        {
+          namespace: "BillBoard/Notifications",
+          data: [{ MetricName: "ApnsCertificateDaysRemaining", Unit: "Count", Value: 124 }],
+        },
+      ]);
+    });
+
+    it("publishes the certificate's days when SNS says certificate, despite leftover token attributes", async () => {
+      mockSnsSend.mockResolvedValue({
+        Attributes: {
+          AuthenticationMethod: "Certificate",
+          ApplePlatformTeamID: "DEF123GHIJ",
+          ApplePlatformBundleID: "com.example.app",
+          AppleCertificateExpirationDate: new Date(START_MS + 40.2 * DAY_MS).toISOString(),
+        },
+      });
+
+      await handler(buildEventBridgeEvent());
+
+      expect(emittedDatums()).toEqual([
+        {
+          namespace: "BillBoard/Notifications",
+          data: [{ MetricName: "ApnsCertificateDaysRemaining", Unit: "Count", Value: 40 }],
+        },
+      ]);
+      expect(logLines(console.log)).not.toContainEqual(expect.objectContaining({ message: tokenLogMessage }));
+    });
+  });
+
   it("skips the check when no platform application is configured", async () => {
     delete process.env.APNS_PLATFORM_APPLICATION_ARN;
     jest.resetModules();

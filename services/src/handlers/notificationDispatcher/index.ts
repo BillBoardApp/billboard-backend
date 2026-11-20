@@ -378,8 +378,18 @@ interface ClaimedUser {
   dispatchPartitions: string[];
 }
 
-// Publishes the days left on the APNs certificate for the expiry alarm (REC-04).
-// Never throws: the dispatch run must not depend on this check.
+// Token-based authentication (UA-08). SNS reports AuthenticationMethod ("token" or "certificate" for APNs; compared
+// without case, since the API reference does not spell the values); without it, ApplePlatformTeamID or
+// ApplePlatformBundleID, which only token authentication sets, decide. Token mode wins over a leftover
+// AppleCertificateExpirationDate, so the metric never counts down to a certificate SNS no longer uses.
+const usesApnsTokenAuthentication = (attributes: Record<string, string>): boolean => {
+  const method = attributes.AuthenticationMethod?.trim().toLowerCase();
+  if (method) return method === "token";
+  return Boolean(attributes.ApplePlatformTeamID || attributes.ApplePlatformBundleID);
+};
+
+// Publishes the days left on the APNs certificate for the expiry alarm (REC-04); nothing with token-based
+// authentication, whose signing key does not expire. Never throws: the dispatch run must not depend on this check.
 const emitApnsCertificateDaysRemaining = async (): Promise<void> => {
   if (!APNS_PLATFORM_APPLICATION_ARN) {
     if (!loggedMissingApnsPlatformApplication) {
@@ -402,7 +412,13 @@ const emitApnsCertificateDaysRemaining = async (): Promise<void> => {
     const response = await sns.send(
       new GetPlatformApplicationAttributesCommand({ PlatformApplicationArn: APNS_PLATFORM_APPLICATION_ARN }),
     );
-    const expiration = response.Attributes?.AppleCertificateExpirationDate;
+    const attributes = response.Attributes ?? {};
+    if (usesApnsTokenAuthentication(attributes)) {
+      // A .p8 signing key does not expire: no datapoint, and the expiry alarm treats that as OK (UA-08).
+      logger.info("APNs platform application uses token-based authentication; no certificate expiry to publish");
+      return;
+    }
+    const expiration = attributes.AppleCertificateExpirationDate;
     if (!expiration) {
       logger.warn("APNs platform application has no AppleCertificateExpirationDate");
       return;

@@ -749,7 +749,7 @@ export class MonitoringStack extends cdk.Stack {
     const apnsFailedMetric = this.apnsMetric('NumberOfNotificationsFailed');
     const apnsDeliveryFailuresAlarm = page('service', new cloudwatch.Alarm(this, 'ApnsDeliveryFailuresAlarm', {
       alarmName: 'Billboard-Notifications-ApnsDeliveryFailures',
-      alarmDescription: `PAGE (member of Billboard-Page-PushesDown). SNS failed to deliver 5 or more pushes through the ${APNS_PLATFORM_APPLICATION_NAME} platform application in 5 minutes. Check the APNs certificate, disabled endpoints and UserNotifier logs.`,
+      alarmDescription: `PAGE (member of Billboard-Page-PushesDown). SNS failed to deliver 5 or more pushes through the ${APNS_PLATFORM_APPLICATION_NAME} platform application in 5 minutes. Check the APNs credentials (the certificate or the token signing key in Billboard/ApnsCredentials), disabled endpoints and UserNotifier logs.`,
       metric: apnsFailedMetric.with({ period: cdk.Duration.minutes(5) }),
       threshold: 5,
       evaluationPeriods: 1,
@@ -765,12 +765,15 @@ export class MonitoringStack extends cdk.Stack {
     });
     notify('service', new cloudwatch.Alarm(this, 'ApnsCertificateExpiryAlarm', {
       alarmName: 'Billboard-Notifications-ApnsCertificateExpiry',
-      alarmDescription: 'The APNs certificate in Billboard/ApnsCredentials expires in under 30 days. Renew it in the Apple developer portal and update the secret before pushes stop.',
+      alarmDescription: 'The APNs certificate in Billboard/ApnsCredentials expires in under 30 days. Renew it in the Apple developer portal and update the secret before pushes stop. With token-based authentication (a .p8 signing key, which does not expire) nothing is published and this alarm stays OK.',
       metric: apnsCertificateDaysRemainingMetric,
       threshold: 30,
       comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
       evaluationPeriods: 1,
       datapointsToAlarm: 1,
+      // Must stay NOT_BREACHING (UA-08): with token-based authentication NotificationDispatcher publishes no
+      // ApnsCertificateDaysRemaining at all, and a missing day has to read as OK, not as ALARM (BREACHING),
+      // INSUFFICIENT_DATA (MISSING) or whatever the last certificate reading was (IGNORE).
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     }));
 
@@ -1867,7 +1870,7 @@ export class MonitoringStack extends cdk.Stack {
         width: 6,
       }),
       new cloudwatch.SingleValueWidget({
-        title: 'APNs certificate days remaining',
+        title: 'APNs certificate days remaining (none with token auth)',
         metrics: [apnsCertificateDaysRemainingMetric],
         width: 6,
         height: 6,
