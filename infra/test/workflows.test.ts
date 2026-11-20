@@ -22,7 +22,7 @@ const ALLOWED_TRIGGERS = ['pull_request', 'push', 'workflow_dispatch'];
  * anything else is not started at all (startup_failure), and a pull request's checks cannot show that, so change
  * the policy and this list together.
  */
-const POLICY_ALLOWED_ACTIONS = ['aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a'];
+const POLICY_ALLOWED_ACTIONS = ['aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd'];
 
 /** The keys of a top-level block (two spaces in), such as `on:` or `jobs:`. */
 const blockKeys = (workflow: string, block: string): string[] => {
