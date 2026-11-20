@@ -108,10 +108,20 @@ production service, `.github/workflows/deploy.yml` runs these steps after a `cdk
 
 ## Monitoring
 
-Alerts go to Slack only, through AWS Chatbot, in two tiers. Two composite alarms page (`Billboard-Page-AppBroken` and
-`Billboard-Page-PushesDown`, on `BillboardPageTopic`); every other alarm in `MonitoringStack` notifies
-`BillboardAlarmTopic` through `notify()` in `lib/stacks/monitoring.ts`. Nothing in code subscribes an email address, or
-any other endpoint, to either topic.
+Alerts go to Slack only, through AWS Chatbot, in two tiers. Six metric alarms page: `Billboard-API-5XXError`,
+`Billboard-Canary-SuccessPercent`, `Billboard-Page-BillsManifestSnapshotStale`,
+`Billboard-Heartbeat-NotificationDispatcher`, `Billboard-Notifications-ApnsDeliveryFailures` and
+`Billboard-Page-NotificationTypeQueueStalled`. Each notifies `BillboardPageTopic` on ALARM and on OK through `page()`,
+and nothing else, so an incident posts once. Every other alarm in `MonitoringStack` notifies `BillboardAlarmTopic`
+through `notify()` in `lib/stacks/monitoring.ts`. With `monitoringSlackPageChannelId` unset, the one alarm channel
+takes both topics. Nothing in code subscribes an email address, or any other endpoint, to either topic.
+
+The composites `Billboard-Page-AppBroken` (the first three pages: the app is broken) and `Billboard-Page-PushesDown`
+(the last three: pushes are down) group the pages on the dashboard. Like `Billboard-Ingest-Unhealthy`, they are a
+status view with no action of their own. The members page, not the composites, because Slack's AWS app rejects
+CloudWatch composite-alarm notifications ("Event received is not supported"): the paging drill on 2026-11-19 found
+that a composite's notification reached `BillboardPageTopic` but never the channel, while metric-alarm
+notifications post.
 
 The alarms: 144 metric alarms and 3 composites in `MonitoringStack`, and 198 in the app with the 51 of the service
 stacks (each Lambda alias's error alarm, which its CodeDeploy deployment group watches, the API deployment groups' own

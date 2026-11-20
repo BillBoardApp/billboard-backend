@@ -26,8 +26,8 @@ export const APP_ATTEST_RESERVED_CONCURRENCY = 5;
 
 // The two routes' own throttles on the prod stage, for all callers together, so a call over them gets 429 from
 // API Gateway before it reaches the function. The reserved concurrency alone does not give a 429: API Gateway
-// answers a Lambda throttle with a 500, and an anonymous burst could then fire Billboard-API-5XXError (the
-// Billboard-Page-AppBroken page) and the API deployment groups' 5XX rollback alarm. The bursts add up to the
+// answers a Lambda throttle with a 500, and an anonymous burst could then fire Billboard-API-5XXError (a page, in
+// Billboard-Page-AppBroken) and the API deployment groups' 5XX rollback alarm. The bursts add up to the
 // reserved concurrency, and the summed rates times a slow call (400 ms) stay under it. Far above today's traffic
 // (one challenge per R2 vote or sign-up, one attestation per install); raise them with the concurrency if R2
 // outgrows them, because under enforce a refused challenge becomes a blocked vote (v1.e.challenge).

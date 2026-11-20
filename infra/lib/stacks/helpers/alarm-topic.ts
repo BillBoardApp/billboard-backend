@@ -6,9 +6,10 @@ import { Construct } from 'constructs';
 export const ALARM_TOPIC_NAME = 'BillboardAlarmTopic';
 
 /**
- * Name of the SNS topic MonitoringStack creates for pages (C1.4). Only the two page composites
- * (Billboard-Page-AppBroken, Billboard-Page-PushesDown) notify it; every other alarm uses the alarm topic
- * through `notify()` or has no action. No stack should resolve it by name to add another page.
+ * Name of the SNS topic MonitoringStack creates for pages (C1.4). Only the six page alarms (PAGE_ALARM_NAMES in
+ * monitoring.ts, the members of Billboard-Page-AppBroken and Billboard-Page-PushesDown) notify it, through `page()`;
+ * every other alarm uses the alarm topic through `notify()` or has no action. No stack should resolve it by name to
+ * add another page.
  */
 export const PAGE_TOPIC_NAME = 'BillboardPageTopic';
 
