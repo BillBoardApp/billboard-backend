@@ -249,6 +249,8 @@ export class NotificationServiceStack extends cdk.Stack {
       onEventHandler: onEvent,
     });
 
+    // The secret holds certificate or token (.p8) credentials; the handler's header describes both formats.
+    // CloudFormation re-runs the handler only when these properties change: bump SyncToken to apply a new secret.
     const platformApp = new cdk.CustomResource(this, 'ApnsPlatformApplication', {
       serviceToken: provider.serviceToken,
       properties: {
