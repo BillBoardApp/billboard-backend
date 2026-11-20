@@ -202,17 +202,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     await removeConflictingDeviceRegistrations(userId, deviceId, pushToken);
 
-    if (endpointArn) {
-      await sns.send(
-        new SetEndpointAttributesCommand({
-          EndpointArn: endpointArn,
-          Attributes: {
-            Token: pushToken,
-            Enabled: "true",
-          },
-        }),
-      );
-    } else {
+    if (!endpointArn) {
       try {
         const resp = await sns.send(
           new CreatePlatformEndpointCommand({
@@ -228,6 +218,22 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         if (!endpointArn) throw err;
       }
     }
+
+    // Always, also right after CreatePlatformEndpoint: for a token SNS already knows, that returns the existing
+    // endpoint (or names it in the "already exists" error) as it is, so an endpoint SNS disabled stays disabled.
+    // UserNotifier drops a disabled endpoint's ARN from the row, so without this the device would get its next push
+    // refused (EndpointDisabled), lose the ARN again and stay without pushes until its APNs token changed. The token
+    // was just sent by the device, so it is current, and AWS's token-management guidance is to set the current token
+    // and Enabled=true together. SetEndpointAttributes is the call the role already has for the endpoints.
+    await sns.send(
+      new SetEndpointAttributesCommand({
+        EndpointArn: endpointArn,
+        Attributes: {
+          Token: pushToken,
+          Enabled: "true",
+        },
+      }),
+    );
 
     await db.send(
       new PutItemCommand({

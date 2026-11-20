@@ -97,6 +97,97 @@ describe("registerUserDevice handler", () => {
     expect(putInput.Item.notifyFailed.BOOL).toBe(true);
   });
 
+  // An endpoint SNS disabled (APNs refused a push to it) keeps Enabled=false when CreatePlatformEndpoint hands it back.
+  const ENDPOINT_ARN = "arn:aws:sns:us-east-1:123:endpoint/APNS/app/endpoint123";
+  const registerEvent = () =>
+    asApiGatewayEvent({
+      requestContext: { authorizer: { jwt: { claims: { sub: "user123" } } } },
+      body: JSON.stringify({ device_id: "device123", platform: "ios", push_token: PUSH_TOKEN }),
+    });
+  const snsInputs = () =>
+    mockSnsSend.mock.calls.map(([command]: [{ input: Record<string, unknown> }]) => command.input);
+  const putItem = () => {
+    const putCall = mockDynamoSend.mock.calls[mockDynamoSend.mock.calls.length - 1];
+    return (putCall[0].input || putCall[0]).Item;
+  };
+
+  it("enables the endpoint CreatePlatformEndpoint returns, which may be one SNS disabled", async () => {
+    mockDynamoSend.mockResolvedValueOnce({ Item: { adultStatus: { S: "attested_adult" } } }); // eligibility
+    mockDynamoSend.mockResolvedValueOnce({}); // GetItem: userNotifier removed the disabled endpoint's ARN
+    mockDynamoSend.mockResolvedValueOnce({ Items: [] }); // Query conflicts by push token
+    mockSnsSend.mockResolvedValueOnce({ EndpointArn: ENDPOINT_ARN }); // CreatePlatformEndpoint: the existing endpoint
+    mockSnsSend.mockResolvedValueOnce({}); // SetEndpointAttributes
+    mockDynamoSend.mockResolvedValueOnce({}); // PutItem
+
+    const result = await handler(registerEvent());
+
+    expect(result.statusCode).toBe(200);
+    expect(snsInputs()).toEqual([
+      {
+        PlatformApplicationArn: "arn:aws:sns:us-east-1:123456789012:app/APNS/test",
+        Token: PUSH_TOKEN,
+        CustomUserData: "user123:device123",
+      },
+      { EndpointArn: ENDPOINT_ARN, Attributes: { Token: PUSH_TOKEN, Enabled: "true" } },
+    ]);
+    expect(CreatePlatformEndpointCommand).toHaveBeenCalledTimes(1);
+    expect(SetEndpointAttributesCommand).toHaveBeenCalledTimes(1);
+    expect(putItem().endpointArn.S).toBe(ENDPOINT_ARN);
+  });
+
+  it("enables the endpoint named in SNS's already-exists error", async () => {
+    mockDynamoSend.mockResolvedValueOnce({ Item: { adultStatus: { S: "attested_adult" } } }); // eligibility
+    mockDynamoSend.mockResolvedValueOnce({}); // GetItem
+    mockDynamoSend.mockResolvedValueOnce({ Items: [] }); // Query conflicts by push token
+    mockSnsSend.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          `Invalid parameter: Token Reason: Endpoint ${ENDPOINT_ARN} already exists with the same Token, but different attributes.`,
+        ),
+        { name: "InvalidParameterException" },
+      ),
+    ); // CreatePlatformEndpoint
+    mockSnsSend.mockResolvedValueOnce({}); // SetEndpointAttributes
+    mockDynamoSend.mockResolvedValueOnce({}); // PutItem
+
+    const result = await handler(registerEvent());
+
+    expect(result.statusCode).toBe(200);
+    expect(snsInputs()[1]).toEqual({ EndpointArn: ENDPOINT_ARN, Attributes: { Token: PUSH_TOKEN, Enabled: "true" } });
+    expect(putItem().endpointArn.S).toBe(ENDPOINT_ARN);
+  });
+
+  it("stores nothing when the endpoint cannot be enabled", async () => {
+    mockDynamoSend.mockResolvedValueOnce({ Item: { adultStatus: { S: "attested_adult" } } }); // eligibility
+    mockDynamoSend.mockResolvedValueOnce({}); // GetItem
+    mockDynamoSend.mockResolvedValueOnce({ Items: [] }); // Query conflicts by push token
+    mockSnsSend.mockResolvedValueOnce({ EndpointArn: ENDPOINT_ARN }); // CreatePlatformEndpoint
+    mockSnsSend.mockRejectedValueOnce(Object.assign(new Error("throttled"), { name: "ThrottlingException" }));
+    const errorLog = jest.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = await handler(registerEvent());
+
+    expect(result.statusCode).toBe(500);
+    expect(PutItemCommand).not.toHaveBeenCalled();
+    errorLog.mockRestore();
+  });
+
+  it("refreshes a stored endpoint with one SetEndpointAttributes and no CreatePlatformEndpoint", async () => {
+    mockDynamoSend.mockResolvedValueOnce({ Item: { adultStatus: { S: "attested_adult" } } }); // eligibility
+    mockDynamoSend.mockResolvedValueOnce({
+      Item: { user_id: { S: "user123" }, device_id: { S: "device123" }, endpointArn: { S: ENDPOINT_ARN } },
+    }); // GetItem: an older token
+    mockDynamoSend.mockResolvedValueOnce({ Items: [] }); // Query conflicts by push token
+    mockSnsSend.mockResolvedValueOnce({}); // SetEndpointAttributes
+    mockDynamoSend.mockResolvedValueOnce({}); // PutItem
+
+    const result = await handler(registerEvent());
+
+    expect(result.statusCode).toBe(200);
+    expect(CreatePlatformEndpointCommand).not.toHaveBeenCalled();
+    expect(snsInputs()).toEqual([{ EndpointArn: ENDPOINT_ARN, Attributes: { Token: PUSH_TOKEN, Enabled: "true" } }]);
+  });
+
   it("preserves existing notification settings when token is refreshed", async () => {
     mockDynamoSend.mockResolvedValueOnce({
       Item: { adultStatus: { S: "attested_adult" } },
