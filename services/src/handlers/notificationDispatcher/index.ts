@@ -380,8 +380,8 @@ interface ClaimedUser {
 
 // Token-based authentication (UA-08). SNS reports AuthenticationMethod ("token" or "certificate" for APNs; compared
 // without case, since the API reference does not spell the values); without it, ApplePlatformTeamID or
-// ApplePlatformBundleID, which only token authentication sets, decide. Token mode wins over a leftover
-// AppleCertificateExpirationDate, so the metric never counts down to a certificate SNS no longer uses.
+// ApplePlatformBundleID, which only token authentication sets, decide. Token mode wins over a leftover certificate
+// expiry date, so the metric never counts down to a certificate SNS no longer uses.
 const usesApnsTokenAuthentication = (attributes: Record<string, string>): boolean => {
   const method = attributes.AuthenticationMethod?.trim().toLowerCase();
   if (method) return method === "token";
@@ -418,14 +418,16 @@ const emitApnsCertificateDaysRemaining = async (): Promise<void> => {
       logger.info("APNs platform application uses token-based authentication; no certificate expiry to publish");
       return;
     }
-    const expiration = attributes.AppleCertificateExpirationDate;
+    // The name this has always read, then the one the API reference documents (AppleCertificateExpiryDate), so the
+    // metric does not stop if SNS returns the documented name. A missing metric reads as OK at the alarm (UA-08).
+    const expiration = attributes.AppleCertificateExpirationDate ?? attributes.AppleCertificateExpiryDate;
     if (!expiration) {
-      logger.warn("APNs platform application has no AppleCertificateExpirationDate");
+      logger.warn("APNs platform application has no AppleCertificateExpirationDate or AppleCertificateExpiryDate");
       return;
     }
     const expiresAtMs = Date.parse(expiration);
     if (!Number.isFinite(expiresAtMs)) {
-      logger.warn("Unparseable AppleCertificateExpirationDate", { expiration });
+      logger.warn("Unparseable APNs certificate expiry date", { expiration });
       return;
     }
 

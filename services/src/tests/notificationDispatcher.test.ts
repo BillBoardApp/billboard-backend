@@ -860,6 +860,39 @@ describe("notificationDispatcher APNs certificate expiry metric", () => {
     await handler(buildEventBridgeEvent());
 
     expect(mockCloudWatchSend).not.toHaveBeenCalled();
+    expect(logLines(console.warn)).toContainEqual(
+      expect.objectContaining({
+        message: "APNs platform application has no AppleCertificateExpirationDate or AppleCertificateExpiryDate",
+      }),
+    );
+  });
+
+  // The API reference names the attribute AppleCertificateExpiryDate; the dispatcher has always read
+  // AppleCertificateExpirationDate. Either keeps the metric (and so the expiry alarm) alive.
+  it("publishes the days from AppleCertificateExpiryDate, the name the API reference documents", async () => {
+    mockSnsSend.mockResolvedValueOnce({
+      Attributes: { Enabled: "true", AppleCertificateExpiryDate: new Date(START_MS + 70.9 * DAY_MS).toISOString() },
+    });
+
+    await handler(buildEventBridgeEvent());
+
+    expect(emittedDatums()).toEqual([
+      {
+        namespace: "BillBoard/Notifications",
+        data: [{ MetricName: "ApnsCertificateDaysRemaining", Unit: "Count", Value: 70 }],
+      },
+    ]);
+  });
+
+  it("warns without publishing when the certificate expiry date does not parse", async () => {
+    mockSnsSend.mockResolvedValueOnce({ Attributes: { AppleCertificateExpiryDate: "not a date" } });
+
+    await handler(buildEventBridgeEvent());
+
+    expect(mockCloudWatchSend).not.toHaveBeenCalled();
+    expect(logLines(console.warn)).toContainEqual(
+      expect.objectContaining({ message: "Unparseable APNs certificate expiry date", expiration: "not a date" }),
+    );
   });
 
   // UA-08: a .p8 signing key does not expire, so token mode publishes no ApnsCertificateDaysRemaining at all.
@@ -896,7 +929,9 @@ describe("notificationDispatcher APNs certificate expiry metric", () => {
       expect(mockCloudWatchSend).not.toHaveBeenCalled();
       expect(logLines(console.log)).toContainEqual(expect.objectContaining({ message: tokenLogMessage }));
       expect(logLines(console.warn)).not.toContainEqual(
-        expect.objectContaining({ message: "APNs platform application has no AppleCertificateExpirationDate" }),
+        expect.objectContaining({
+          message: "APNs platform application has no AppleCertificateExpirationDate or AppleCertificateExpiryDate",
+        }),
       );
     });
 
