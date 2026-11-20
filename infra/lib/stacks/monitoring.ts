@@ -988,7 +988,7 @@ export class MonitoringStack extends cdk.Stack {
     integrityAlarm(
       'IntegritySignUpFilterHitsAlarm',
       'SignUpFilterHits',
-      'The pre-sign-up filter matched a self-service sign-up in the last hour (INT-05): a disposable email domain, or a second account on one base address (a +tag or Gmail dots). With SIGNUP_FILTER_MODE=watch the sign-up went ahead; with enforce it was refused. /aws/lambda/PreSignUpCheck logs the reason, and the domain for a disposable hit, never the address. Flip to enforce only if every hit was a test or a real disposable address.',
+      'The pre-sign-up filter matched a self-service sign-up in the last hour (INT-05): a disposable email domain, or a second account on one base address (a +tag or Gmail dots). With SIGNUP_FILTER_MODE=enforce (since the 2026-11 flip) the sign-up was refused; with watch it went ahead. /aws/lambda/PreSignUpCheck logs the reason, and the domain for a disposable hit, never the address. If a real person was refused (not a test or a disposable address), set the mode back to watch.',
       integrityMetric('SignUpFilterHit', cdk.Duration.hours(1)),
       1,
     );

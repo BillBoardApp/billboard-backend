@@ -1864,14 +1864,14 @@ describe("UserAPIServiceStack, account integrity", () => {
 
     // The filter check expects the filter's mode, so SIGNUP_FILTER_MODE also reaches SignUpFilterCheck, under its own
     // name SIGNUP_FILTER_CHECK_EXPECTED_MODE (CB-07). A value that already ships flipped (VOTE_DAILY_CAP_MODE
-    // 'enforce', SIGNUP_RATE_LIMIT_ACTION 'block') is set back to its old value here, so the test also proves its
-    // rollback changes only its own function or rule.
+    // 'enforce', SIGNUP_FILTER_MODE 'enforce', SIGNUP_RATE_LIMIT_ACTION 'block') is set back to its old value here,
+    // so the test also proves its rollback changes only its own function or rule.
     test("the flip PR's values change exactly the four functions' modes, the filter check's expected mode and the sign-up rule's action", () => {
       const flipped = synthUserApiWithAbuseLimits({
         VOTE_DAILY_CAP_MODE: "watch",
         VERIFICATION_LIMITS_MODE: "enforce",
         VOTE_RESTAMP_MODE: "apply",
-        SIGNUP_FILTER_MODE: "enforce",
+        SIGNUP_FILTER_MODE: "watch",
         SIGNUP_RATE_LIMIT_ACTION: "count",
       });
       const fnId = (functionName: string) => functionNamed(functionName)[0];
@@ -1891,10 +1891,10 @@ describe("UserAPIServiceStack, account integrity", () => {
       expect(flippedEnvironment("SetFeedback")).toEqual({ ...environmentOf("SetFeedback"), VOTE_DAILY_CAP_MODE: "watch" });
       expect(flippedEnvironment("DistrictVerification")).toEqual({ ...environmentOf("DistrictVerification"), VERIFICATION_LIMITS_MODE: "enforce" });
       expect(flippedEnvironment("RestampUserVotes")).toEqual({ ...environmentOf("RestampUserVotes"), VOTE_RESTAMP_MODE: "apply" });
-      expect(flippedEnvironment("PreSignUpCheck")).toEqual({ ...environmentOf("PreSignUpCheck"), SIGNUP_FILTER_MODE: "enforce" });
+      expect(flippedEnvironment("PreSignUpCheck")).toEqual({ ...environmentOf("PreSignUpCheck"), SIGNUP_FILTER_MODE: "watch" });
       expect(flippedEnvironment("SignUpFilterCheck")).toEqual({
         ...environmentOf("SignUpFilterCheck"),
-        SIGNUP_FILTER_CHECK_EXPECTED_MODE: "enforce",
+        SIGNUP_FILTER_CHECK_EXPECTED_MODE: "watch",
       });
       const rules = flipped.Resources.UserApiWebAcl.Properties.Rules as Array<Record<string, any>>;
       const shippedRules = template().Resources.UserApiWebAcl.Properties.Rules as Array<Record<string, any>>;

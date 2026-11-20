@@ -30,7 +30,7 @@ describe('lib/config/abuse-limits.ts', () => {
       VOTE_DAILY_CAP_MODE: 'enforce',
       VERIFICATION_LIMITS_MODE: 'watch',
       VOTE_RESTAMP_MODE: 'plan',
-      SIGNUP_FILTER_MODE: 'watch',
+      SIGNUP_FILTER_MODE: 'enforce',
       SIGNUP_RATE_LIMIT_ACTION: 'block',
       PRE_SIGN_UP_TRIGGER_ENABLED: true,
       SIGNUP_FILTER_CHECK_ENABLED: 'true',
