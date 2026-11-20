@@ -80,12 +80,12 @@ export const MIN_APP_VERSION: string = '';
 export const APP_ATTEST_EXEMPT_GROUP = 'AppAttestExempt';
 
 // ── Account integrity switches (integration plan section 6) ──────────────────────────────────────
-// Each ships in its safe position.
+// Each ships in its safe position first and moves to the stricter one only on its own condition (docs/RUNBOOK.md 14.1).
 
 /** INT-06 (SetFeedback): 'watch' counts writes over VOTE_DAILY_LIMIT a UTC day and emits VoteDailyCapExceeded
- * but writes every vote; 'enforce' answers 429 VOTE_DAILY_LIMIT. Flip when no account went above
- * VOTE_DAILY_CAP_ENFORCE_READY_MAX writes on any day. */
-export const VOTE_DAILY_CAP_MODE: 'watch' | 'enforce' = 'watch';
+ * but writes every vote; 'enforce' answers 429 VOTE_DAILY_LIMIT. Enforced once no account had gone above
+ * VOTE_DAILY_CAP_ENFORCE_READY_MAX writes on any day of the watch period. Rollback: 'watch'. */
+export const VOTE_DAILY_CAP_MODE: 'watch' | 'enforce' = 'enforce';
 
 /** INT-03 (DistrictVerification): 'watch' writes the address claims and counters exactly as enforce does
  * but never caps an account and never answers 429; 'enforce' caps the verified account after
@@ -104,8 +104,9 @@ export const SIGNUP_FILTER_MODE: 'watch' | 'enforce' = 'watch';
 
 /** 7B (the user API web ACL's CognitoSignUpRateLimit rule): 'count' only counts an IP's SignUp,
  * ResendConfirmationCode or ForgotPassword calls over COGNITO_SIGN_UP_RATE_LIMIT in its window; 'block' refuses
- * them (Cognito answers 403 ForbiddenException). Flip when the counted requests came only from the test sign-ups. */
-export const SIGNUP_RATE_LIMIT_ACTION: 'count' | 'block' = 'count';
+ * them (Cognito answers 403 ForbiddenException). Blocks once the count period showed no request over the limit
+ * that did not come from a test. Rollback: 'count'. */
+export const SIGNUP_RATE_LIMIT_ACTION: 'count' | 'block' = 'block';
 
 /** INT-05 kill switch: true attaches PreSignUpCheck to the user pool as its PreSignUp trigger. false detaches
  * it (the pool's template loses its LambdaConfig, exactly as U9 left it, and sign-ups run without the filter)
