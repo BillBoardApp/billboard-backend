@@ -59,9 +59,8 @@ is disabled on purpose.
 - The two roles in `infra/lib/stacks/github-oidc.ts` trust only this repository's `deploy.yml` on `main`, in the
   `production` environment, through GitHub's OIDC provider. The repository's OIDC subject template puts the repository
   and owner IDs, the environment and the workflow file with its branch into each token's subject, and the roles match
-  that subject exactly. Pull requests, forks, other branches and other workflows get no token they accept. Until the
-  move to this repository is closed out, the roles also trust the `main` branch of the private repository the project
-  deployed from before; that subject is then removed.
+  that subject exactly. Pull requests, forks, other branches and other workflows get no token they accept. The
+  private repository the project deployed from before the move to this repository is no longer trusted.
 - Only the `deploy` job asks for an OIDC token (`id-token: write`), and only it runs in the `production` environment,
   which lets only `main` in and waits for the project's maintainers to approve. `infra/test/workflows.test.ts` fails if
   another job or workflow asks for a token or uses a secret, uses a runner that is not GitHub-hosted, or is started by

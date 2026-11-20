@@ -3,7 +3,7 @@ import {
   CONGRESS_MEMBER_STORE_BUCKET_NAME,
   LAMBDA_ARTIFACTS_BUCKET_NAME,
 } from '../../lib/config/deployment-identity';
-import { GITHUB_PLATFORM_MAIN_SUBJECT, GITHUB_PUBLIC_PRODUCTION_SUBJECT } from '../../lib/stacks/github-oidc';
+import { GITHUB_PUBLIC_PRODUCTION_SUBJECT } from '../../lib/stacks/github-oidc';
 import type { Json, SynthesizedAppStack } from './synth-app';
 
 /**
@@ -32,7 +32,6 @@ const PARTITION = 'aws';
 /** The deployment's own names and the placeholders the permissions show instead (longest first). */
 const DEPLOYMENT_NAMES: ReadonlyArray<readonly [string, string]> = [
   [GITHUB_PUBLIC_PRODUCTION_SUBJECT, '${GitHubPublicProductionSubject}'],
-  [GITHUB_PLATFORM_MAIN_SUBJECT, '${GitHubPlatformMainSubject}'],
   [CONGRESS_MEMBER_STORE_BUCKET_NAME, '${CongressMemberStoreBucket}'],
   [LAMBDA_ARTIFACTS_BUCKET_NAME, '${LambdaArtifactsBucket}'],
   [BILL_STORE_BUCKET_NAME, '${BillStoreBucket}'],

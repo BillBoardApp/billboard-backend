@@ -11,8 +11,6 @@ import {
   GITHUB_OWNER_ID,
   GITHUB_PUBLIC_REPOSITORY,
   GITHUB_PUBLIC_REPOSITORY_ID,
-  GITHUB_REPOSITORY,
-  GITHUB_REPOSITORY_ID,
 } from '../lib/config/deployment-identity';
 import {
   ACCOUNT,
@@ -41,11 +39,9 @@ describe('GitHubOidcStack', () => {
     expect(Object.keys(template.findResources('AWS::Lambda::Function'))).toHaveLength(0);
   });
 
-  // The private repository's main branch, and the public repository's deploy.yml on main in its production
-  // environment (the subject template's format), in this order: the export takes this stack unchanged, so the
-  // public copy synthesizes exactly the trust that is deployed.
+  // Only this repository's deploy.yml on main in its production environment (the subject template's format); the
+  // private repository the project deployed from before the public switch is no longer trusted.
   const trustedSubjects = [
-    `repo:${GITHUB_OWNER}@${GITHUB_OWNER_ID}/${GITHUB_REPOSITORY}@${GITHUB_REPOSITORY_ID}:ref:refs/heads/main`,
     `repository_owner_id:${GITHUB_OWNER_ID}:repository_id:${GITHUB_PUBLIC_REPOSITORY_ID}:environment:production:` +
       `job_workflow_ref:${GITHUB_OWNER}/${GITHUB_PUBLIC_REPOSITORY}/.github/workflows/deploy.yml@refs/heads/main`,
   ];

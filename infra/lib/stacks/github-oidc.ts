@@ -6,8 +6,6 @@ import {
   GITHUB_OWNER_ID,
   GITHUB_PUBLIC_REPOSITORY,
   GITHUB_PUBLIC_REPOSITORY_ID,
-  GITHUB_REPOSITORY,
-  GITHUB_REPOSITORY_ID,
   LAMBDA_ARTIFACTS_BUCKET_NAME,
 } from '../config/deployment-identity';
 
@@ -18,16 +16,12 @@ export const GITHUB_INFRA_DEPLOY_ROLE_NAME = 'GitHubInfraDeployRole';
 
 // Exact OIDC subjects. No wildcards: `ref:refs/heads/main*` also matched any
 // branch whose name starts with "main". A list means "any one of" (StringEquals with several values).
-// Both repositories were created after 2026-07-15, so GitHub issues them immutable subjects that carry
+// The repository was created after 2026-07-15, so GitHub issues it immutable subjects that carry
 // the repo owner and repository IDs; a recreated repo with the same name cannot match. The repo owner
-// and the repositories come from deployment-identity.ts.
+// and the repository come from deployment-identity.ts. The private repository the project deployed from
+// before the public switch (CON-13) is no longer trusted.
 //
-// The private repository (until the close-out of the public switch, CON-13): its main branch, in the
-// default subject format `repo:OWNER@OWNER_ID/REPO@REPO_ID:ref:refs/heads/main`. It has no environments
-// to bind (a private repository on GitHub Free; P0-06, UA-09).
-export const GITHUB_PLATFORM_MAIN_SUBJECT =
-  `repo:${GITHUB_OWNER}@${GITHUB_OWNER_ID}/${GITHUB_REPOSITORY}@${GITHUB_REPOSITORY_ID}:ref:refs/heads/main`;
-// The public repository: its deploy.yml on main, in its production environment, which waits for the
+// This repository: its deploy.yml on main, in its production environment, which waits for the
 // project's maintainers to approve. The repository's subject template (`include_claim_keys`: repository_owner_id,
 // repository_id, context, job_workflow_ref; set through the actions/oidc/customization/sub API) puts all
 // three in the subject; a probe on 2026-11-12 showed the format. Any change to that template makes the
@@ -35,14 +29,8 @@ export const GITHUB_PLATFORM_MAIN_SUBJECT =
 export const GITHUB_PUBLIC_PRODUCTION_SUBJECT =
   `repository_owner_id:${GITHUB_OWNER_ID}:repository_id:${GITHUB_PUBLIC_REPOSITORY_ID}:environment:production:` +
   `job_workflow_ref:${GITHUB_OWNER}/${GITHUB_PUBLIC_REPOSITORY}/.github/workflows/deploy.yml@refs/heads/main`;
-export const GITHUB_SERVICES_RELEASE_SUBJECTS: readonly string[] = [
-  GITHUB_PLATFORM_MAIN_SUBJECT,
-  GITHUB_PUBLIC_PRODUCTION_SUBJECT,
-];
-export const GITHUB_INFRA_DEPLOY_SUBJECTS: readonly string[] = [
-  GITHUB_PLATFORM_MAIN_SUBJECT,
-  GITHUB_PUBLIC_PRODUCTION_SUBJECT,
-];
+export const GITHUB_SERVICES_RELEASE_SUBJECTS: readonly string[] = [GITHUB_PUBLIC_PRODUCTION_SUBJECT];
+export const GITHUB_INFRA_DEPLOY_SUBJECTS: readonly string[] = [GITHUB_PUBLIC_PRODUCTION_SUBJECT];
 
 export const DEFAULT_LAMBDA_ARTIFACTS_BUCKET_NAME = LAMBDA_ARTIFACTS_BUCKET_NAME;
 
@@ -102,11 +90,11 @@ export class GitHubOidcStack extends cdk.Stack {
         },
       });
 
-    // billboard-platform .github/workflows/deploy.yml, release job (scripts/ci/publish-release.sh):
+    // .github/workflows/deploy.yml, release job (scripts/ci/publish-release.sh):
     // `aws s3 cp` of the zips and the release manifest into the artifacts bucket. Nothing else.
     this.servicesReleaseRole = new iam.Role(this, 'GitHubServicesReleaseRole', {
       roleName: GITHUB_SERVICES_RELEASE_ROLE_NAME,
-      description: 'GitHub Actions: billboard-platform main uploads Lambda release artifacts',
+      description: 'GitHub Actions: billboard-backend main uploads Lambda release artifacts',
       assumedBy: gitHubPrincipal(GITHUB_SERVICES_RELEASE_SUBJECTS),
       maxSessionDuration: cdk.Duration.hours(1),
       inlinePolicies: {
@@ -127,14 +115,14 @@ export class GitHubOidcStack extends cdk.Stack {
       },
     });
 
-    // billboard-platform .github/workflows/deploy.yml, deploy job, plus scripts/syncLambdaAliasVersionParameters.ts
+    // .github/workflows/deploy.yml, deploy job, plus scripts/syncLambdaAliasVersionParameters.ts
     // and scripts/deployLambdaRelease.ts. CloudFormation changes and asset
     // publishing go through the CDK bootstrap roles, never this role directly.
     // A diff run narrows its session with an inline session policy in deploy.yml to the manifest and
     // zip downloads, GetAlias and three bootstrap roles; that policy can only take away from this one.
     this.infraDeployRole = new iam.Role(this, 'GitHubInfraDeployRole', {
       roleName: GITHUB_INFRA_DEPLOY_ROLE_NAME,
-      description: 'GitHub Actions: billboard-platform main deploys CDK stacks and Lambda releases',
+      description: 'GitHub Actions: billboard-backend main deploys CDK stacks and Lambda releases',
       assumedBy: gitHubPrincipal(GITHUB_INFRA_DEPLOY_SUBJECTS),
       // The CodeDeploy wait runs up to 150 minutes after synth and cdk deploy.
       maxSessionDuration: cdk.Duration.hours(4),
