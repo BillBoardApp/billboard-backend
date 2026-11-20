@@ -21,15 +21,11 @@ export const HOSTED_ZONE_ID = 'Z042484932F0V8RTY6BAX';
 export const MONITORING_SLACK_WORKSPACE_ID = 'T0B2XM1EEFR';
 export const MONITORING_SLACK_CHANNEL_ID = 'C0B39P514SZ';
 
-/** The GitHub repositories that may assume the deploy roles (GitHubOidcStack). GitHub issues repositories created
- * after 2026-07-15 immutable OIDC subjects that carry the repo owner and repository IDs as well as their names.
- * GITHUB_REPOSITORY is the private repository the project deployed from until the public switch (CON-13): its main
- * branch keeps its trust until the close-out removes it. GITHUB_PUBLIC_REPOSITORY is the public repository that
- * deploys from then on, through its production environment. */
+/** The GitHub repository that may assume the deploy roles (GitHubOidcStack), through its production environment.
+ * GitHub issues repositories created after 2026-07-15 immutable OIDC subjects that carry the repo owner and
+ * repository IDs as well as their names. */
 export const GITHUB_OWNER = 'BillBoardApp';
 export const GITHUB_OWNER_ID = '237660567';
-export const GITHUB_REPOSITORY = 'billboard-platform';
-export const GITHUB_REPOSITORY_ID = '1409003646';
 export const GITHUB_PUBLIC_REPOSITORY = 'billboard-backend';
 export const GITHUB_PUBLIC_REPOSITORY_ID = '1455989902';
 
