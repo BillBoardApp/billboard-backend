@@ -68,13 +68,13 @@ describe("NotificationServiceStack", () => {
     expect(JSON.stringify(templates.notificationTemplate.toJSON())).not.toContain("s3.amazonaws.com");
   });
 
-  // X6: the expired-push cutoff (C1.3) ships watch-only. UserNotifier counts and logs rows past their
-  // 24-hour lifetime and still sends them; the flip PR sets "enforce".
-  test("UserNotifier runs the expired-push cutoff in watch mode", () => {
-    expect(USER_NOTIFIER_PENDING_EXPIRY_MODE).toBe("watch");
+  // X6: the expired-push cutoff (C1.3) shipped watch-only and now enforces: UserNotifier deletes rows past their
+  // 24-hour lifetime unsent. "watch" (count and log them, still send them) is the rollback.
+  test("UserNotifier runs the expired-push cutoff in enforce mode", () => {
+    expect(USER_NOTIFIER_PENDING_EXPIRY_MODE).toBe("enforce");
     templates.notificationTemplate.hasResourceProperties("AWS::Lambda::Function", {
       FunctionName: "UserNotifier",
-      Environment: { Variables: Match.objectLike({ PENDING_EXPIRY_MODE: "watch" }) },
+      Environment: { Variables: Match.objectLike({ PENDING_EXPIRY_MODE: "enforce" }) },
     });
     // Only UserNotifier reads it.
     const withMode = Object.values(templates.notificationTemplate.findResources("AWS::Lambda::Function"))

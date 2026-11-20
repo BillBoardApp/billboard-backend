@@ -83,7 +83,8 @@ const ENDPOINT_ARN_ATTRIBUTE = process.env.ENDPOINT_ARN_ATTRIBUTE ?? "endpointAr
  * X6, the expired-push cutoff of C1.3 (decision D1): what happens to a pending row past its 24-hour
  * lifetime (isPendingRowExpired). Exactly "enforce": it is deleted unsent, counted and logged
  * "expired". Any other value, or none, is "watch": it is counted and logged "would_expire", then sent
- * and deleted exactly as before. Ships as "watch" (infra USER_NOTIFIER_PENDING_EXPIRY_MODE).
+ * and deleted exactly as before. Infra sets "enforce" (USER_NOTIFIER_PENDING_EXPIRY_MODE); it shipped as "watch",
+ * which is the rollback.
  */
 type PendingExpiryMode = "watch" | "enforce";
 const PENDING_EXPIRY_MODE: PendingExpiryMode = process.env.PENDING_EXPIRY_MODE === "enforce" ? "enforce" : "watch";

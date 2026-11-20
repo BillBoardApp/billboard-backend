@@ -77,10 +77,11 @@ export type PendingExpiryMode = 'watch' | 'enforce';
  * X6 (the expired-push cutoff of C1.3, decision D1). In 'watch', UserNotifier counts a pending row past its
  * 24-hour lifetime (NotificationsExpiredUndelivered) and logs it as "would_expire", then sends and deletes it
  * exactly as before, so a unit mismatch shows as an alarm instead of lost pushes. 'enforce' deletes such
- * rows unsent. Ships as 'watch'; the flip PR sets 'enforce' once the metric stayed 0 for 7 days of normal
- * running. Changing it publishes a new UserNotifier version, which shifts all at once (a worker).
+ * rows unsent. It shipped as 'watch' and is 'enforce' since the metric stayed 0 for at least 7 days of normal
+ * running; 'watch' is the rollback. Changing it publishes a new UserNotifier version, which shifts all at once
+ * (a worker).
  */
-export const USER_NOTIFIER_PENDING_EXPIRY_MODE: PendingExpiryMode = 'watch';
+export const USER_NOTIFIER_PENDING_EXPIRY_MODE: PendingExpiryMode = 'enforce';
 
 export interface NotificationServiceStackProps extends cdk.StackProps {
   readonly lambdaArtifactsBucket: s3.IBucket;
