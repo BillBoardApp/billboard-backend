@@ -27,6 +27,7 @@ import {
   MONITORED_LAMBDA_NAMES,
   MONITORED_WORK_QUEUE_NAMES,
   MonitoringStack,
+  PAGE_ALARM_NAMES,
   PAGE_COMPOSITE_ALARM_NAMES,
   PAGE_MEMBER_ONLY_ALARM_NAMES,
   STATUS_ONLY_ALARM_NAMES,
@@ -50,6 +51,7 @@ import {
 
 const templates = synthesizeStacks();
 const alarmTopicRef = { Ref: Match.stringLikeRegexp("^AlarmTopic") };
+const pageTopicRef = { Ref: Match.stringLikeRegexp("^PageTopic") };
 
 // Alarms that are not generated from one of the exported lists.
 const STANDALONE_ALARM_NAMES = [
@@ -108,7 +110,7 @@ const STANDALONE_ALARM_NAMES = [
   "Billboard-Bedrock-RequestRejected",
   "Billboard-Summarizer-FieldRepairRate",
   "Billboard-Priority-NoModelAnswer",
-  // C1.4: page members with no action of their own.
+  // C1.4: the page alarms made for the page composites (the page topic only).
   ...PAGE_MEMBER_ONLY_ALARM_NAMES,
   // C2 3.11: routine.
   ...ACCOUNT_INTEGRITY_ALARM_NAMES,
@@ -259,11 +261,26 @@ describe("MonitoringStack", () => {
       expect(names).toContain(`Billboard-SQS-${SCHEDULED_JOB_FAILURES_QUEUE_NAME}-VisibleMessages`);
     });
 
-    // C1.4: two tiers. Only the two page composites notify the page topic (on ALARM and on OK); the three
-    // member-only alarms and the status-only composite have no action at all; everything else notifies only the
+    // C1.4: two tiers. Exactly the six page alarms notify the page topic, on ALARM and on OK, and nothing else. No
+    // composite has an action: Slack's AWS app rejects composite-alarm notifications (the 2026-11-19 paging drill),
+    // so the two page composites, like the status-only one, are status views. Everything else notifies only the
     // alarm topic, on ALARM.
-    test("only the two page composites page; member-only and status-only alarms have no actions; the rest are routine", () => {
+    test("exactly the six page alarms page; the composites have no actions; the rest are routine", () => {
+      expect(PAGE_ALARM_NAMES).toEqual([
+        "Billboard-API-5XXError",
+        "Billboard-Canary-SuccessPercent",
+        "Billboard-Page-BillsManifestSnapshotStale",
+        "Billboard-Heartbeat-NotificationDispatcher",
+        "Billboard-Notifications-ApnsDeliveryFailures",
+        "Billboard-Page-NotificationTypeQueueStalled",
+      ]);
       expect(PAGE_COMPOSITE_ALARM_NAMES).toEqual(["Billboard-Page-AppBroken", "Billboard-Page-PushesDown"]);
+      expect(PAGE_MEMBER_ONLY_ALARM_NAMES).toEqual([
+        "Billboard-Page-BillsManifestSnapshotStale",
+        "Billboard-Page-NotificationTypeQueueStalled",
+        "Billboard-Heartbeat-NotificationDispatcher",
+      ]);
+      expect(PAGE_ALARM_NAMES).toEqual(expect.arrayContaining([...PAGE_MEMBER_ONLY_ALARM_NAMES]));
       expect(STATUS_ONLY_ALARM_NAMES).toEqual(["Billboard-Ingest-Unhealthy"]);
       const alarms = { ...metricAlarms(), ...compositeAlarms() };
       Object.entries(alarms).forEach(([logicalId, resource]) => {
@@ -274,14 +291,14 @@ describe("MonitoringStack", () => {
           ok: resource.Properties.OKActions,
           insufficientData: resource.Properties.InsufficientDataActions,
         };
-        if (PAGE_COMPOSITE_ALARM_NAMES.includes(name)) {
+        if (PAGE_ALARM_NAMES.includes(name)) {
           expect(actions).toEqual({
             logicalId,
             alarm: [{ Ref: expect.stringMatching(/^PageTopic/) }],
             ok: [{ Ref: expect.stringMatching(/^PageTopic/) }],
             insufficientData: undefined,
           });
-        } else if (PAGE_MEMBER_ONLY_ALARM_NAMES.includes(name) || STATUS_ONLY_ALARM_NAMES.includes(name)) {
+        } else if (PAGE_COMPOSITE_ALARM_NAMES.includes(name) || STATUS_ONLY_ALARM_NAMES.includes(name)) {
           expect(actions).toEqual({ logicalId, alarm: undefined, ok: undefined, insufficientData: undefined });
         } else {
           expect(actions).toEqual({
@@ -292,6 +309,14 @@ describe("MonitoringStack", () => {
           });
         }
       });
+      // Exactly six: each listed name is a metric alarm here (never a composite), and no other alarm names the page topic.
+      PAGE_ALARM_NAMES.forEach((name) => expect(alarmLogicalId(name)).toBeTruthy());
+      const paging = Object.values(alarms)
+        .filter((resource) => /PageTopic/.test(JSON.stringify([
+          resource.Properties.AlarmActions, resource.Properties.OKActions, resource.Properties.InsufficientDataActions,
+        ])))
+        .map((resource) => resource.Properties.AlarmName as string);
+      expect(paging.sort()).toEqual([...PAGE_ALARM_NAMES].sort());
     });
 
     test("monitored lists cover the review's functions and DLQs without duplicates", () => {
@@ -356,6 +381,8 @@ describe("MonitoringStack", () => {
         EvaluationPeriods: 3,
         DatapointsToAlarm: 2,
         TreatMissingData: "notBreaching",
+        AlarmActions: [pageTopicRef],
+        OKActions: [pageTopicRef],
       });
     });
 
@@ -386,6 +413,8 @@ describe("MonitoringStack", () => {
         EvaluationPeriods: 3,
         DatapointsToAlarm: 2,
         TreatMissingData: "notBreaching",
+        AlarmActions: [pageTopicRef],
+        OKActions: [pageTopicRef],
       });
     });
 
@@ -432,8 +461,8 @@ describe("MonitoringStack", () => {
       const logicalId = alarmLogicalId("Billboard-Canary-SmokeSignInFailed");
       expect(metricAlarms()[logicalId].Properties.OKActions).toBeUndefined();
 
-      // Not a page member, and not named by any composite.
-      expect(PAGE_MEMBER_ONLY_ALARM_NAMES).not.toContain("Billboard-Canary-SmokeSignInFailed");
+      // Not a page, and not named by any composite.
+      expect(PAGE_ALARM_NAMES).not.toContain("Billboard-Canary-SmokeSignInFailed");
       Object.values(compositeAlarms()).forEach((composite) =>
         expect({ composite: composite.Properties.AlarmName, members: ruleMemberIds(composite) }).toEqual({
           composite: composite.Properties.AlarmName,
@@ -532,6 +561,8 @@ describe("MonitoringStack", () => {
         Statistic: "Sum",
         Period: 300,
         Threshold: 5,
+        AlarmActions: [pageTopicRef],
+        OKActions: [pageTopicRef],
       });
     });
 
@@ -1436,11 +1467,12 @@ describe("MonitoringStack", () => {
       );
     });
 
-    // C1.4: a "Pages" status widget first, with the two composites and their three member-only alarms;
-    // the DynamoDB widget now holds only the write-throttle alarm.
+    // C1.4: a "Pages" status widget first, with the two composites (status views of the six page alarms) and the
+    // three page alarms made for them. The other three page alarms (API 5XX, canary, APNs delivery failures) stay on
+    // the service widget, where they were as routine alarms. The DynamoDB widget now holds only the write-throttle alarm.
     test("shows the pages first, then the routine groups, and renames the DynamoDB widget", () => {
       const statusWidgets = dashboardBody(templates.monitoringTemplate).widgets.filter((widget) => widget.type === "alarm");
-      const [pages] = statusWidgets;
+      const [pages, service] = statusWidgets;
       expect(pages.properties.title).toMatch(/^Pages:/);
       const pageIds = [
         ...PAGE_COMPOSITE_ALARM_NAMES.map((name) =>
@@ -1448,6 +1480,11 @@ describe("MonitoringStack", () => {
         ...PAGE_MEMBER_ONLY_ALARM_NAMES.map(alarmLogicalId),
       ].map((logicalId) => `alarm:${logicalId}`);
       expect([...pages.properties.alarms].sort()).toEqual(pageIds.sort());
+      expect(service.properties.title).toBe("Alarms: API, freshness and delivery");
+      expect(service.properties.alarms).toEqual(expect.arrayContaining(
+        PAGE_ALARM_NAMES.filter((name) => !PAGE_MEMBER_ONLY_ALARM_NAMES.includes(name))
+          .map((name) => `alarm:${alarmLogicalId(name)}`),
+      ));
 
       const titles = statusWidgets.map((widget) => widget.properties.title as string);
       expect(titles).toContain("Alarms: DynamoDB throttles");
@@ -1470,7 +1507,7 @@ describe("MonitoringStack", () => {
       const rule = JSON.stringify(composite.Properties.AlarmRule);
       expect(rule.match(/ALARM\(/g)).toHaveLength(3);
       expect(rule.match(/ OR /g)).toHaveLength(2);
-      expect(composite.Properties.AlarmDescription).toMatch(/^PAGE: /);
+      expect(composite.Properties.AlarmDescription).toMatch(/^Status view of its three page alarms, with no notification of its own: each member pages itself\. The app is broken for users: /);
     });
 
     test("Billboard-Page-PushesDown fires on the dispatcher heartbeat, APNs failures or a stalled NotificationTypeQueue", () => {
@@ -1483,16 +1520,42 @@ describe("MonitoringStack", () => {
       const rule = JSON.stringify(composite.Properties.AlarmRule);
       expect(rule.match(/ALARM\(/g)).toHaveLength(3);
       expect(rule.match(/ OR /g)).toHaveLength(2);
-      expect(composite.Properties.AlarmDescription).toMatch(/^PAGE: /);
+      expect(composite.Properties.AlarmDescription).toMatch(/^Status view of its three page alarms, with no notification of its own: each member pages itself\. Pushes are down: /);
     });
 
-    test("the existing members keep their routine action", () => {
+    // Slack's AWS app rejects composite-alarm notifications ("Event received is not supported", the 2026-11-19
+    // paging drill), so the members page and the composites are status views.
+    test("the two composites have no action, and their six members are exactly the page alarms", () => {
+      PAGE_COMPOSITE_ALARM_NAMES.forEach((name) => {
+        const composite = compositeNamed(name);
+        expect({
+          name,
+          alarm: composite.Properties.AlarmActions,
+          ok: composite.Properties.OKActions,
+          insufficientData: composite.Properties.InsufficientDataActions,
+        }).toEqual({ name, alarm: undefined, ok: undefined, insufficientData: undefined });
+        expect(composite.Properties.AlarmDescription).not.toMatch(/\bPAGE\b/);
+      });
+      const memberIds = PAGE_COMPOSITE_ALARM_NAMES.flatMap((name) => ruleMemberIds(compositeNamed(name)));
+      expect([...memberIds].sort()).toEqual(PAGE_ALARM_NAMES.map(alarmLogicalId).sort());
+      PAGE_ALARM_NAMES.forEach((name) =>
+        expect(metricAlarms()[alarmLogicalId(name)].Properties.AlarmDescription).toMatch(
+          /^PAGE \(member of Billboard-Page-(AppBroken|PushesDown)\)\. /,
+        ),
+      );
+    });
+
+    // They notified the routine alarm topic until 2026-11-19. With pages in the same Slack channel, each incident
+    // now posts once, as a page.
+    test("the API 5XX, canary and APNs members page instead of notifying the routine topic", () => {
       ["Billboard-API-5XXError", "Billboard-Canary-SuccessPercent", "Billboard-Notifications-ApnsDeliveryFailures"]
         .forEach((alarmName) => {
           templates.monitoringTemplate.hasResourceProperties("AWS::CloudWatch::Alarm", {
             AlarmName: alarmName,
-            AlarmActions: [alarmTopicRef],
+            AlarmActions: [pageTopicRef],
+            OKActions: [pageTopicRef],
           });
+          expect(JSON.stringify(metricAlarms()[alarmLogicalId(alarmName)].Properties)).not.toMatch(/AlarmTopic/);
         });
     });
 
@@ -1509,7 +1572,8 @@ describe("MonitoringStack", () => {
         EvaluationPeriods: 5,
         DatapointsToAlarm: 5,
         TreatMissingData: "breaching",
-        AlarmActions: Match.absent(),
+        AlarmActions: [pageTopicRef],
+        OKActions: [pageTopicRef],
       });
       // The 30-minute routine freshness alarm stays as it was.
       templates.monitoringTemplate.hasResourceProperties("AWS::CloudWatch::Alarm", {
@@ -1533,7 +1597,8 @@ describe("MonitoringStack", () => {
         EvaluationPeriods: 1,
         DatapointsToAlarm: 1,
         TreatMissingData: "notBreaching",
-        AlarmActions: Match.absent(),
+        AlarmActions: [pageTopicRef],
+        OKActions: [pageTopicRef],
       });
     });
 
@@ -1577,7 +1642,7 @@ describe("MonitoringStack", () => {
       })),
     ]);
 
-    test("NotificationDispatcher: 30 minutes without a successful run, a page member with no action", () => {
+    test("NotificationDispatcher: 30 minutes without a successful run, a page", () => {
       templates.monitoringTemplate.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: "Billboard-Heartbeat-NotificationDispatcher",
         Metrics: successfulRuns("NotificationDispatcher", 300),
@@ -1586,7 +1651,8 @@ describe("MonitoringStack", () => {
         EvaluationPeriods: 6,
         DatapointsToAlarm: 6,
         TreatMissingData: "breaching",
-        AlarmActions: Match.absent(),
+        AlarmActions: [pageTopicRef],
+        OKActions: [pageTopicRef],
       });
     });
 
@@ -2404,9 +2470,9 @@ describe("MonitoringStack", () => {
       );
     });
 
-    // C1.4: across every stack, the page topic is the action of the two page composites only. The service
-    // stacks' alarms (alias errors, the API 5XX and canary rollback alarms) notify no one.
-    test("in the whole app, only the two page composites name the page topic", () => {
+    // C1.4: across every stack, the page topic is the action of the six page alarms only, never of a composite. The
+    // service stacks' alarms (alias errors, the API 5XX and canary rollback alarms) notify no one.
+    test("in the whole app, only the six page alarms name the page topic", () => {
       const alarms = resources.filter((resource) =>
         resource.Type === "AWS::CloudWatch::Alarm" || resource.Type === "AWS::CloudWatch::CompositeAlarm");
       const paging = alarms
@@ -2415,7 +2481,7 @@ describe("MonitoringStack", () => {
         ])))
         .map((resource) => resource.Properties?.AlarmName)
         .sort();
-      expect(paging).toEqual([...PAGE_COMPOSITE_ALARM_NAMES].sort());
+      expect(paging).toEqual([...PAGE_ALARM_NAMES].sort());
     });
 
     test("the real app ships with pages in the existing Slack channel", () => {

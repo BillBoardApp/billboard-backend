@@ -116,13 +116,34 @@ export const BEDROCK_METRIC_NAMESPACE = 'BillBoard/Bedrock';
 export const SES_METRIC_NAMESPACE = 'AWS/SES';
 export const SES_REPUTATION_ALARM_NAMES: readonly string[] = ['Billboard-Email-BounceRate', 'Billboard-Email-ComplaintRate'];
 
-/** C1.4: the only alarms with an action on the page topic, on ALARM and on OK. */
+/**
+ * C1.4: the page alarms, the only alarms with an action on the page topic, on ALARM and on OK, and with no other
+ * action. They are the members of the two page composites. The composites cannot page themselves: Slack's AWS app
+ * (AWS Chatbot) rejects CloudWatch composite-alarm notifications ("Event received is not supported"), which the
+ * paging drill of 2026-11-19 found.
+ */
+export const PAGE_ALARM_NAMES: readonly string[] = [
+  'Billboard-API-5XXError',
+  'Billboard-Canary-SuccessPercent',
+  'Billboard-Page-BillsManifestSnapshotStale',
+  'Billboard-Heartbeat-NotificationDispatcher',
+  'Billboard-Notifications-ApnsDeliveryFailures',
+  'Billboard-Page-NotificationTypeQueueStalled',
+];
+
+/**
+ * C1.4: the two page composites, each over three of the page alarms (PAGE_ALARM_NAMES). A status view on the
+ * dashboard's "Pages" widget with no action of their own: each member pages itself.
+ */
 export const PAGE_COMPOSITE_ALARM_NAMES: readonly string[] = [
   'Billboard-Page-AppBroken',
   'Billboard-Page-PushesDown',
 ];
 
-/** C1.4: alarms with no action of their own, which reach the paging channel only through a page composite. */
+/**
+ * C1.4: the page alarms made for the page composites, never routine. They sit on the dashboard's "Pages" widget; the
+ * other three page alarms (API 5XX, canary, APNs delivery failures) stay on the "API, freshness and delivery" widget.
+ */
 export const PAGE_MEMBER_ONLY_ALARM_NAMES: readonly string[] = [
   'Billboard-Page-BillsManifestSnapshotStale',
   'Billboard-Page-NotificationTypeQueueStalled',
@@ -131,7 +152,8 @@ export const PAGE_MEMBER_ONLY_ALARM_NAMES: readonly string[] = [
 
 /**
  * Composites with no action of their own, kept as a status view on the dashboard: each of their members notifies the
- * alarm topic itself, so their own notification only ever repeated a member's.
+ * alarm topic itself, so their own notification only ever repeated a member's. The page composites
+ * (PAGE_COMPOSITE_ALARM_NAMES) are status views too, over members that page.
  */
 export const STATUS_ONLY_ALARM_NAMES: readonly string[] = ['Billboard-Ingest-Unhealthy'];
 
@@ -345,7 +367,7 @@ export class MonitoringStack extends cdk.Stack {
     const alarmTopic = new sns.Topic(this, 'AlarmTopic', {
       topicName: alarmTopicName,
     });
-    // C1.4: the paging tier. Only the two page composites below notify it.
+    // C1.4: the paging tier. Only the six page alarms below (PAGE_ALARM_NAMES) notify it, on ALARM and on OK.
     const pageTopic = new sns.Topic(this, 'PageTopic', {
       topicName: PAGE_TOPIC_NAME,
     });
@@ -424,35 +446,33 @@ export class MonitoringStack extends cdk.Stack {
       email: [],
     };
     // Every alarm in this stack appears on the dashboard's status widgets. All of them notify the alarm
-    // topic (the routine tier) through notify(), except the page tier below and the status-only composites.
+    // topic (the routine tier) through notify(), except the page alarms (page()) and the status-only composites.
     const notify = <T extends cloudwatch.AlarmBase>(group: AlarmGroup, alarm: T): T => {
       alarm.addAlarmAction(alarmAction);
       alarmGroups[group].push(alarm);
       return alarm;
     };
-    // A status-only composite (STATUS_ONLY_ALARM_NAMES): on the dashboard, with no action of its own.
+    // A status-only composite (STATUS_ONLY_ALARM_NAMES, PAGE_COMPOSITE_ALARM_NAMES): on the dashboard, with no action
+    // of its own.
     const statusOnly = (group: AlarmGroup, alarm: cloudwatch.CompositeAlarm): cloudwatch.CompositeAlarm => {
       alarmGroups[group].push(alarm);
       return alarm;
     };
-    // C1.4: a page member has no action of its own; it reaches the paging channel only through its page.
-    const pageMember = <T extends cloudwatch.AlarmBase>(alarm: T): T => {
-      alarmGroups.pages.push(alarm);
-      return alarm;
-    };
-    // C1.4: the only alarms with the page topic as an action, on ALARM and on OK.
-    const page = (alarm: cloudwatch.CompositeAlarm): cloudwatch.CompositeAlarm => {
+    // C1.4: a page alarm (PAGE_ALARM_NAMES): the page topic on ALARM and on OK, and no routine action, so an incident
+    // posts once even while pages and routine alarms share a channel. Metric alarms only: Slack's AWS app does not
+    // post a composite's notification (the 2026-11-19 paging drill).
+    const page = (group: AlarmGroup, alarm: cloudwatch.Alarm): cloudwatch.Alarm => {
       alarm.addAlarmAction(pageAction);
       alarm.addOkAction(pageAction);
-      alarmGroups.pages.push(alarm);
+      alarmGroups[group].push(alarm);
       return alarm;
     };
 
     // ── User API, canary and product health ─────────────────────────────────
 
-    const userApi5xxAlarm = notify('service', new cloudwatch.Alarm(this, 'UserApi5xxAlarm', {
+    const userApi5xxAlarm = page('service', new cloudwatch.Alarm(this, 'UserApi5xxAlarm', {
       alarmName: 'Billboard-API-5XXError',
-      alarmDescription: `${USER_API_NAME} returned 5 or more 5XX responses in at least 2 of the last 3 minutes. Check the per-function Lambda error alarms for the failing handler, then API Gateway access logs.`,
+      alarmDescription: `PAGE (member of Billboard-Page-AppBroken). ${USER_API_NAME} returned 5 or more 5XX responses in at least 2 of the last 3 minutes. Check the per-function Lambda error alarms for the failing handler, then API Gateway access logs.`,
       metric: this.userApiMetric('5XXError', 'Sum', cdk.Duration.minutes(1)),
       threshold: 5,
       evaluationPeriods: 3,
@@ -478,9 +498,9 @@ export class MonitoringStack extends cdk.Stack {
       statistic: 'Average',
       period: cdk.Duration.minutes(15),
     });
-    const userApiCanaryAlarm = notify('service', new cloudwatch.Alarm(this, 'UserApiCanaryAlarm', {
+    const userApiCanaryAlarm = page('service', new cloudwatch.Alarm(this, 'UserApiCanaryAlarm', {
       alarmName: 'Billboard-Canary-SuccessPercent',
-      alarmDescription: `The ${USER_API_CANARY_NAME} Synthetics canary succeeded on under 90% of runs in 2 of the last 3 fifteen-minute windows. The canary only runs 13:00-23:45 UTC, so this alarm is silent overnight. Check the failed run's screenshots and logs in the Synthetics console.`,
+      alarmDescription: `PAGE (member of Billboard-Page-AppBroken). The ${USER_API_CANARY_NAME} Synthetics canary succeeded on under 90% of runs in 2 of the last 3 fifteen-minute windows. The canary only runs 13:00-23:45 UTC, so this alarm is silent overnight. Check the failed run's screenshots and logs in the Synthetics console.`,
       metric: canarySuccessMetric,
       threshold: 90,
       comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
@@ -491,9 +511,10 @@ export class MonitoringStack extends cdk.Stack {
 
     // UA-04: the canary's test account could not sign in (no secret, bad JSON, wrong keys, a TOTP or password-change
     // challenge, a refused password). The canary then skips its signed-in steps and emits this instead of failing
-    // the run, so a mistake in the hand-made secret or account does not page (the canary alarm above is a
-    // member of Billboard-Page-AppBroken) and does not stop an API deployment. This alarm is routine only: it is no
-    // page member and no deployment group watches it. Same shape as the canary alarm: 2 of 3 fifteen-minute windows.
+    // the run, so a mistake in the hand-made secret or account does not page (the canary alarm above is a page,
+    // in Billboard-Page-AppBroken) and does not stop an API deployment. This alarm is routine only: it is no page,
+    // no page composite names it and no deployment group watches it. Same shape as the canary alarm: 2 of 3
+    // fifteen-minute windows.
     notify('service', new cloudwatch.Alarm(this, 'CanarySmokeSignInFailedAlarm', {
       alarmName: 'Billboard-Canary-SmokeSignInFailed',
       alarmDescription: `The ${USER_API_CANARY_NAME} canary could not sign in its test account in at least 2 of the last 3 fifteen-minute windows, so it is running only /health and the unauthenticated check; the signed-in steps, the weekly digest freshness check among them, are off. This does not fail the canary, page or stop a deploy. The canary only runs 13:00-23:45 UTC. Find the reason in the latest run's log in the Synthetics console ("smoke sign-in unavailable (...)"), then fix the secret Billboard/CanarySmokeTestCredentials (JSON keys exactly username or email, and password) or the account (confirmed, permanent password, no TOTP). RUNBOOK 7.`,
@@ -727,9 +748,9 @@ export class MonitoringStack extends cdk.Stack {
 
     const apnsDeliveredMetric = this.apnsMetric('NumberOfNotificationsDelivered');
     const apnsFailedMetric = this.apnsMetric('NumberOfNotificationsFailed');
-    const apnsDeliveryFailuresAlarm = notify('service', new cloudwatch.Alarm(this, 'ApnsDeliveryFailuresAlarm', {
+    const apnsDeliveryFailuresAlarm = page('service', new cloudwatch.Alarm(this, 'ApnsDeliveryFailuresAlarm', {
       alarmName: 'Billboard-Notifications-ApnsDeliveryFailures',
-      alarmDescription: `SNS failed to deliver 5 or more pushes through the ${APNS_PLATFORM_APPLICATION_NAME} platform application in 5 minutes. Check the APNs certificate, disabled endpoints and UserNotifier logs.`,
+      alarmDescription: `PAGE (member of Billboard-Page-PushesDown). SNS failed to deliver 5 or more pushes through the ${APNS_PLATFORM_APPLICATION_NAME} platform application in 5 minutes. Check the APNs certificate, disabled endpoints and UserNotifier logs.`,
       metric: apnsFailedMetric.with({ period: cdk.Duration.minutes(5) }),
       threshold: 5,
       evaluationPeriods: 1,
@@ -996,8 +1017,8 @@ export class MonitoringStack extends cdk.Stack {
 
     // ── App Attest (C3 3.11) ────────────────────────────────────────────────
     //
-    // Routine alarms, none paging (C3: consider adding Billboard-AppAttest-Rejected to the app-broken page once
-    // sign-up enforcement is on).
+    // Routine alarms, none paging (C3: consider making Billboard-AppAttest-Rejected a page, with page() and in
+    // Billboard-Page-AppBroken, once sign-up enforcement is on).
     addAppAttestAlarms(this, (alarm) => notify('appAttest', alarm));
 
     // ── Email (REL-54) ──────────────────────────────────────────────────────
@@ -1503,16 +1524,20 @@ export class MonitoringStack extends cdk.Stack {
 
     // ── Pages (C1.4) ────────────────────────────────────────────────────────
     //
-    // Two composites are the only alarms that page (the page topic, on ALARM and on OK). Their existing
-    // members keep their routine action, so an incident shows the member in the routine channel and the
-    // page in the paging channel. The three new members below have no action of their own.
+    // Six metric alarms page (PAGE_ALARM_NAMES): each notifies the page topic on ALARM and on OK, and nothing else,
+    // so an incident posts once even while pages share the routine alarm channel (slackPageChannelId unset). Three
+    // are above (API 5XX, canary, APNs delivery failures, routine until 2026-11-19, kept on the service widget); the
+    // three below were made for paging and sit on the "Pages" widget. Two composites group them, "the app is broken"
+    // and "pushes are down", as a status view with no action of their own: Slack's AWS app rejects composite-alarm
+    // notifications ("Event received is not supported"), so in the 2026-11-19 paging drill the composite's page
+    // reached the topic but never the channel.
 
     // PublishBillsManifest emits SnapshotBillCount on every run (every 10 minutes); 5 empty half-hours
     // mean the app has read the same snapshot for 2.5 to 3 hours. The snapshot's generated-at is not used:
     // it moves only when bills change. Billboard-Freshness-BillsManifestSnapshot (30 minutes) stays routine.
-    const snapshotStaleAlarm = pageMember(new cloudwatch.Alarm(this, 'BillsManifestSnapshotStalePageAlarm', {
+    const snapshotStaleAlarm = page('pages', new cloudwatch.Alarm(this, 'BillsManifestSnapshotStalePageAlarm', {
       alarmName: 'Billboard-Page-BillsManifestSnapshotStale',
-      alarmDescription: 'Page member of Billboard-Page-AppBroken (no action of its own). PublishBillsManifest has not completed a run for 2.5 hours, so the app is reading a stale bills snapshot. Check /aws/lambda/PublishBillsManifest logs, the PublishBillsManifestSchedule (every 10 minutes) and ScheduledJobFailures for a delivery failure.',
+      alarmDescription: 'PAGE (member of Billboard-Page-AppBroken). PublishBillsManifest has not completed a run for 2.5 hours, so the app is reading a stale bills snapshot. Check /aws/lambda/PublishBillsManifest logs, the PublishBillsManifestSchedule (every 10 minutes) and ScheduledJobFailures for a delivery failure.',
       metric: new cloudwatch.Metric({
         namespace: BILLS_MANIFEST_METRIC_NAMESPACE,
         metricName: 'SnapshotBillCount',
@@ -1529,9 +1554,9 @@ export class MonitoringStack extends cdk.Stack {
     // Failing records leave NotificationTypeQueue for its DLQ within about 15 minutes, so failures alone
     // never reach 2 hours: this is a quiet window left open (RUNBOOK 4.1 disables the consumer) or a
     // consumer that is off or throttled.
-    const notificationTypeQueueStalledAlarm = pageMember(new cloudwatch.Alarm(this, 'NotificationTypeQueueStalledPageAlarm', {
+    const notificationTypeQueueStalledAlarm = page('pages', new cloudwatch.Alarm(this, 'NotificationTypeQueueStalledPageAlarm', {
       alarmName: 'Billboard-Page-NotificationTypeQueueStalled',
-      alarmDescription: 'Page member of Billboard-Page-PushesDown (no action of its own). A message has waited 2 hours on NotificationTypeQueue, so no bill pushes are going out. Usually a RUNBOOK 4.1 quiet window left open (re-enable the NotificationType event source mapping), or the consumer is disabled or throttled.',
+      alarmDescription: 'PAGE (member of Billboard-Page-PushesDown). A message has waited 2 hours on NotificationTypeQueue, so no bill pushes are going out. Usually a RUNBOOK 4.1 quiet window left open (re-enable the NotificationType event source mapping), or the consumer is disabled or throttled.',
       metric: this.sqsMetric('NotificationTypeQueue', 'ApproximateAgeOfOldestMessage'),
       threshold: 2 * 60 * 60,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
@@ -1542,9 +1567,9 @@ export class MonitoringStack extends cdk.Stack {
 
     // C1.2: the dispatcher runs every 5 minutes. Its APNs-expiry metric treats missing data as OK, so
     // until this alarm a stopped dispatcher (rule disabled or deleted, every run failing) went unnoticed.
-    const dispatcherHeartbeatAlarm = pageMember(new cloudwatch.Alarm(this, 'NotificationDispatcherHeartbeatAlarm', {
+    const dispatcherHeartbeatAlarm = page('pages', new cloudwatch.Alarm(this, 'NotificationDispatcherHeartbeatAlarm', {
       alarmName: 'Billboard-Heartbeat-NotificationDispatcher',
-      alarmDescription: 'Page member of Billboard-Page-PushesDown (no action of its own). NotificationDispatcher has not completed a run in 30 minutes (it runs every 5 minutes), so pending pushes are not being sent. Check /aws/lambda/NotificationDispatcher logs, the NotificationDispatcherSchedule rule (enabled?) and ScheduledJobFailures for a delivery failure.',
+      alarmDescription: 'PAGE (member of Billboard-Page-PushesDown). NotificationDispatcher has not completed a run in 30 minutes (it runs every 5 minutes), so pending pushes are not being sent. Check /aws/lambda/NotificationDispatcher logs, the NotificationDispatcherSchedule rule (enabled?) and ScheduledJobFailures for a delivery failure.',
       metric: this.successfulRunsMetric('NotificationDispatcher', cdk.Duration.minutes(5), 'NotificationDispatcher successful runs per 5 minutes'),
       threshold: 0,
       comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_OR_EQUAL_TO_THRESHOLD,
@@ -1556,17 +1581,17 @@ export class MonitoringStack extends cdk.Stack {
     const anyInAlarm = (...alarms: cloudwatch.IAlarm[]): cloudwatch.IAlarmRule =>
       cloudwatch.AlarmRule.anyOf(...alarms.map((alarm) => cloudwatch.AlarmRule.fromAlarm(alarm, cloudwatch.AlarmState.ALARM)));
 
-    // Overnight (the canary is off 23:45 to 13:00 UTC) this relies on the 5XX and snapshot members; at a
+    // Overnight (the canary is off 23:45 to 13:00 UTC) the app-broken pages are the 5XX and snapshot members; at a
     // few API calls an hour the 5XX member is effectively unreachable, which is accepted.
-    page(new cloudwatch.CompositeAlarm(this, 'AppBrokenPageAlarm', {
+    statusOnly('pages', new cloudwatch.CompositeAlarm(this, 'AppBrokenPageAlarm', {
       compositeAlarmName: 'Billboard-Page-AppBroken',
-      alarmDescription: 'PAGE: the app is broken for users: API 5XX errors (Billboard-API-5XXError), the Synthetics canary failing (Billboard-Canary-SuccessPercent), or a bills snapshot over 2.5 hours old (Billboard-Page-BillsManifestSnapshotStale). Open the member in ALARM; RUNBOOK 1.1 has the first checks for each.',
+      alarmDescription: 'Status view of its three page alarms, with no notification of its own: each member pages itself. The app is broken for users: API 5XX errors (Billboard-API-5XXError), the Synthetics canary failing (Billboard-Canary-SuccessPercent), or a bills snapshot over 2.5 hours old (Billboard-Page-BillsManifestSnapshotStale). Open the member in ALARM; RUNBOOK 1.1 has the first checks for each.',
       alarmRule: anyInAlarm(userApi5xxAlarm, userApiCanaryAlarm, snapshotStaleAlarm),
     }));
 
-    page(new cloudwatch.CompositeAlarm(this, 'PushesDownPageAlarm', {
+    statusOnly('pages', new cloudwatch.CompositeAlarm(this, 'PushesDownPageAlarm', {
       compositeAlarmName: 'Billboard-Page-PushesDown',
-      alarmDescription: 'PAGE: pushes are down: NotificationDispatcher has not completed a run in 30 minutes (Billboard-Heartbeat-NotificationDispatcher), APNs is rejecting pushes (Billboard-Notifications-ApnsDeliveryFailures), or NotificationTypeQueue has stalled for 2 hours (Billboard-Page-NotificationTypeQueueStalled). Pending pushes live 24 hours. Open the member in ALARM; RUNBOOK 1.1 has the first checks for each.',
+      alarmDescription: 'Status view of its three page alarms, with no notification of its own: each member pages itself. Pushes are down: NotificationDispatcher has not completed a run in 30 minutes (Billboard-Heartbeat-NotificationDispatcher), APNs is rejecting pushes (Billboard-Notifications-ApnsDeliveryFailures), or NotificationTypeQueue has stalled for 2 hours (Billboard-Page-NotificationTypeQueueStalled). Pending pushes live 24 hours. Open the member in ALARM; RUNBOOK 1.1 has the first checks for each.',
       alarmRule: anyInAlarm(dispatcherHeartbeatAlarm, apnsDeliveryFailuresAlarm, notificationTypeQueueStalledAlarm),
     }));
 
@@ -1643,10 +1668,10 @@ export class MonitoringStack extends cdk.Stack {
 
     // Row 1: is prod healthy?
     dashboard.addWidgets(
-      sectionHeader('## 1. Is prod healthy? Alarms in ALARM sort first. Only the two page composites reach the paging channel; their member-only alarms have no action of their own; every other alarm notifies the alarm topic.'),
+      sectionHeader('## 1. Is prod healthy? Alarms in ALARM sort first. The six page alarms notify the page topic (ALARM and OK); their two page composites and Billboard-Ingest-Unhealthy are status views with no action; every other alarm notifies the alarm topic.'),
     );
     dashboard.addWidgets(
-      alarmStatusWidget('Pages: Billboard-Page-AppBroken, Billboard-Page-PushesDown and their member-only alarms', 'pages', 24, 3),
+      alarmStatusWidget('Pages: Billboard-Page-AppBroken and Billboard-Page-PushesDown (status views) and three page alarms; the API 5XX, canary and APNs pages are in the next widget', 'pages', 24, 3),
     );
     dashboard.addWidgets(
       alarmStatusWidget('Alarms: API, freshness and delivery', 'service', 8, 4),
