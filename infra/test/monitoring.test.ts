@@ -10,7 +10,6 @@ import {
   ACCOUNT_INTEGRITY_ALARM_THRESHOLDS,
   APP_ATTEST_ALARM_THRESHOLDS,
   APP_ATTEST_RESERVED_CONCURRENCY,
-  VOTE_DAILY_CAP_ENFORCE_READY_MAX,
 } from "../lib/config/abuse-limits";
 import {
   CANARY_SIGN_IN_FAILED_METRIC_NAME,
@@ -1712,7 +1711,7 @@ describe("MonitoringStack", () => {
     test("the expired-push alarm explains watch and enforce", () => {
       templates.monitoringTemplate.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: "Billboard-Notifications-ExpiredUndelivered",
-        AlarmDescription: Match.stringLikeRegexp("PENDING_EXPIRY_MODE=watch.*would_expire.*enforce"),
+        AlarmDescription: Match.stringLikeRegexp("PENDING_EXPIRY_MODE=enforce.*expired.*would_expire.*back to watch"),
       });
     });
 
@@ -1810,7 +1809,7 @@ describe("MonitoringStack", () => {
       const descriptions = Object.fromEntries(Object.values(metricAlarms())
         .filter((resource) => ACCOUNT_INTEGRITY_ALARM_NAMES.includes(resource.Properties.AlarmName))
         .map((resource) => [resource.Properties.AlarmName, resource.Properties.AlarmDescription as string]));
-      expect(descriptions["Billboard-Integrity-VoteDailyCapExceeded"]).toMatch(new RegExp(`VOTE_DAILY_CAP_MODE=watch.*/aws/lambda/SetFeedback.*${VOTE_DAILY_CAP_ENFORCE_READY_MAX}`));
+      expect(descriptions["Billboard-Integrity-VoteDailyCapExceeded"]).toMatch(/VOTE_DAILY_CAP_MODE=enforce.*VOTE_DAILY_LIMIT.*\/aws\/lambda\/SetFeedback.*back to watch/);
       expect(descriptions["Billboard-Integrity-VoteVelocity"]).toMatch(/\/aws\/lambda\/SetFeedback/);
       expect(descriptions["Billboard-Integrity-AddressVerificationBurst"]).toMatch(/\/aws\/lambda\/DistrictVerification/);
       // No fact about how many accounts production has: the text is public.
