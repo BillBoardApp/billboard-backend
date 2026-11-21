@@ -962,7 +962,7 @@ export class MonitoringStack extends cdk.Stack {
     integrityAlarm(
       'IntegrityAddressCapSignalAlarm',
       'AddressCapSignal',
-      `An address verification hit an INT-03 limit in the last hour: a ${ordinal(MAX_VERIFIED_ACCOUNTS_PER_ADDRESS + 1)} verified account at one address and unit (AddressLimitReached), a ${ordinal(MAX_ADDRESS_CHANGES_PER_WINDOW + 1)} address change by one account in ${ADDRESS_CHANGE_WINDOW_DAYS} days (ReverificationLimitReached), or more than ${STREET_CLUSTER_FLAG_THRESHOLD} verified accounts across one street address (StreetClusterFlagged). With VERIFICATION_LIMITS_MODE=watch nothing was refused. Check /aws/lambda/DistrictVerification; flip to enforce only if no signal came from a real household.`,
+      `An address verification hit an INT-03 limit in the last hour: a ${ordinal(MAX_VERIFIED_ACCOUNTS_PER_ADDRESS + 1)} verified account at one address and unit (AddressLimitReached), a ${ordinal(MAX_ADDRESS_CHANGES_PER_WINDOW + 1)} address change by one account in ${ADDRESS_CHANGE_WINDOW_DAYS} days (ReverificationLimitReached), or more than ${STREET_CLUSTER_FLAG_THRESHOLD} verified accounts across one street address (StreetClusterFlagged). With VERIFICATION_LIMITS_MODE=enforce (since the 2026-11 flip) the account was saved self-attested (a full address) or refused with 429 (a 4th address change); a street cluster is only flagged. Check /aws/lambda/DistrictVerification; if a real household was capped, set the mode back to watch.`,
       new cloudwatch.MathExpression({
         expression: 'SUM([addressLimit, reverificationLimit, streetCluster])',
         usingMetrics: {

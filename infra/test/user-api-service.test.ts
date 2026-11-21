@@ -1666,7 +1666,7 @@ describe("UserAPIServiceStack, account integrity", () => {
       });
     });
 
-    test("RestampUserVotes is a worker in plan mode that reads UserPII and stamps UserFeedback rows only", () => {
+    test("RestampUserVotes is a worker in apply mode that reads UserPII and stamps UserFeedback rows only", () => {
       const [, fn] = functionNamed("RestampUserVotes");
       expect(fn.Properties).toEqual(expect.objectContaining({ Handler: "dist/index.handler", MemorySize: 256, Timeout: 60 }));
       expect(environmentOf("RestampUserVotes")).toEqual({
@@ -1675,7 +1675,7 @@ describe("UserAPIServiceStack, account integrity", () => {
         FEEDBACK_TABLE_NAME: "UserFeedback",
         FEEDBACK_PARTITION_KEY: "userId",
         FEEDBACK_SORT_KEY: "billId",
-        VOTE_RESTAMP_MODE: "plan",
+        VOTE_RESTAMP_MODE: "apply",
       });
       expect(storeActions(statementsOf("RestampUserVotes"))).toEqual({
         "table/UserFeedback": ["dynamodb:Query", "dynamodb:UpdateItem"],
@@ -1863,14 +1863,15 @@ describe("UserAPIServiceStack, account integrity", () => {
     });
 
     // The filter check expects the filter's mode, so SIGNUP_FILTER_MODE also reaches SignUpFilterCheck, under its own
-    // name SIGNUP_FILTER_CHECK_EXPECTED_MODE (CB-07). A value that already ships flipped (VOTE_DAILY_CAP_MODE
-    // 'enforce', SIGNUP_FILTER_MODE 'enforce', SIGNUP_RATE_LIMIT_ACTION 'block') is set back to its old value here,
-    // so the test also proves its rollback changes only its own function or rule.
+    // name SIGNUP_FILTER_CHECK_EXPECTED_MODE (CB-07). Every value now ships flipped (VOTE_DAILY_CAP_MODE 'enforce',
+    // VERIFICATION_LIMITS_MODE 'enforce', VOTE_RESTAMP_MODE 'apply', SIGNUP_FILTER_MODE 'enforce',
+    // SIGNUP_RATE_LIMIT_ACTION 'block'), so each is set back to its old value here, and the test proves each rollback
+    // changes only its own function or rule.
     test("the flip PR's values change exactly the four functions' modes, the filter check's expected mode and the sign-up rule's action", () => {
       const flipped = synthUserApiWithAbuseLimits({
         VOTE_DAILY_CAP_MODE: "watch",
-        VERIFICATION_LIMITS_MODE: "enforce",
-        VOTE_RESTAMP_MODE: "apply",
+        VERIFICATION_LIMITS_MODE: "watch",
+        VOTE_RESTAMP_MODE: "plan",
         SIGNUP_FILTER_MODE: "watch",
         SIGNUP_RATE_LIMIT_ACTION: "count",
       });
@@ -1889,8 +1890,8 @@ describe("UserAPIServiceStack, account integrity", () => {
       });
       const flippedEnvironment = (functionName: string) => flipped.Resources[fnId(functionName)].Properties.Environment.Variables;
       expect(flippedEnvironment("SetFeedback")).toEqual({ ...environmentOf("SetFeedback"), VOTE_DAILY_CAP_MODE: "watch" });
-      expect(flippedEnvironment("DistrictVerification")).toEqual({ ...environmentOf("DistrictVerification"), VERIFICATION_LIMITS_MODE: "enforce" });
-      expect(flippedEnvironment("RestampUserVotes")).toEqual({ ...environmentOf("RestampUserVotes"), VOTE_RESTAMP_MODE: "apply" });
+      expect(flippedEnvironment("DistrictVerification")).toEqual({ ...environmentOf("DistrictVerification"), VERIFICATION_LIMITS_MODE: "watch" });
+      expect(flippedEnvironment("RestampUserVotes")).toEqual({ ...environmentOf("RestampUserVotes"), VOTE_RESTAMP_MODE: "plan" });
       expect(flippedEnvironment("PreSignUpCheck")).toEqual({ ...environmentOf("PreSignUpCheck"), SIGNUP_FILTER_MODE: "watch" });
       expect(flippedEnvironment("SignUpFilterCheck")).toEqual({
         ...environmentOf("SignUpFilterCheck"),
