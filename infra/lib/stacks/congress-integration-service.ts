@@ -58,6 +58,7 @@ import { BILLS_DIFFER_QUEUE_BATCH_SIZE,
   CONGRESS_API_REQUEST_TIMEOUT_MS,
   CONGRESS_VOTE_CALL_DELAY_MS,
   CONGRESS_VOTE_MAX_CALLS_PER_BILL,
+  OLDER_COPY_RECHECK,
   POLL_BILL_TYPES,
   POLL_CONGRESS,
   POLL_TARGETS,
@@ -254,6 +255,9 @@ export class CongressIntegrationServiceStack extends cdk.Stack {
         // REL-57: an unchanged poller refetch is logged and counted ('watch') or not stored ('on'). It compares with the
         // stored copy the carry already reads, so it needs no grant.
         REFETCH_UNCHANGED_MODE,
+        // REL-56 (2026-11-21): a poller message whose bill answer is older than its listing is sent back to
+        // UpdatedBillsQueue (TEXT_RETRY_QUEUE_URL, its send grant below) for a delayed re-check under 'on'.
+        OLDER_COPY_RECHECK,
         // REL-58: the retry ladder. FetchRawBill sets a failed record's visibility on the record's own queue (from its
         // eventSourceARN), which the consume grant below covers (sqs:ChangeMessageVisibility). The receive count is
         // the queue's maxReceiveCount, so the final receive is known.
@@ -278,7 +282,7 @@ export class CongressIntegrationServiceStack extends cdk.Stack {
     grantCloudWatchMetricNamespaceWrite(fetchRawBillFn, 'BillBoard/BillIngestion');
     // Receive, delete and, for REL-58's retry ladder, ChangeMessageVisibility.
     updatedBillsQueue.grantConsumeMessages(fetchRawBillFn);
-    // REL-45: the delayed bill text retry (TEXT_RETRY_QUEUE_URL).
+    // REL-45: the delayed bill text retry (TEXT_RETRY_QUEUE_URL); REL-56: the delayed older-copy re-check.
     updatedBillsQueue.grantSendMessages(fetchRawBillFn);
     this.billDifferQueue.grantSendMessages(fetchRawBillFn);
     this.billVoteEnrichmentQueue.grantSendMessages(fetchRawBillFn);

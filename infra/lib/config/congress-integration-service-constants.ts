@@ -200,6 +200,15 @@ export const BILL_XML_REFUSED_HOST_COOLDOWN_MS = 600000;
 // 'watch' are the rollback (docs/RUNBOOK.md 6.4).
 export const REFETCH_UNCHANGED_MODE: 'off' | 'watch' | 'on' = 'watch';
 
+// REL-56 (2026-11-21): congress.gov's bill answer can be older than its list. The poller lists a bill in the window
+// that holds its update, and the fetch a minute later gets the bill as it was before it: 739 of about 3,070 poller
+// fetches from 11-14 to 11-21, up to 48 minutes after the update, and 721 bills were left stored without it. 'on' sends
+// such a poller message back to UpdatedBillsQueue 15 minutes later, twice at most (TEXT_RETRY_QUEUE_URL and its send
+// grant, as the text retry): each re-check reads the bill's own answer (one call) and fetches the bill in full only when
+// it is newer than the stored copy (RawBillOlderThanListing, RawBillOlderCopyRecheck by Outcome). 'watch' only logs and
+// counts; 'off' compares nothing (the rollback, docs/RUNBOOK.md 6.6).
+export const OLDER_COPY_RECHECK: 'off' | 'watch' | 'on' = 'on';
+
 // EnrichOfficialVotes congress.gov budget and deferral
 export const CONGRESS_VOTE_CALL_DELAY_MS = 1500;
 export const CONGRESS_API_MAX_HOUSE_VOTE_PAGES = 2;
