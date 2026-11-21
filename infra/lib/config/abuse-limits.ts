@@ -90,13 +90,17 @@ export const VOTE_DAILY_CAP_MODE: 'watch' | 'enforce' = 'enforce';
 /** INT-03 (DistrictVerification): 'watch' writes the address claims and counters exactly as enforce does
  * but never caps an account and never answers 429; 'enforce' caps the verified account after
  * MAX_VERIFIED_ACCOUNTS_PER_ADDRESS at one address (self-attested, address_capped) and refuses an address change
- * after MAX_ADDRESS_CHANGES_PER_WINDOW in ADDRESS_CHANGE_WINDOW_DAYS. */
-export const VERIFICATION_LIMITS_MODE: 'watch' | 'enforce' = 'watch';
+ * after MAX_ADDRESS_CHANGES_PER_WINDOW in ADDRESS_CHANGE_WINDOW_DAYS. 'enforce' since the 2026-11 flip: in the
+ * watch period AddressCapSignal never fired. Rollback: 'watch' (claims and counters are kept, so a later flip
+ * starts from them). */
+export const VERIFICATION_LIMITS_MODE: 'watch' | 'enforce' = 'enforce';
 
 /** INT-03 re-stamp (RestampUserVotes, X8): 'plan' reads an account's votes and logs the rows it would
  * change (VotesRestampPlanned) without writing; 'apply' rewrites their verification stamp. DistrictVerification
- * enqueues in both modes. Flip no later than, and in the same PR as, VERIFICATION_LIMITS_MODE='enforce'. */
-export const VOTE_RESTAMP_MODE: 'plan' | 'apply' = 'plan';
+ * enqueues in both modes. Flip no later than, and in the same PR as, VERIFICATION_LIMITS_MODE='enforce'.
+ * 'apply' since the 2026-11 flip, after a plan-mode run for every account whose planned rows the project reviewed
+ * (docs/RUNBOOK.md 14.4). Rollback: 'plan' (rows already rewritten keep their new stamp). */
+export const VOTE_RESTAMP_MODE: 'plan' | 'apply' = 'apply';
 
 /** INT-05 (PreSignUpCheck): 'watch' lets every sign-up through and emits SignUpFilterHit on a disposable
  * domain or a second account on one base address; 'enforce' refuses them. Claims are written in both.
