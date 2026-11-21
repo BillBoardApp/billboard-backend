@@ -10,6 +10,8 @@ import {
   DEFAULT_CUTOFF,
   DEMO_KEY,
   JOURNAL_TITLE,
+  MAX_TYPE_LIST_REQUESTS,
+  MIN_SPLIT_SECONDS,
   POLLER_RELISTED_FROM,
   RuleWatch,
   StopError,
@@ -17,6 +19,7 @@ import {
   classifyByDetail,
   classifyRow,
   congressApiTime,
+  listPagedSlice,
   listType,
   parseArgs,
   parseJournal,
@@ -24,6 +27,8 @@ import {
   runSnapshot,
   withholdKey,
   type CongressHttpGet,
+  type ListedType,
+  type PagedListing,
   type SnapshotDeps,
   type SnapshotOptions,
 } from "../../scripts/listSkippedBillUpdates";
@@ -290,6 +295,168 @@ const seedStandard = (): World => {
     forced: new Map([[5, { status: 500, body: `{"error":"upstream ${KEY} broke"}` }]]),
   });
 };
+
+// ─── A congress.gov that filters by a hidden time ─────────────────────────────
+
+const HOUR_MS = 3_600_000;
+const TOP_MS = Date.parse(TOP);
+/** Two years before top: the window of the realistic lists. */
+const WIDE = { from: "2024-11-12T12:00:00.000Z", to: TOP };
+const iso = (ms: number) => new Date(ms).toISOString();
+
+/** congress.gov's rule at fromDateTime and toDateTime, which is not known: each is tested. */
+type BoundaryRule = "inclusive" | "from_exclusive" | "to_exclusive" | "exclusive";
+
+const inWindow = (rule: BoundaryRule, from: number, to: number, ms: number): boolean =>
+  (rule === "from_exclusive" || rule === "exclusive" ? ms > from : ms >= from) &&
+  (rule === "to_exclusive" || rule === "exclusive" ? ms < to : ms <= to);
+
+interface TimedRow {
+  row: Row;
+  /** The time the fromDateTime/toDateTime filter goes by, in milliseconds; the row itself shows a date alone. */
+  ms: number;
+}
+
+interface TimedGov {
+  rows: TimedRow[];
+  rule: BoundaryRule;
+  /** "shuffled": each request sees another order, seeded by its number; "stable": the order of `rows`. */
+  order: "shuffled" | "stable";
+  /** Times of rows congress.gov counts but never lists. */
+  ghosts: number[];
+  /** Answers without pagination. */
+  noCount: boolean;
+  /** Called before each request is answered, with its number (1-based): rows move between requests here. */
+  before: (request: number) => void;
+  /** Changes the rows of an answer before it is sent. */
+  edit: (bills: Row[], request: number, count: number) => Row[];
+  calls: URL[];
+}
+
+/** A seeded generator (mulberry32): the same numbers for the same seed, so every run of a test is the same. */
+const seeded = (seed: number) => {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+  };
+};
+
+const shuffle = <T>(items: readonly T[], seed: number): T[] => {
+  const random = seeded(seed);
+  const out = [...items];
+  for (let index = out.length - 1; index > 0; index -= 1) {
+    const other = Math.floor(random() * (index + 1));
+    [out[index], out[other]] = [out[other], out[index]];
+  }
+  return out;
+};
+
+/**
+ * congress.gov's bill list as it was measured: each row has a hidden time that fromDateTime and toDateTime filter by
+ * (under `rule`), offset and limit page the rows in the window, pagination.count counts them, and the order follows
+ * no field, changing from request to request.
+ */
+const timedGov = (rows: TimedRow[], settings: Partial<Omit<TimedGov, "rows" | "calls">> = {}) => {
+  const gov: TimedGov = {
+    rows,
+    rule: "inclusive",
+    order: "shuffled",
+    ghosts: [],
+    noCount: false,
+    before: () => undefined,
+    edit: (bills) => bills,
+    calls: [],
+    ...settings,
+  };
+  const httpGet: CongressHttpGet = async (url) => {
+    const parsed = new URL(url);
+    gov.calls.push(parsed);
+    const request = gov.calls.length;
+    gov.before(request);
+    const from = Date.parse(parsed.searchParams.get("fromDateTime")!);
+    const to = Date.parse(parsed.searchParams.get("toDateTime")!);
+    const matching = gov.rows.filter((entry) => inWindow(gov.rule, from, to, entry.ms));
+    const ordered = gov.order === "shuffled" ? shuffle(matching, request) : matching;
+    const offset = Number(parsed.searchParams.get("offset"));
+    const limit = Number(parsed.searchParams.get("limit"));
+    const count = matching.length + gov.ghosts.filter((ms) => inWindow(gov.rule, from, to, ms)).length;
+    const bills = gov.edit(
+      ordered.slice(offset, offset + limit).map((entry) => entry.row),
+      request,
+      count,
+    );
+    return { status: 200, body: JSON.stringify(gov.noCount ? { bills } : { bills, pagination: { count } }) };
+  };
+  return { gov, httpGet };
+};
+
+const timedRow = (number: number, ms: number): TimedRow => ({ row: row("hr", number, iso(ms).slice(0, 10)), ms });
+
+/** A row that names no bill (no number), told apart from the others by its title. */
+const noBill = (title: string, ms: number): TimedRow => ({
+  row: { ...row("hr", 1, iso(ms).slice(0, 10)), number: undefined, title },
+  ms,
+});
+
+/** hr rows numbered from 1, each group's times spread over [from, to), in milliseconds. */
+const timedRows = (seed: number, ...groups: Array<{ rows: number; from: number; to: number }>): TimedRow[] => {
+  const random = seeded(seed);
+  let number = 0;
+  return groups.flatMap(({ rows, from, to }) =>
+    Array.from({ length: rows }, () => timedRow((number += 1), from + Math.floor(random() * (to - from)))),
+  );
+};
+
+/** The realistic shape: 3,000 rows, 2,600 within one day that ends 12 hours before top, the rest over two years. */
+const realisticRows = (): TimedRow[] =>
+  timedRows(
+    1,
+    { rows: 2_600, from: TOP_MS - 36 * HOUR_MS, to: TOP_MS - 12 * HOUR_MS },
+    { rows: 400, from: Date.parse(WIDE.from), to: TOP_MS },
+  );
+
+const guidOf = (entry: TimedRow) => `BILLS-119hr${String(entry.row.number)}`;
+const guidsOf = (entries: readonly TimedRow[]) => entries.map(guidOf).sort();
+const listedGuids = (listed: ListedType | PagedListing) => [...listed.rows.keys()].sort();
+
+/** A reader run against a fake congress.gov: what it listed or its stop, and its log lines. */
+const attempt = async <T>(
+  read: (client: CongressClient, deps: { log: (line: string) => void; sleep: () => Promise<void> }) => Promise<T>,
+  httpGet: CongressHttpGet,
+) => {
+  const lines: string[] = [];
+  const client = new CongressClient({
+    key: KEY,
+    httpGet,
+    perHour: 4000,
+    maxRequests: null,
+    now: () => new Date(START),
+    sleep: async () => undefined,
+    scrub: (line) => line,
+  });
+  try {
+    const listed = await read(client, { log: (line) => lines.push(line), sleep: async () => undefined });
+    return { listed, stop: null, lines, text: lines.join("\n") };
+  } catch (error) {
+    if (!(error instanceof StopError)) throw error;
+    return { listed: null, stop: error, lines, text: lines.join("\n") };
+  }
+};
+
+/** listType: the sliced listing of hr over `window`. */
+const sliced = (httpGet: CongressHttpGet, window = WIDE) =>
+  attempt((client, deps) => listType(client, "119", "hr", window, deps), httpGet);
+
+/** listPagedSlice: the paging reader over `window`, as listType uses it for a slice too narrow to split. */
+const paged = (httpGet: CongressHttpGet, window = WIDE) =>
+  attempt((client, deps) => listPagedSlice(client, "119", "hr", window, deps), httpGet);
+
+/** The paging reader over the standard fake congress.gov, from the default cutoff to top. */
+const readPages = (world: World) => paged(congressGov(world), { from: DEFAULT_CUTOFF, to: TOP });
 
 beforeEach(() => {
   mockS3 = new FakeVersionedS3();
@@ -646,16 +813,22 @@ describe("the snapshot", () => {
     }
   });
 
-  it("lists each type over the cutoff to the start, newest first, 250 rows a page at offsets 0, 225, 450", async () => {
+  it("asks for each type's whole window first, and the paging reader reads 250 rows a page at offsets 0, 225, 450", async () => {
     const rows = Array.from({ length: 500 }, (_, index) => row("hr", 20_000 - index, "2026-10-01"));
-    const world = newWorld({ lists: { hr: rows } });
-    const { result } = await run(world, { types: ["hr"], countOnly: true });
+    const paging = newWorld({ lists: { hr: rows } });
+    const { listed } = await readPages(paging);
+    expect(listed!.rows.size).toBe(500);
+    expect(listCalls(paging).map((call) => Number(call.url.searchParams.get("offset")))).toEqual([0, 225, 450]);
+    // The run's first request for each type is the whole window [cutoff, top] at offset 0, as the paging reader's is.
+    const world = seedStandard();
+    const { result } = await run(world, { types: ["hr", "s"], countOnly: true });
     expect(result.outcome).toBe("done");
-    expect(result.counts.missing).toBe(500);
-    const calls = listCalls(world);
-    expect(calls.map((call) => Number(call.url.searchParams.get("offset")))).toEqual([0, 225, 450]);
-    for (const call of calls) {
-      expect(call.url.pathname).toBe("/v3/bill/119/hr");
+    expect(listCalls(world).map((call) => [call.url.pathname, call.url.searchParams.get("offset")])).toEqual([
+      ["/v3/bill/119/hr", "0"],
+      ["/v3/bill/119/s", "0"],
+    ]);
+    for (const call of [...listCalls(paging), ...listCalls(world)]) {
+      expect(call.url.pathname).toMatch(/^\/v3\/bill\/119\/(hr|s)$/);
       expect(Object.fromEntries(call.url.searchParams)).toEqual({
         fromDateTime: "2026-03-05T00:00:00Z",
         toDateTime: "2026-11-12T12:00:00Z",
@@ -670,7 +843,7 @@ describe("the snapshot", () => {
     expect(congressApiTime("2026-03-05T00:00:00.000Z")).toBe("2026-03-05T00:00:00Z");
   });
 
-  it("still reads a row when rows leave the window between pages, thanks to the overlap", async () => {
+  it("the paging reader still reads a row when rows leave the window between pages, thanks to the overlap", async () => {
     const rows = Array.from({ length: 480 }, (_, index) => row("hr", 20_000 - index, "2026-10-01"));
     const world = newWorld({
       lists: { hr: rows },
@@ -679,15 +852,15 @@ describe("the snapshot", () => {
         if (type === "hr" && offset === 0) world.gov.lists.hr = rows.slice(10);
       },
     });
-    const { result } = await run(world, { types: ["hr"], countOnly: true });
-    expect(result).toMatchObject({ exitCode: 0, outcome: "done" });
+    const { listed, stop } = await readPages(world);
+    expect(stop).toBeNull();
     // Every one of the 480 was read: the 10 on the first page, and the 470 still there. The second page (offset 225)
     // starts at the 236th row of the first reading; at offset 250 it would have stepped over 10 rows.
-    expect(result.counts.missing).toBe(480);
+    expect(listed!.rows.size).toBe(480);
     expect(listCalls(world).map((call) => Number(call.url.searchParams.get("offset")))).toEqual([0, 225]);
   });
 
-  it("steps back a page when more rows leave above the offset than the overlap covers, and reads every row", async () => {
+  it("the paging reader steps back a page when more rows leave above the offset than the overlap covers", async () => {
     // Review probe (REL-56 backfill): 700 never-stored rows; after the page at offset 225, the 40 newest are updated
     // again (after top) and leave the window, so every row below moves up 40, more than the 25-row overlap. Without the
     // continuity check the page at 450 began at the 491st row: the 15 rows from 476 to 490 were never read, and the last
@@ -699,9 +872,8 @@ describe("the snapshot", () => {
         if (type === "hr" && offset === 225 && world.gov.lists.hr.length === 700) world.gov.lists.hr = rows.slice(40);
       },
     });
-    const { result, text } = await run(world, { types: ["hr"], countOnly: true });
-    expect(result).toMatchObject({ exitCode: 0, outcome: "done" });
-    expect(result.counts.missing).toBe(700);
+    const { listed, text } = await readPages(world);
+    expect(listed!.rows.size).toBe(700);
     // The page at 450 shared no row with the end of the page at 225: back to 225, then on.
     expect(listCalls(world).map((call) => Number(call.url.searchParams.get("offset")))).toEqual([
       0, 225, 450, 225, 450,
@@ -710,10 +882,10 @@ describe("the snapshot", () => {
       "hr: the page at offset 450 shares no row with the end of the page before (rows left the window above it); " +
         "reading again from offset 225",
     );
-    expect(text).toContain("hr: 700 rows in 5 pages (pagination.count 660, 1 step back)");
+    expect(listed).toMatchObject({ pages: 5, count: 660, stepBacks: 1, reads: 1 });
   });
 
-  it("starts the next page earlier by as many rows as the count dropped between two pages", async () => {
+  it("the paging reader starts the next page earlier by as many rows as the count dropped between two pages", async () => {
     const rows = Array.from({ length: 900 }, (_, index) => row("hr", 20_000 - index, "2026-10-01"));
     const world = newWorld({
       lists: { hr: rows },
@@ -724,14 +896,13 @@ describe("the snapshot", () => {
         if (type === "hr" && offset === 0) world.gov.lists.hr = rows.slice(20);
       },
     });
-    const { result, text } = await run(world, { types: ["hr"], countOnly: true });
-    expect(result).toMatchObject({ exitCode: 0, outcome: "done" });
-    expect(result.counts.missing).toBe(900);
+    const { listed, text } = await readPages(world);
+    expect(listed!.rows.size).toBe(900);
     expect(listCalls(world).map((call) => Number(call.url.searchParams.get("offset")))).toEqual([0, 225, 430, 655]);
     expect(text).not.toContain("shares no row");
   });
 
-  it("stops (count_short) when the pages do not join up in either reading", async () => {
+  it("the paging reader stops (count_short) when the pages do not join up in either reading", async () => {
     // After every page at offset 675 the whole list is replaced by other bills: the pages after it never share a row
     // with the end of the page before, two steps back do not mend it, and the second reading fares the same.
     const listOf = (generation: number) =>
@@ -743,9 +914,9 @@ describe("the snapshot", () => {
         if (type === "hr" && offset === 675) world.gov.lists.hr = listOf((generation += 1));
       },
     });
-    const { result, text } = await run(world, { types: ["hr"] });
-    expect(result).toMatchObject({ exitCode: 2, outcome: "stopped_count_short", file: null });
-    expect(result.stop!.detail).toBe(
+    const { stop, text } = await readPages(world);
+    expect(stop).toMatchObject({ reason: "count_short" });
+    expect(stop!.message).toBe(
       "hr: read twice, and the pages did not join up after 2 steps back (rows kept leaving the window); rows between " +
         "two pages may not have been read. Run again later.",
     );
@@ -755,10 +926,9 @@ describe("the snapshot", () => {
     const offsets = listCalls(world).map((call) => Number(call.url.searchParams.get("offset")));
     // Each reading: 0, 225, 450, 675, then 900 shares nothing, back to 675 and 450, still nothing.
     expect(offsets).toEqual([0, 225, 450, 675, 900, 675, 450, 0, 225, 450, 675, 900, 675, 450]);
-    expect(parseJournal(world.files.get(JOURNAL)!).listed.size).toBe(0);
   });
 
-  it("reads a type again when rows left the window before they were read, and passes the second on its own count", async () => {
+  it("the paging reader reads again when rows left the window before they were read, and passes the second on its own count", async () => {
     const rows = Array.from({ length: 500 }, (_, index) => row("hr", 20_000 - index, "2026-10-01"));
     // In the first reading, 10 rows below the page being read are updated again (they leave the window): it lists 490
     // of the 500 its first page counts. The second lists all 490 its first page counts.
@@ -770,12 +940,11 @@ describe("the snapshot", () => {
         world.gov.lists.hr = world.gov.lists.hr.filter((entry) => !rows.slice(480, 490).includes(entry));
       },
     });
-    const { result, text } = await run(world, { types: ["hr"], countOnly: true });
-    expect(result).toMatchObject({ exitCode: 0, outcome: "done" });
+    const { listed, text } = await readPages(world);
     expect(text).toContain("hr: read 490 distinct rows but congress.gov counts 500; reading it once more");
     // Every row still in the window (the 10 that left before the first reading reached them are the poller's).
-    expect(result.counts.missing).toBe(490);
-    expect(text).toContain("hr: 490 rows in 6 pages (pagination.count 490, read twice)");
+    expect(listed!.rows.size).toBe(490);
+    expect(listed).toMatchObject({ pages: 6, count: 490, reads: 2 });
 
     // Rows leave in both readings: the second lists 485 of the 490 its first page counts. Its last page counts 485,
     // but against that count a row read before it left makes up for a row the reading missed (the next test): stop.
@@ -789,14 +958,14 @@ describe("the snapshot", () => {
         both.gov.lists.hr = both.gov.lists.hr.filter((entry) => !leaving.includes(entry));
       },
     });
-    const stopped = await run(both, { types: ["hr"], countOnly: true });
-    expect(stopped.result).toMatchObject({ exitCode: 2, outcome: "stopped_count_short" });
-    expect(stopped.result.stop!.detail).toBe(
+    const stopped = await readPages(both);
+    expect(stopped.stop).toMatchObject({ reason: "count_short" });
+    expect(stopped.stop!.message).toBe(
       "hr: read 485 distinct rows twice, but congress.gov counts 490; rows may have moved between pages. Run again later.",
     );
   });
 
-  it("does not pass a second reading in which a row that left makes up for a row a changed order hid", async () => {
+  it("the paging reader does not pass a second reading in which a row that left makes up for a row a changed order hid", async () => {
     // Review probe (round 2): 500 never-stored rows with the same time. Each request after a page at offset 0 sees
     // rows[100] and rows[300] swapped, so both readings miss rows[300] (BILLS-119hr19700), in the window throughout.
     // In the second, rows[5], already read, is updated again and leaves: the last page counts 499, as many as the
@@ -819,13 +988,13 @@ describe("the snapshot", () => {
         world.gov.lists.hr = offset === 0 ? swap(current) : current;
       },
     });
-    const { result, text } = await run(world, { types: ["hr"], countOnly: true });
+    const { stop, text } = await readPages(world);
     expect(text).toContain("hr: read 499 distinct rows but congress.gov counts 500; reading it once more");
-    expect(result).toMatchObject({ exitCode: 2, outcome: "stopped_count_short" });
-    expect(result.stop!.detail).toContain("hr: read 499 distinct rows twice, but congress.gov counts 500");
+    expect(stop).toMatchObject({ reason: "count_short" });
+    expect(stop!.message).toContain("hr: read 499 distinct rows twice, but congress.gov counts 500");
   });
 
-  it("counts a row that names no bill once, though the overlap of two pages reads it twice", async () => {
+  it("the paging reader counts a row that names no bill once, though the overlap of two pages reads it twice", async () => {
     // Review probe (round 2): a row with no number at 230 is on the pages at 0 and 225. Counted twice, it made up for
     // rows[300] (BILLS-119hr19700), which a changed order hid from the first reading: 498 + 2 met the count of 500,
     // and the run ended "done" without it. Counted once, the first reading is short and the second lists it.
@@ -841,15 +1010,15 @@ describe("the snapshot", () => {
         if (type === "hr") world.gov.lists.hr = offset === 0 && (page0 += 1) === 1 ? swapped : rows;
       },
     });
-    const { result, text } = await run(world, { types: ["hr"], countOnly: true });
+    const { listed, text } = await readPages(world);
     expect(text).toContain("hr: read 499 distinct rows but congress.gov counts 500; reading it once more");
-    expect(result).toMatchObject({ exitCode: 0, outcome: "done" });
-    expect(text).toContain("hr: 499 rows in 6 pages (pagination.count 500, 1 naming no hr bill, read twice)");
-    expect(result.rows.map((entry) => entry.guid)).toContain("BILLS-119hr19700");
-    expect(result.counts.missing).toBe(499);
+    expect(listed).toMatchObject({ pages: 6, count: 500, reads: 2 });
+    expect(listed!.unnamed.size).toBe(1);
+    expect(listed!.rows.has("BILLS-119hr19700")).toBe(true);
+    expect(listed!.rows.size).toBe(499);
   });
 
-  it("keeps a row only the second reading found, and stops when that reading is short of its own count", async () => {
+  it("the paging reader keeps a row only the second reading found, and stops when that reading is short of its own count", async () => {
     // In the first reading the list's order changes between two pages (rows with the same time): the row at 300 swaps
     // with the row at 100, already read, so the first reading never sees it.
     const rows = Array.from({ length: 500 }, (_, index) => row("hr", 20_000 - index, "2026-10-01"));
@@ -862,10 +1031,9 @@ describe("the snapshot", () => {
         if (type === "hr" && offset === 0 && (page0 += 1) === 1) world.gov.lists.hr = swapped;
       },
     });
-    const { result, text } = await run(world, { types: ["hr"], countOnly: true });
+    const { listed, text } = await readPages(world);
     expect(text).toContain("hr: read 499 distinct rows but congress.gov counts 500; reading it once more");
-    expect(result).toMatchObject({ exitCode: 0, outcome: "done" });
-    expect(result.counts.missing).toBe(500);
+    expect(listed!.rows.size).toBe(500);
 
     // The same, but rows also leave while the second reading is read: it found a row the first lacked, so only its own
     // first count can pass it, and it is short.
@@ -880,18 +1048,25 @@ describe("the snapshot", () => {
         if (offset === 225 && secondReading) short.gov.lists.hr = swapped.slice(0, 490);
       },
     });
-    const stopped = await run(short, { types: ["hr"], countOnly: true });
-    expect(stopped.result).toMatchObject({ exitCode: 2, outcome: "stopped_count_short" });
-    expect(stopped.result.stop!.detail).toContain("hr: read 490 distinct rows twice, but congress.gov counts 500");
+    const stopped = await readPages(short);
+    expect(stopped.stop).toMatchObject({ reason: "count_short" });
+    expect(stopped.stop!.message).toContain("hr: read 490 distinct rows twice, but congress.gov counts 500");
   });
 
-  it("reads a type once more when it read fewer rows than congress.gov counts, then stops naming it", async () => {
+  it("asks for a slice once more when it lists fewer rows than congress.gov counts, then stops naming the slice", async () => {
     const world = newWorld({ lists: { hr: [row("hr", 1, "2026-10-01")], s: [row("s", 1, "2026-10-01")] } });
     world.gov.countExtra.s = 3;
     const { result, text } = await run(world, { types: ["hr", "s"] });
     expect(result).toMatchObject({ exitCode: 2, outcome: "stopped_count_short", file: null });
-    expect(result.stop!.detail).toContain("s: read 1 distinct rows twice, but congress.gov counts 4");
-    expect(text).toContain("s: read 1 distinct rows but congress.gov counts 4; reading it once more");
+    expect(result.stop!.detail).toBe(
+      "s from 2026-03-05T00:00:00Z to 2026-11-12T12:00:00Z: read twice, and congress.gov counts 4 rows but listed 1 " +
+        "(1 distinct); rows it counts may not have been listed. Run again later.",
+    );
+    expect(text).toContain(
+      "s from 2026-03-05T00:00:00Z to 2026-11-12T12:00:00Z: congress.gov counts 4 rows but listed 1 (1 distinct); " +
+        "reading it once more",
+    );
+    expect(text).toContain("  hr: 1 row in 1 slice, 1 request (pagination.count 1 at the start)");
     expect(listCalls(world).map((call) => call.url.pathname)).toEqual([
       "/v3/bill/119/hr",
       "/v3/bill/119/s",
@@ -902,13 +1077,20 @@ describe("the snapshot", () => {
     expect([...journal.listed.keys()]).toEqual(["hr"]);
     expect(world.files.has(OUT)).toBe(false);
 
-    // A count that drops on the second reading (rows left the window) passes.
+    // A count that drops on the second answer (rows left the window) passes, once the whole window, counted again,
+    // counts no more rows than were listed; the type's line counts them.
     const recovers = newWorld({ lists: { s: [row("s", 1, "2026-10-01")] } });
     recovers.gov.countExtra.s = 3;
     recovers.gov.afterPage = () => (recovers.gov.countExtra.s = 0);
     const second = await run(recovers, { types: ["s"], countOnly: true });
     expect(second.result.outcome).toBe("done");
-    expect(listCalls(recovers)).toHaveLength(2);
+    const recoverCalls = listCalls(recovers);
+    expect(recoverCalls).toHaveLength(3);
+    expect(new Set(recoverCalls.map((call) => call.url.search)).size).toBe(1);
+    expect(second.text).toContain(
+      "  s: 1 row in 1 slice, 3 requests (pagination.count 4 at the start); 3 updated again since top (the poller " +
+        "lists them)",
+    );
   });
 
   it("paces requests to --per-hour, detail requests in flight at once included", async () => {
@@ -1070,12 +1252,16 @@ describe("the snapshot", () => {
   });
 
   it("checks the poller rule every 100 requests among the detail requests, and sends none waiting after a window", async () => {
-    const numbers = Array.from({ length: 300 }, (_, index) => 1_000 + index);
-    for (const number of numbers) store(`BILLS-119hr${number}`, "2026-10-20T08:00:00Z");
+    // 150 same-date bills of each of two types (each type one answer of the list), so 300 detail requests.
+    const numbers = Array.from({ length: 150 }, (_, index) => 1_000 + index);
+    const types = ["hr", "s"];
+    for (const type of types) for (const number of numbers) store(`BILLS-119${type}${number}`, "2026-10-20T08:00:00Z");
     const world = newWorld({
-      lists: { hr: numbers.map((number) => row("hr", number, "2026-10-20")) },
+      lists: Object.fromEntries(types.map((type) => [type, numbers.map((number) => row(type, number, "2026-10-20"))])),
       details: Object.fromEntries(
-        numbers.map((number) => [`BILLS-119hr${number}`, { updateDate: "2026-10-20T15:00:00Z" }]),
+        types.flatMap((type) =>
+          numbers.map((number) => [`BILLS-119${type}${number}`, { updateDate: "2026-10-20T15:00:00Z" }]),
+        ),
       ),
     });
     // The window opens once 150 detail requests have been answered.
@@ -1087,13 +1273,14 @@ describe("the snapshot", () => {
     };
     const { result } = await run(
       world,
-      { types: ["hr"], perHour: 1500, concurrency: 8 },
+      { types: ["hr", "s"], perHour: 1500, concurrency: 8 },
       { httpGet, sleep: timerSleep(world) },
     );
     expect(result).toMatchObject({ exitCode: 2, outcome: "stopped_window_open", file: null });
-    // Checks: the preflight, before the details, then after 100 and 200 detail requests had started. The last finds
-    // the window: of those 200, the 7 still waiting for their turn (8 in flight at once) are not sent.
-    expect(world.cliCalls.filter((args) => args[1] === "describe-rule")).toHaveLength(4);
+    // Checks: the preflight, before s is listed, before the details, then after 100 and 200 detail requests had
+    // started. The last finds the window: of those 200, the 7 still waiting for their turn (8 in flight at once) are
+    // not sent.
+    expect(world.cliCalls.filter((args) => args[1] === "describe-rule")).toHaveLength(5);
     const asked = detailCalls(world).length;
     expect(asked).toBe(193);
     expect(result.requests).toBe(2 + asked);
@@ -1103,7 +1290,11 @@ describe("the snapshot", () => {
     // After the window: the rest only, each asked once.
     world.ruleState = "ENABLED";
     const before = world.gov.calls.length;
-    const second = await run(world, { types: ["hr"], perHour: 1500, concurrency: 8 }, { sleep: timerSleep(world) });
+    const second = await run(
+      world,
+      { types: ["hr", "s"], perHour: 1500, concurrency: 8 },
+      { sleep: timerSleep(world) },
+    );
     expect(second.result).toMatchObject({ exitCode: 0, outcome: "done" });
     expect(world.gov.calls.length - before).toBe(300 - asked);
     expect(second.result.counts.stale_same_day).toBe(300);
@@ -1157,14 +1348,15 @@ describe("the snapshot", () => {
     const recovered = await run(world, { types: ["hr"], countOnly: true });
     expect(recovered.result.outcome).toBe("done");
     expect(recovered.text).toContain(
-      "hr at offset 0: congress.gov answered 503 for /v3/bill/119/hr: busy; trying again (2 of 3)",
+      "hr from 2026-03-05T00:00:00Z to 2026-11-12T12:00:00Z: congress.gov answered 503 for /v3/bill/119/hr: busy; " +
+        "trying again (2 of 3)",
     );
 
     const broken = seedStandard();
     broken.gov.forced = new Map([1, 2, 3].map((n) => [n, { status: 502, body: "bad gateway" }]));
     const { result } = await run(broken, { types: ["hr"], countOnly: true });
     expect(result).toMatchObject({ exitCode: 2, outcome: "stopped_list_failed" });
-    expect(result.stop!.detail).toContain("hr at offset 0 failed 3 times");
+    expect(result.stop!.detail).toContain("hr from 2026-03-05T00:00:00Z to 2026-11-12T12:00:00Z failed 3 times");
     expect(broken.gov.calls).toHaveLength(3);
   });
 
@@ -1280,6 +1472,419 @@ describe("the snapshot", () => {
   });
 });
 
+// ─── The sliced listing ───────────────────────────────────────────────────────
+
+describe("the sliced listing", () => {
+  it("lists every row once from a list whose order changes with every request, where the paging reader misses rows", async () => {
+    // As measured: hr's order followed no field, and offset paging over it dropped rows while none left the window.
+    const rows = realisticRows();
+    const { gov, httpGet } = timedGov(rows);
+    const { listed, stop, text } = await sliced(httpGet);
+    expect(stop).toBeNull();
+    expect(listedGuids(listed!)).toEqual(guidsOf(rows));
+    expect(listed).toMatchObject({ count: 3_000, unnamed: 0, paged: 0, left: 0, requests: gov.calls.length });
+    // One answer a slice: no page past the first, nothing asked again, nothing to log.
+    expect(gov.calls.every((call) => call.searchParams.get("offset") === "0")).toBe(true);
+    expect(text).toBe("");
+
+    // The paging reader on the same list: its pages miss rows, and its checks stop it.
+    const paging = await paged(timedGov(rows).httpGet);
+    expect(paging.stop).toMatchObject({ reason: "count_short" });
+    const read = Number(paging.stop!.message.match(/^hr: read (\d+) distinct rows twice/)?.[1]);
+    expect(read).toBeLessThan(3_000);
+
+    // The run: done, every row listed, and the type's line.
+    const { result, lines } = await run(
+      newWorld(),
+      { types: ["hr"], countOnly: true, cutoff: WIDE.from },
+      { httpGet: timedGov(rows).httpGet },
+    );
+    expect(result).toMatchObject({ exitCode: 0, outcome: "done" });
+    expect(result.counts.missing).toBe(3_000);
+    expect(lines).toContain(
+      `  hr: 3000 rows in ${listed!.slices} slices, ${listed!.requests} requests (pagination.count 3000 at the start)`,
+    );
+  });
+
+  it.each<BoundaryRule>(["inclusive", "from_exclusive", "to_exclusive", "exclusive"])(
+    "misses no row on a split point when congress.gov's bounds are %s",
+    async (rule) => {
+      // A window of 4,096 seconds and 1,200 rows: the window, its halves and their halves count more than 250 each and
+      // are split; the 8 slices below them count about 150 each. 3 rows sit exactly on each second the slices meet at
+      // (m and m + 1 of each split), 3 halfway between the two, and 3 on each end of the window.
+      const start = Date.parse("2026-11-01T00:00:00.000Z");
+      const at = (seconds: number) => start + seconds * 1000;
+      const window = { from: iso(at(0)), to: iso(at(4_096)) };
+      const splits: Array<[number, number]> = [];
+      const leaves: Array<[number, number]> = [];
+      const walk = (a: number, b: number, depth: number) => {
+        if (depth === 3) return void leaves.push([a, b]);
+        splits.push([a, b]);
+        const m = a + Math.floor((b - a) / 2);
+        walk(a, m + 1, depth + 1);
+        walk(m, b, depth + 1);
+      };
+      walk(0, 4_096, 0);
+      const points = [
+        0,
+        4_096,
+        ...splits.flatMap(([a, b]) => {
+          const m = a + Math.floor((b - a) / 2);
+          return [m, m + 0.5, m + 1];
+        }),
+      ];
+      const placed = points.flatMap((seconds, index) =>
+        [0, 1, 2].map((copy) => timedRow(50_000 + index * 3 + copy, at(seconds))),
+      );
+      const rows = [...timedRows(4, { rows: 1_200 - placed.length, from: at(0), to: at(4_096) }), ...placed];
+      const { gov, httpGet } = timedGov(rows, { rule });
+      const { listed, stop } = await sliced(httpGet, window);
+      expect(stop).toBeNull();
+      const inside = rows.filter((entry) => inWindow(rule, at(0), at(4_096), entry.ms));
+      expect(listedGuids(listed!)).toEqual(guidsOf(inside));
+      expect(listed).toMatchObject({ count: inside.length, left: 0, slices: 8, requests: 15 });
+      // The 8 slices were asked for as the splits say, so the placed rows sat on their bounds.
+      const asked = gov.calls.map((call) => [
+        call.searchParams.get("fromDateTime"),
+        call.searchParams.get("toDateTime"),
+      ]);
+      for (const [a, b] of leaves)
+        expect(asked).toContainEqual([congressApiTime(iso(at(a))), congressApiTime(iso(at(b)))]);
+    },
+  );
+
+  it("leaves out rows updated again during the listing, without a stop, and the type's line counts them", async () => {
+    const rows = realisticRows();
+    const updateAgain = (entries: TimedRow[]) => {
+      for (const entry of entries) {
+        entry.ms = TOP_MS + 60_000;
+        entry.row = { ...entry.row, updateDate: "2026-11-12" };
+      }
+    };
+    // 40 rows of the dense day are updated again once the whole window has been counted, 20 more later on (some of
+    // them may have been listed by then).
+    const early = rows.slice(0, 40);
+    const later = rows.slice(1_000, 1_020);
+    const { httpGet } = timedGov(rows, {
+      before: (request) => {
+        if (request === 2) updateAgain(early);
+        if (request === 12) updateAgain(later);
+      },
+    });
+    const { result, lines } = await run(newWorld(), { types: ["hr"], countOnly: true, cutoff: WIDE.from }, { httpGet });
+    expect(result).toMatchObject({ exitCode: 0, outcome: "done", stop: null });
+    const listed = new Set(result.rows.map((entry) => entry.guid));
+    expect(early.map(guidOf).filter((guid) => listed.has(guid))).toEqual([]);
+    const stayed = rows.filter((entry) => !early.includes(entry) && !later.includes(entry));
+    expect(stayed.map(guidOf).filter((guid) => !listed.has(guid))).toEqual([]);
+    const left = 3_000 - listed.size;
+    expect(left).toBeGreaterThanOrEqual(40);
+    expect(left).toBeLessThanOrEqual(60);
+    expect(lines).toContainEqual(
+      expect.stringMatching(
+        new RegExp(
+          `^  hr: ${listed.size} rows in \\d+ slices, \\d+ requests \\(pagination\\.count 3000 at the start\\); ` +
+            `${left} updated again since top \\(the poller lists them\\)$`,
+        ),
+      ),
+    );
+  });
+
+  it("stops (count_short) when a row enters the window during the listing", async () => {
+    // No row should: a time is set when a bill is updated, and that is after top. More rows than the first count are
+    // the evidence that one did, and the slices may then have missed one.
+    const rows = realisticRows();
+    const { httpGet } = timedGov(rows, {
+      before: (request) => {
+        if (request === 2) rows.push(timedRow(9_999, TOP_MS - 20 * HOUR_MS));
+      },
+    });
+    const { stop } = await sliced(httpGet);
+    expect(stop).toMatchObject({ reason: "count_short" });
+    expect(stop!.message).toBe(
+      "hr: listed 3001 distinct rows, more than the 3000 congress.gov counted at the start: a row entered the window " +
+        "during the listing, which the slices assume cannot happen, so they may have missed a row. Run again later.",
+    );
+  });
+
+  it("stops (count_short) when a row that names no bill enters the window during the listing", async () => {
+    const rows = realisticRows();
+    const { httpGet } = timedGov(rows, {
+      before: (request) => {
+        if (request === 2) rows.push(noBill("No number", TOP_MS - 20 * HOUR_MS));
+      },
+    });
+    const { stop } = await sliced(httpGet);
+    expect(stop).toMatchObject({ reason: "count_short" });
+    expect(stop!.message).toMatch(/^hr: listed 3001 distinct rows, more than the 3000 congress\.gov counted/);
+  });
+
+  it("counts the whole window again when rows are missing, and stops (count_short) when it still counts more", async () => {
+    // Every answer that counts at most 250 leaves one row out of both its bills and its count: each slice passes its
+    // own check, and the rows listed are fewer than the first count, as when rows are updated again since top. Only
+    // the second count of the whole window, which still counts the row, tells the two apart.
+    const rows = realisticRows();
+    const hidden = rows[1_234].row.number;
+    const { gov, httpGet } = timedGov(rows);
+    const hiding: CongressHttpGet = async (url, headers) => {
+      const answer = await httpGet(url, headers);
+      const body = JSON.parse(answer.body) as { bills: Row[]; pagination: { count: number } };
+      if (body.pagination.count > 250 || !body.bills.some((bill) => bill.number === hidden)) return answer;
+      const bills = body.bills.filter((bill) => bill.number !== hidden);
+      return {
+        status: answer.status,
+        body: JSON.stringify({ bills, pagination: { count: body.pagination.count - 1 } }),
+      };
+    };
+    const { stop } = await sliced(hiding);
+    expect(stop).toMatchObject({ reason: "count_short" });
+    expect(stop!.message).toBe(
+      "hr: congress.gov still counts 3000 rows in the window, but only 2999 were listed: an answer left out a row it " +
+        "should have counted, or the slices did not cover the window. Run again later.",
+    );
+    const whole = [congressApiTime(WIDE.from), congressApiTime(WIDE.to)];
+    const last = gov.calls[gov.calls.length - 1];
+    expect([last.searchParams.get("fromDateTime"), last.searchParams.get("toDateTime")]).toEqual(whole);
+
+    // Rows updated again during the listing lower the second count with them: no stop, and they are counted as left.
+    const moving = realisticRows();
+    const left = timedGov(moving, {
+      before: (request) => {
+        if (request === 2) for (const entry of moving.slice(0, 40)) entry.ms = TOP_MS + 60_000;
+      },
+    });
+    const passes = await sliced(left.httpGet);
+    expect(passes.stop).toBeNull();
+    expect(passes.listed).toMatchObject({ count: 3_000, finalCount: 2_960, left: 40, requests: left.gov.calls.length });
+    expect(passes.listed!.rows.size).toBe(2_960);
+    const lastCall = left.gov.calls[left.gov.calls.length - 1];
+    expect([lastCall.searchParams.get("fromDateTime"), lastCall.searchParams.get("toDateTime")]).toEqual(whole);
+
+    // Nothing missing: no second count.
+    const complete = await sliced(timedGov(realisticRows()).httpGet);
+    expect(complete.listed).toMatchObject({ count: 3_000, finalCount: null, left: 0 });
+  });
+
+  it("reads a slice by pages when more than 250 rows lie within one second, and stops when their order changes", async () => {
+    const burst = Date.parse("2026-11-11T09:30:00.000Z");
+    const rows = timedRows(
+      5,
+      { rows: 600, from: Date.parse(WIDE.from), to: TOP_MS },
+      // Within one second: every slice that holds the burst counts more than 250, so only slices read by pages list it.
+      { rows: 300, from: burst + 200, to: burst + 800 },
+    );
+    const stable = timedGov(rows, { order: "stable" });
+    const { listed, stop, lines } = await sliced(stable.httpGet);
+    expect(stop).toBeNull();
+    expect(listedGuids(listed!)).toEqual(guidsOf(rows));
+    expect(listed).toMatchObject({ count: 900, left: 0, paged: 2 });
+    // The two slices, 2 seconds wide, that share the burst's second are each read at offsets 0 and 225.
+    const slicesRead = [
+      ["2026-11-11T09:30:00Z", "2026-11-11T09:30:02Z"],
+      ["2026-11-11T09:29:59Z", "2026-11-11T09:30:01Z"],
+    ];
+    expect(lines).toEqual(
+      slicesRead.map(
+        ([from, to]) =>
+          `  hr from ${from} to ${to}: congress.gov counts 300 rows in under ${MIN_SPLIT_SECONDS} seconds, more than ` +
+          "one answer holds; reading the slice by pages",
+      ),
+    );
+    for (const [from, to] of slicesRead) {
+      const calls = stable.gov.calls.filter(
+        (call) => call.searchParams.get("fromDateTime") === from && call.searchParams.get("toDateTime") === to,
+      );
+      expect(calls.map((call) => call.searchParams.get("offset"))).toEqual(["0", "0", "225"]);
+    }
+
+    // The same rows in an order that changes with every request: the paging reader's checks stop the run, and the
+    // stop names the slice.
+    const where = "hr from 2026-11-11T09:30:00Z to 2026-11-11T09:30:02Z";
+    const shuffled = await sliced(timedGov(rows).httpGet);
+    expect(shuffled.stop).toMatchObject({ reason: "count_short" });
+    expect(shuffled.stop!.message.startsWith(`${where}: read`)).toBe(true);
+  });
+
+  it("keeps the rows that name no bill of a slice read by pages", async () => {
+    const burst = Date.parse("2026-11-11T09:30:00.000Z");
+    const rows = [
+      ...timedRows(
+        5,
+        { rows: 600, from: Date.parse(WIDE.from), to: TOP_MS },
+        { rows: 298, from: burst + 200, to: burst + 800 },
+      ),
+      noBill("No number A", burst + 300),
+      noBill("No number B", burst + 700),
+    ];
+    const { listed, stop } = await sliced(timedGov(rows, { order: "stable" }).httpGet);
+    expect(stop).toBeNull();
+    expect(listed).toMatchObject({ count: 900, unnamed: 2, left: 0, paged: 2 });
+    expect(listed!.rows.size).toBe(898);
+  });
+
+  it("reads a full answer without pagination.count by pages when the slice is too narrow to split", async () => {
+    const burst = Date.parse("2026-11-11T09:30:00.000Z");
+    const rows = timedRows(
+      5,
+      { rows: 600, from: Date.parse(WIDE.from), to: TOP_MS },
+      { rows: 300, from: burst + 200, to: burst + 800 },
+    );
+    const { gov, httpGet } = timedGov(rows, { order: "stable", noCount: true });
+    const { listed, stop } = await sliced(httpGet);
+    expect(stop).toBeNull();
+    expect(listedGuids(listed!)).toEqual(guidsOf(rows));
+    expect(listed).toMatchObject({ count: null, left: 0, paged: 2, requests: gov.calls.length });
+    expect(listed!.requests).toBeLessThan(MAX_TYPE_LIST_REQUESTS / 5);
+  });
+
+  it("asks for a slice once more when its answer lists fewer rows than it counts, then stops naming the slice", async () => {
+    const rows = realisticRows();
+    // A row congress.gov counts but never lists, in the dense day.
+    const ghost = TOP_MS - 20 * HOUR_MS + 123;
+    const { gov, httpGet } = timedGov(rows, { ghosts: [ghost] });
+    const { stop, lines } = await sliced(httpGet);
+    expect(stop).toMatchObject({ reason: "count_short" });
+    const named = stop!.message.match(
+      /^hr from (\S+) to (\S+): read twice, and congress\.gov counts (\d+) rows but listed (\d+) \(\d+ distinct\); rows it counts may not have been listed\. Run again later\.$/,
+    );
+    expect(named).not.toBeNull();
+    const [, from, to, counts, listedRows] = named!;
+    expect(Number(counts)).toBe(Number(listedRows) + 1);
+    expect(Date.parse(from)).toBeLessThanOrEqual(ghost);
+    expect(Date.parse(to)).toBeGreaterThanOrEqual(ghost);
+    const asked = gov.calls.filter(
+      (call) => call.searchParams.get("fromDateTime") === from && call.searchParams.get("toDateTime") === to,
+    );
+    expect(asked).toHaveLength(2);
+    expect(lines).toEqual([
+      `  hr from ${from} to ${to}: congress.gov counts ${counts} rows but listed ${listedRows} (${listedRows} ` +
+        "distinct); reading it once more",
+    ]);
+
+    // An answer that once leaves out a row it counts is asked for again, and the second answer passes.
+    const target = rows[500].row;
+    let dropped = false;
+    const once = timedGov(rows, {
+      edit: (bills, _request, count) => {
+        if (dropped || count > 250 || !bills.includes(target)) return bills;
+        dropped = true;
+        return bills.filter((bill) => bill !== target);
+      },
+    });
+    const passes = await sliced(once.httpGet);
+    expect(passes.stop).toBeNull();
+    expect(listedGuids(passes.listed!)).toEqual(guidsOf(rows));
+    expect(passes.listed!.requests).toBe(2 * passes.listed!.slices);
+    expect(passes.lines).toHaveLength(1);
+    expect(passes.lines[0]).toMatch(/reading it once more$/);
+
+    // An answer that lists as many rows as it counts, one of them twice, is short as well.
+    const twice = timedGov(rows, {
+      edit: (bills, _request, count) =>
+        count > 250 || !bills.includes(target) ? bills : [...bills.filter((bill) => bill !== target), bills[0]],
+    });
+    const duplicated = await sliced(twice.httpGet);
+    expect(duplicated.stop).toMatchObject({ reason: "count_short" });
+    expect(duplicated.stop!.message).toMatch(
+      /: read twice, and congress\.gov counts (\d+) rows but listed \1 \(\d+ distinct\)/,
+    );
+  });
+
+  it("keeps the requests well under MAX_TYPE_LIST_REQUESTS for lists shaped like the real ones", async () => {
+    // Each split costs one answer whose rows are not kept: twice the slices, less one.
+    const realistic = await sliced(timedGov(realisticRows()).httpGet);
+    expect(realistic.listed!.requests).toBe(2 * realistic.listed!.slices - 1);
+    expect(realistic.listed!.requests).toBeLessThanOrEqual(60);
+
+    // hr's 11,141 rows, four in five updated again within the two days before top, the rest since the cutoff.
+    const hr = timedRows(
+      9,
+      { rows: 8_913, from: TOP_MS - 48 * HOUR_MS, to: TOP_MS },
+      { rows: 2_228, from: Date.parse(DEFAULT_CUTOFF), to: TOP_MS - 48 * HOUR_MS },
+    );
+    const { listed, stop } = await sliced(timedGov(hr).httpGet, { from: DEFAULT_CUTOFF, to: TOP });
+    expect(stop).toBeNull();
+    expect(listed!.rows.size).toBe(11_141);
+    expect(listed!.requests).toBe(2 * listed!.slices - 1);
+    expect(listed!.requests).toBeLessThanOrEqual(200);
+    expect(listed!.requests).toBeLessThan(MAX_TYPE_LIST_REQUESTS / 5);
+  });
+
+  it("stops (list_failed) past MAX_TYPE_LIST_REQUESTS, as when congress.gov does not apply the time filter", async () => {
+    // The standard fake answers the whole list whatever the window: every slice counts 260, down to slices under 3
+    // seconds, each read by pages.
+    const world = newWorld({
+      lists: { hr: Array.from({ length: 260 }, (_, index) => row("hr", 1 + index, "2026-10-01")) },
+    });
+    const { stop } = await sliced(congressGov(world));
+    expect(stop).toMatchObject({ reason: "list_failed" });
+    expect(stop!.message).toBe(
+      `hr: the listing needs more than MAX_TYPE_LIST_REQUESTS (${MAX_TYPE_LIST_REQUESTS}) list requests: more rows ` +
+        "lie close together than the slices expect, or congress.gov did not apply fromDateTime and toDateTime",
+    );
+    expect(listCalls(world)).toHaveLength(MAX_TYPE_LIST_REQUESTS);
+  });
+
+  it("lists hr's rows in dense bursts a day apart within MAX_TYPE_LIST_REQUESTS, at more than 1,000 requests", async () => {
+    // 37 bursts of 300 rows, each within 5 seconds, a day apart, and 41 rows spread over the window: each burst costs
+    // about 2 x log2(a day / 5 seconds) splits of its own, the costliest shape the cap is meant to pass.
+    const bursts = Array.from({ length: 37 }, (_, day) => {
+      const from = TOP_MS - (day + 1) * 24 * HOUR_MS;
+      return { rows: 300, from, to: from + 5_000 };
+    });
+    const rows = timedRows(13, ...bursts, { rows: 41, from: Date.parse(DEFAULT_CUTOFF), to: TOP_MS });
+    const { gov, httpGet } = timedGov(rows, { order: "stable" });
+    const { listed, stop } = await sliced(httpGet, { from: DEFAULT_CUTOFF, to: TOP });
+    expect(stop).toBeNull();
+    expect(listed!.rows.size).toBe(11_141);
+    expect(listed).toMatchObject({ count: 11_141, left: 0, paged: 0, requests: gov.calls.length });
+    expect(listed!.requests).toBeGreaterThan(1_000);
+    expect(listed!.requests).toBeLessThan(MAX_TYPE_LIST_REQUESTS);
+  });
+
+  it("counts a row that names no bill once, though both halves of a split read it", async () => {
+    // 403 rows over 1,000 seconds: one split, at 500 and 501 seconds. Two rows with no number sit in the second both
+    // halves share; counted twice, the 405 would pass the first count and stop the listing.
+    const start = Date.parse("2026-11-01T00:00:00.000Z");
+    const window = { from: iso(start), to: iso(start + 1_000_000) };
+    const rows = [
+      ...timedRows(11, { rows: 400, from: start, to: start + 1_000_000 }),
+      noBill("No number A", start + 500_000),
+      noBill("No number B", start + 500_500),
+      noBill("No number C", start + 100_000),
+    ];
+    const { gov, httpGet } = timedGov(rows);
+    const { listed, stop } = await sliced(httpGet, window);
+    expect(stop).toBeNull();
+    expect(listed).toMatchObject({ count: 403, unnamed: 3, left: 0, slices: 2, requests: 3 });
+    expect(listed!.rows.size).toBe(400);
+    expect(
+      gov.calls.map((call) => [call.searchParams.get("fromDateTime"), call.searchParams.get("toDateTime")]),
+    ).toEqual([
+      ["2026-11-01T00:00:00Z", "2026-11-01T00:16:40Z"],
+      ["2026-11-01T00:08:20Z", "2026-11-01T00:16:40Z"],
+      ["2026-11-01T00:00:00Z", "2026-11-01T00:08:21Z"],
+    ]);
+  });
+
+  it("takes a short answer without pagination.count as complete, and splits a full one", async () => {
+    const rows = realisticRows();
+    const { gov, httpGet } = timedGov(rows, { noCount: true });
+    const { listed, stop } = await sliced(httpGet);
+    expect(stop).toBeNull();
+    expect(listedGuids(listed!)).toEqual(guidsOf(rows));
+    expect(listed).toMatchObject({ count: null, left: 0, paged: 0, requests: gov.calls.length });
+    const { lines } = await run(
+      newWorld(),
+      { types: ["hr"], countOnly: true, cutoff: WIDE.from },
+      { httpGet: timedGov(rows, { noCount: true }).httpGet },
+    );
+    expect(lines).toContain(
+      `  hr: 3000 rows in ${listed!.slices} slices, ${listed!.requests} requests (pagination.count none at the start)`,
+    );
+  });
+});
+
 // ─── The preflight ────────────────────────────────────────────────────────────
 
 describe("the poller rule during the run", () => {
@@ -1337,7 +1942,7 @@ describe("the poller rule during the run", () => {
       { from: DEFAULT_CUTOFF, to: TOP },
       { log: () => undefined, sleep: async () => undefined, due },
     );
-    expect(listed.pages).toBe(1);
+    expect(listed).toMatchObject({ requests: 1, slices: 1, count: 0 });
     expect(due).toHaveBeenCalledTimes(1);
 
     // A list page that fails is tried again: each try is a request, and each is checked.
