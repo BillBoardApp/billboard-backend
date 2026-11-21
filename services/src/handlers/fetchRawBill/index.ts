@@ -67,6 +67,17 @@ import {
   type MessageListing,
   type RetryLadder,
 } from "./retryLadder";
+import {
+  billAnswerUpdateMs,
+  decideOlderCopyRecheck,
+  isOlderThanListing,
+  olderCopyRecheckOf,
+  parseOlderCopyRecheckMode,
+  pollerListingTimeMs,
+  storedCopyUpdateMs,
+  type OlderCopyRecheck,
+  type OlderCopyRecheckMode,
+} from "./olderCopy";
 
 const BUCKET_NAME = process.env.BUCKET_NAME!;
 const SECRET_NAME = process.env.SECRET_NAME!;
@@ -187,6 +198,17 @@ const FETCH_RETRY_LADDER: RetryLadder | null = ((): RetryLadder | null => {
 })();
 const FETCH_RETRY_ON = FETCH_RETRY_LADDER !== null;
 
+/**
+ * REL-56 (2026-11-21): a poller message whose fetched bill answer is older than its listing (olderCopy.ts). Under
+ * OLDER_COPY_RECHECK "on" it is sent again to UpdatedBillsQueue (TEXT_RETRY_QUEUE_URL, as the text retry) after
+ * OLDER_COPY_RECHECK_DELAY_SECONDS (SQS allows 900 at most), at most OLDER_COPY_MAX_RECHECKS times; a listed row's
+ * time is at most OLDER_COPY_LISTING_WINDOW_SECONDS before the run that listed it.
+ */
+const OLDER_COPY_RECHECK_MODE: OlderCopyRecheckMode = parseOlderCopyRecheckMode(process.env.OLDER_COPY_RECHECK);
+const OLDER_COPY_RECHECK_DELAY_SECONDS = positiveIntegerEnv("OLDER_COPY_RECHECK_DELAY_SECONDS", 900, 900);
+const OLDER_COPY_MAX_RECHECKS = positiveIntegerEnv("OLDER_COPY_MAX_RECHECKS", 2, 5);
+const OLDER_COPY_LISTING_WINDOW_SECONDS = positiveIntegerEnv("OLDER_COPY_LISTING_WINDOW_SECONDS", 480, 86_400);
+
 const s3 = new S3Client({});
 const rawBillDao = new RawBillDao(s3, BUCKET_NAME);
 const sqs = new SQSClient({});
@@ -221,6 +243,8 @@ interface FeedItem {
    * title by it (messageListing).
    */
   listedAt?: string;
+  /** REL-56 (2026-11-21): set on the re-check FetchRawBill sends itself when the bill's answer was older (olderCopy.ts). */
+  olderCopyRecheck?: OlderCopyRecheck;
 }
 
 /** The handler context FetchRawBill reads: the logger's request id and the time left. */
@@ -663,15 +687,20 @@ const fetchAllRelatedBillPages = async (
   return { data: { ...firstPage, relatedBills: mergeRelatedBillItems(items), pagination }, extraCalls };
 };
 
+/** The bill's own answer (/bill/{congress}/{type}/{number}): the first endpoint a full fetch reads. */
+const billAnswerUrl = (billId: BillIdentifier): string =>
+  `${CONGRESS_API_BASE_URL}/bill/${billId.congress}/${toAbbreviatedBillType(billId.billType)}/${billId.billNumber}`;
+
 // Fetch comprehensive bill data from Congress API (main bill + all related endpoints)
 // Uses sequential fetching with rate limiting to avoid API throttling
+// REL-56 (2026-11-21): `billAnswer`, the bill's own answer a re-check already read, is used instead of reading it again
+// (coreApiCalls then leaves it out: the re-check counted it).
 const fetchComprehensiveBillData = async (
   billId: BillIdentifier,
   clock?: RequestClock,
+  billAnswer?: Record<string, unknown>,
 ): Promise<{ data: Record<string, unknown>; coreApiCalls: number }> => {
-  const { congress, billType, billNumber } = billId;
-  const billTypeSegment = toAbbreviatedBillType(billType);
-  const baseUrl = `${CONGRESS_API_BASE_URL}/bill/${congress}/${billTypeSegment}/${billNumber}`;
+  const baseUrl = billAnswerUrl(billId);
   const actionsUrl = new URL(`${baseUrl}/actions`);
   actionsUrl.searchParams.set("limit", String(Math.max(1, CONGRESS_API_ACTIONS_PAGE_LIMIT)));
   const cosponsorsUrl = new URL(`${baseUrl}/cosponsors`);
@@ -707,6 +736,10 @@ const fetchComprehensiveBillData = async (
   // Fetch endpoints sequentially with delay to avoid rate limiting
   for (let i = 0; i < boundedEndpoints.length; i++) {
     const [key, url] = boundedEndpoints[i];
+    if (key === "bill" && billAnswer) {
+      comprehensiveData.bill = billAnswer;
+      continue;
+    }
 
     // Add delay between calls (skip delay for first call)
     if (i > 0 && CONGRESS_API_CALL_DELAY_MS > 0) {
@@ -933,6 +966,175 @@ const sendTextRetry = async (feedItem: FeedItem, nextAttempt: number, correlatio
       `Failed to schedule the bill text retry: ${failed.map((failure) => failure.Message ?? failure.Id ?? "unknown").join(", ")}`,
     );
   }
+};
+
+// ─── REL-56 (2026-11-21): a bill answer older than its listing (OLDER_COPY_RECHECK) ───
+
+/**
+ * Sends the message again to UpdatedBillsQueue, OLDER_COPY_RECHECK_DELAY_SECONDS later, with olderCopyRecheck (its
+ * attempt and the update time of the answer found older) and the same correlation id, so the re-check knows the
+ * listing. A failed send throws, so SQS retries the record (as the text retry's).
+ */
+const sendOlderCopyRecheck = async (
+  feedItem: FeedItem,
+  recheck: OlderCopyRecheck,
+  correlationId: string,
+): Promise<void> => {
+  const response = await sqs.send(
+    new SendMessageBatchCommand({
+      QueueUrl: TEXT_RETRY_QUEUE_URL,
+      Entries: [
+        {
+          Id: `older-copy-recheck-${recheck.attempt}`,
+          MessageBody: JSON.stringify({ ...feedItem, olderCopyRecheck: recheck }),
+          DelaySeconds: OLDER_COPY_RECHECK_DELAY_SECONDS,
+          ...correlationIdMessageAttributes(correlationId),
+        },
+      ],
+    }),
+  );
+  const failed = response?.Failed ?? [];
+  if (failed.length > 0) {
+    throw new Error(
+      `Failed to schedule the older-copy re-check: ${failed.map((failure) => failure.Message ?? failure.Id ?? "unknown").join(", ")}`,
+    );
+  }
+};
+
+const isoOf = (ms: number | null): string | null => (ms === null ? null : new Date(ms).toISOString());
+
+/** Whether this fetch may send an older-copy re-check: "on", with the queue set. */
+const olderCopyRechecksSent = (): boolean => OLDER_COPY_RECHECK_MODE === "on" && TEXT_RETRY_QUEUE_URL !== "";
+
+/**
+ * After a full fetch is stored: when the poller listed the bill (listedAtMs) and the bill's answer is older than that
+ * listing, count it (RawBillOlderThanListing, on a first fetch) and, under "on", send the next re-check unless this was
+ * the last one or the text step already sends the bill again (its retry fetches the whole bill). Under "watch" only
+ * the line and the count.
+ */
+const handleOlderCopy = async (
+  feedItem: FeedItem,
+  billAnswer: unknown,
+  listedAtMs: number | null,
+  attempt: number,
+  textRetryScheduled: boolean,
+  correlationId: string,
+): Promise<void> => {
+  if (OLDER_COPY_RECHECK_MODE === "off" || listedAtMs === null) return;
+  const updateMs = billAnswerUpdateMs(billAnswer);
+  if (!isOlderThanListing(updateMs, listedAtMs, OLDER_COPY_LISTING_WINDOW_SECONDS)) return;
+  const fields = {
+    event: "older_copy",
+    olderCopyRecheckMode: OLDER_COPY_RECHECK_MODE,
+    billUpdatedAt: isoOf(updateMs),
+    listedAt: isoOf(listedAtMs),
+    listingWindowSeconds: OLDER_COPY_LISTING_WINDOW_SECONDS,
+    recheckAttempt: attempt,
+  };
+  if (attempt === 0) await putMetric(METRIC_NAMESPACE, "RawBillOlderThanListing", 1);
+  if (!olderCopyRechecksSent()) {
+    logger.info("congress.gov's bill answer is older than its listing; it would be checked again (watch)", fields);
+    return;
+  }
+  if (textRetryScheduled) {
+    logger.info("congress.gov's bill answer is older than its listing; the bill text retry fetches it again", fields);
+    return;
+  }
+  if (attempt >= OLDER_COPY_MAX_RECHECKS) {
+    logger.warn("congress.gov's bill answer is still older than its listing after its last re-check", {
+      ...fields,
+      maxRechecks: OLDER_COPY_MAX_RECHECKS,
+    });
+    return;
+  }
+  await sendOlderCopyRecheck(feedItem, { attempt: attempt + 1, updateDate: isoOf(updateMs) }, correlationId);
+  logger.info("congress.gov's bill answer is older than its listing; it is checked again later", {
+    ...fields,
+    nextRecheckAttempt: attempt + 1,
+    maxRechecks: OLDER_COPY_MAX_RECHECKS,
+    delaySeconds: OLDER_COPY_RECHECK_DELAY_SECONDS,
+  });
+};
+
+/** The update time of the stored raw bill, or null when there is none or it cannot be read (logged). */
+const readStoredUpdateMs = async (guid: string): Promise<number | null> => {
+  try {
+    return storedCopyUpdateMs((await rawBillDao.getRevisionByGuid(guid)).value);
+  } catch (error) {
+    logger.warn("Could not read the stored raw bill for an older-copy re-check; using the update time it carries", {
+      error,
+    });
+    return null;
+  }
+};
+
+/**
+ * A re-check (olderCopyRecheck, under "on"): reads the bill's own answer (one congress.gov call) and decides with the
+ * stored copy (decideOlderCopyRecheck). Returns the answer when the bill is to be fetched in full ("newer"); otherwise
+ * sends the next re-check ("still_older") or stops, and returns null: nothing is stored or sent on.
+ */
+const recheckOlderCopy = async (
+  feedItem: FeedItem,
+  billId: BillIdentifier,
+  recheck: OlderCopyRecheck,
+  listedAtMs: number,
+  guid: string,
+  correlationId: string,
+  clock: RequestClock,
+): Promise<Record<string, unknown> | null> => {
+  const answer = await fetchFromCongressAPI(billAnswerUrl(billId), clock).catch((error: unknown) => {
+    throw new BillEndpointError("bill", `Failed to fetch bill endpoint: ${errorMessage(error)}`, { cause: error });
+  });
+  await emitCoreApiCallsMetric(1);
+  const answerUpdateMs = billAnswerUpdateMs(answer);
+  const storedUpdateMs =
+    (await readStoredUpdateMs(guid)) ?? (recheck.updateDate ? Date.parse(recheck.updateDate) : null);
+  const outcome = decideOlderCopyRecheck({
+    answerUpdateMs,
+    storedUpdateMs,
+    listedAtMs,
+    windowSeconds: OLDER_COPY_LISTING_WINDOW_SECONDS,
+    attempt: recheck.attempt,
+    maxRechecks: OLDER_COPY_MAX_RECHECKS,
+  });
+  await putMetrics(METRIC_NAMESPACE, [
+    { name: "RawBillOlderCopyRecheck", value: 1 },
+    { name: "RawBillOlderCopyRecheck", value: 1, dimensions: { Outcome: outcome } },
+  ]);
+  const fields = {
+    event: "older_copy_recheck",
+    outcome,
+    recheckAttempt: recheck.attempt,
+    maxRechecks: OLDER_COPY_MAX_RECHECKS,
+    billUpdatedAt: isoOf(answerUpdateMs),
+    storedUpdatedAt: isoOf(storedUpdateMs),
+    listedAt: isoOf(listedAtMs),
+  };
+  if (outcome === "newer") {
+    logger.info("Checked congress.gov's bill answer again: newer than the stored copy; fetching the bill", fields);
+    return answer;
+  }
+  if (outcome === "still_older") {
+    await sendOlderCopyRecheck(
+      feedItem,
+      { attempt: recheck.attempt + 1, updateDate: recheck.updateDate },
+      correlationId,
+    );
+    logger.info("Checked congress.gov's bill answer again: still older than its listing; checking again later", {
+      ...fields,
+      delaySeconds: OLDER_COPY_RECHECK_DELAY_SECONDS,
+    });
+    return null;
+  }
+  if (outcome === "gave_up") {
+    logger.warn(
+      "Checked congress.gov's bill answer again: still older than its listing; the stored copy stays",
+      fields,
+    );
+    return null;
+  }
+  logger.info("Checked congress.gov's bill answer again: the stored copy is already as new as its listing", fields);
+  return null;
 };
 
 // ─── REL-35: storing a fetched raw bill (MEMBER_VOTE_CARRY_MODE) ─────────────
@@ -1224,8 +1426,25 @@ const processRecord = async (record: SQSRecord, remainingMs?: () => number): Pro
       billNumber: billId.billNumber,
       sourceBillType: billId.billType,
     });
-    const { data: billData, coreApiCalls } = await fetchComprehensiveBillData(billId, clock);
-    await emitCoreApiCallsMetric(coreApiCalls);
+    // REL-56 (2026-11-21): when the poller listed the bill (null for any other message), and whether this message is
+    // FetchRawBill's own re-check of an answer that was older than that listing: it reads the bill's answer first and
+    // fetches the rest only when that answer is newer than the stored copy.
+    const listedAtMs = pollerListingTimeMs(feedItem, messageCorrelationId);
+    const recheck = olderCopyRecheckOf(feedItem.olderCopyRecheck);
+    let recheckedAnswer: Record<string, unknown> | undefined;
+    if (recheck && listedAtMs !== null && olderCopyRechecksSent()) {
+      const answer = await recheckOlderCopy(feedItem, billId, recheck, listedAtMs, guid, correlationId, clock);
+      if (!answer) return null;
+      recheckedAnswer = answer;
+    }
+    const { data: billData, coreApiCalls: endpointCalls } = await fetchComprehensiveBillData(
+      billId,
+      clock,
+      recheckedAnswer,
+    );
+    await emitCoreApiCallsMetric(endpointCalls);
+    // The re-check's own call was counted when it was made.
+    const coreApiCalls = endpointCalls + (recheckedAnswer ? 1 : 0);
 
     const textRetryAttempt = textRetryAttemptOf(feedItem.textRetryAttempt);
     const text = await resolveBillText(
@@ -1300,6 +1519,15 @@ const processRecord = async (record: SQSRecord, remainingMs?: () => number): Pro
         delaySeconds: BILL_TEXT_RETRY_DELAY_SECONDS,
       });
     }
+    // REL-56 (2026-11-21): after the store, as the text retry: an answer older than its listing is checked again.
+    await handleOlderCopy(
+      feedItem,
+      billData.bill,
+      listedAtMs,
+      recheck?.attempt ?? 0,
+      text.nextRetryAttempt !== undefined,
+      correlationId,
+    );
     if (text.unavailableReason) {
       await putMetrics(METRIC_NAMESPACE, [
         { name: "BillTextUnavailable", value: 1 },

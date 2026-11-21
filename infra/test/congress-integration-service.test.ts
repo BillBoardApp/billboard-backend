@@ -8,6 +8,7 @@ import {
   FETCH_RAW_BILL_RETRY_NOT_FOUND_RECEIVES,
   FETCH_RAW_BILL_RETRY_OTHER_SECONDS,
   FETCH_RETRY_BACKOFF,
+  OLDER_COPY_RECHECK,
   REFETCH_UNCHANGED_MODE,
   UPDATED_BILLS_QUEUE_MAX_RECEIVE_COUNT,
 } from "../lib/config/congress-integration-service-constants";
@@ -433,6 +434,22 @@ describe("CongressIntegrationServiceStack", () => {
     });
     const holders = Object.values(templates.congressTemplate.findResources("AWS::Lambda::Function"))
       .filter((fn) => "REFETCH_UNCHANGED_MODE" in (fn.Properties.Environment?.Variables ?? {}))
+      .map((fn) => fn.Properties.FunctionName);
+    expect(holders).toEqual(["FetchRawBill"]);
+  });
+
+  // REL-56 (2026-11-21): a poller message whose bill answer is older than its listing is checked again later. It ships
+  // "on" and sends to UpdatedBillsQueue through TEXT_RETRY_QUEUE_URL and the send grant the text retry has.
+  test("FetchRawBill gets OLDER_COPY_RECHECK from its constant (on), and only FetchRawBill", () => {
+    expect(OLDER_COPY_RECHECK).toBe("on");
+    templates.congressTemplate.hasResourceProperties("AWS::Lambda::Function", {
+      FunctionName: "FetchRawBill",
+      Environment: {
+        Variables: Match.objectLike({ OLDER_COPY_RECHECK: "on", TEXT_RETRY_QUEUE_URL: Match.anyValue() }),
+      },
+    });
+    const holders = Object.values(templates.congressTemplate.findResources("AWS::Lambda::Function"))
+      .filter((fn) => "OLDER_COPY_RECHECK" in (fn.Properties.Environment?.Variables ?? {}))
       .map((fn) => fn.Properties.FunctionName);
     expect(holders).toEqual(["FetchRawBill"]);
   });
