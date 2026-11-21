@@ -59,17 +59,30 @@ const TRAILING_ACTION_CUTOFF = (process.env.TRAILING_ACTION_CUTOFF ?? "").trim()
 // keeps a watermark instead: the top of the last window it listed in full. The next window starts OVERLAP_SECONDS
 // before it, so a row inside the overlap is enqueued by both runs, and every row in a window is enqueued. A row is
 // skipped only if it shows in the list more than OVERLAP_SECONDS after its time (BillPollerLateRows watches that) or
-// the list changes its order while a window is read (the count check in pollBillType).
+// it is in a slice of the window that had to be paged (below) and congress.gov's order changed while it was.
 const OVERLAP_SECONDS = 120;
-// Rows each page reads again from the end of the page before (REL-56). A row that leaves the window while it is read
-// (updated again, so its time is now past the window's top) moves the rows below it up; the overlap keeps such a row
-// from slipping between two pages.
+// REL-56 (2026-11-21): congress.gov's list is not in the order of the time its filter uses, whatever `sort` says, and
+// offset paging over it drops rows: two readings of the 119th's hr list with no bill updated meanwhile listed 11,137
+// distinct rows against a pagination.count of 11,141, and the s list 5,801 against 5,804 four times. An answer that fits
+// in one page was always exact. So a window is listed in time slices whose answers each fit in one page (pollBillType):
+// a slice with more rows is split in two by time, oldest first, and is paged by offset only when splitting cannot
+// help: under MIN_SPLIT_SECONDS wide, the few seconds around a burst (rows with one time) in the second its halves
+// share, or a slice whose halves and older and newer parts all still hold at least UNSPLIT_SHARE of its rows (a filter
+// coarser than a second).
+const MIN_SPLIT_SECONDS = 3;
+const UNSPLIT_SHARE = 0.75;
+// A slice whose halves share most of its rows is listed in three parts, its older part, the 5 seconds around the second
+// its halves share, and its newer part, from this wide: a burst in that second is paged alone, the rest split again.
+const MIN_THREE_PART_SECONDS = 8;
+// Rows each page of a paged slice (or of the unfiltered fallback) reads again from the end of the page before. A row
+// that leaves the list while it is read (updated again, so its time is now past the window's top) moves the rows below
+// it up; the overlap keeps such a row from slipping between two pages.
 const PAGE_OVERLAP_ROWS = 25;
-// How often a scan steps back one page (PAGE_STEP_ROWS) when a page shares no row with the end of the page before
+// How often paging steps back one page (PAGE_STEP_ROWS) when a page shares no row with the end of the page before
 // (BillPollerPageDrift).
 const MAX_PAGE_DRIFT_STEP_BACKS = 2;
-// A window read in this run lists at least every row it still counts (it only loses rows). When it lists fewer, the
-// scan reads it again from where it started, this many times at most (BillPollerPageDrift).
+// A paged slice lists at least every row it still counts (it only loses rows). When it lists fewer, it is read again
+// from its top, this many times at most (BillPollerPageDrift).
 const MAX_WINDOW_REREADS = 1;
 // REL-56: "hourly" (the default) makes the first run of each hour check congress.gov's list filter
 // (BillPollerFilterImprecise) and list again a window read an hour before (BillPollerLateRows); "off" turns both off.
@@ -121,21 +134,35 @@ interface BillTypeCursor {
   /** REL-56: whether congress.gov has listed a bill of this type (REL-46's no-bill-yet rule). */
   listed?: boolean;
   /**
-   * REL-56: set while a window is listed over several runs (the page cap, the soft stop, an outage). The watermark
-   * stays put until the window is read in full; the next run reads the same window, with the same top, from offset.
+   * REL-56: set when a scan stopped before the end of its window (the page cap, the soft stop, an outage). The
+   * watermark is the top of the slices it listed in full, oldest first; `to` is the top of the oldest slice it had
+   * still to list, so the next run lists the window up to there first, then on to its own start.
    */
   backlog?: BillTypeBacklog;
 }
 
 interface BillTypeBacklog {
-  /** The window's top, fixed until it is read in full. */
+  /**
+   * Where the next window starts, when not OVERLAP_SECONDS before the watermark: the top of what the scan listed in
+   * full, when that was more than OVERLAP_SECONDS before its run's start, so no row up to there could still show in
+   * the list late. Without it the next run would list that overlap again, and a burst in it every run.
+   */
+  from?: string;
+  /** The top of the oldest slice still to list. */
   to: string;
   /**
-   * Where the next page starts, rows from the newest in the window. Kept only with a count: without one the next run
-   * cannot tell how far rows moved since, so it reads the window from its top again (offset 0).
+   * Set when that slice, from `from` (or the watermark less OVERLAP_SECONDS) to `to`, was being paged by offset (more
+   * rows than its time can split) when the scan stopped: the next run pages it on from there, so a burst larger than one
+   * run can page is read over several. Code from before the sliced listing does not read it.
+   */
+  paged?: { offset: number; count: number };
+  /**
+   * Written 0, with no count: code from before the sliced listing (a rollback) then reads the window up to `to` from
+   * its top. That code wrote where its next page started, with the window's count, and resumed there; this code reads
+   * neither, since an offset into congress.gov's list does not keep its place (REL-56).
    */
   offset: number;
-  /** The window's pagination.count at the last page read, when congress.gov gave one. */
+  /** The window's pagination.count at the last page read, when code from before the sliced listing wrote it. */
   count?: number;
 }
 
@@ -386,17 +413,37 @@ const effectiveWatermark = (cursor: BillTypeCursor): string =>
 const isListed = (cursor: BillTypeCursor): boolean =>
   cursor.listed ?? splitCursorKey(cursor.lastSeenKey).guid.length > 0;
 
-// A backlog that is not above its watermark has nothing left to read; one that does not parse is dropped too. Either
-// way the next scan lists the whole window from the watermark, which holds the backlog's.
+// A backlog's `from` counts only between the window's usual start and the watermark. A backlog whose top is not above
+// where its window starts has nothing left to read; one that does not parse is dropped too. Either way the next scan
+// lists the whole window from the watermark less OVERLAP_SECONDS. (Code from before the sliced listing drops a backlog
+// not above its watermark, and reads no `from`: it lists from that start too.)
 const parseBacklog = (value: unknown, watermark: string): BillTypeBacklog | undefined => {
   if (!value || typeof value !== "object") return undefined;
   const backlog = value as Record<string, unknown>;
   const to = normalizeIsoDate(backlog.to);
+  const fromIso = normalizeIsoDate(backlog.from);
+  const fromMs = fromIso ? Date.parse(floorToSecondIso(fromIso)) : Number.NaN;
+  const from =
+    fromMs > Date.parse(windowStartIso(watermark)) && fromMs <= Date.parse(watermark)
+      ? new Date(fromMs).toISOString()
+      : undefined;
   const { offset, count } = backlog;
-  if (!to || Date.parse(to) <= Date.parse(watermark)) return undefined;
+  if (!to || Date.parse(to) <= Date.parse(from ?? windowStartIso(watermark))) return undefined;
   if (typeof offset !== "number" || !Number.isInteger(offset) || offset < 0) return undefined;
   const validCount = typeof count === "number" && Number.isInteger(count) && count >= 0;
-  return { to: floorToSecondIso(to), ...(validCount ? { offset, count } : { offset: 0 }) };
+  const pagedValue = backlog.paged as Record<string, unknown> | null | undefined;
+  const isRowNumber = (value: unknown): value is number =>
+    typeof value === "number" && Number.isInteger(value) && value >= 0;
+  const paged =
+    pagedValue && typeof pagedValue === "object" && isRowNumber(pagedValue.offset) && isRowNumber(pagedValue.count)
+      ? { paged: { offset: pagedValue.offset, count: pagedValue.count } }
+      : {};
+  return {
+    ...(from ? { from } : {}),
+    to: floorToSecondIso(to),
+    ...paged,
+    ...(validCount ? { offset, count } : { offset: 0 }),
+  };
 };
 
 const parseProbe = (value: unknown): LateRowProbe | undefined => {
@@ -529,9 +576,11 @@ const compareBacklogProgress = (a: BillTypeBacklog, b: BillTypeBacklog): number 
 /**
  * Positive when cursor `a` is further along than `b`, negative when behind, 0 when level (REL-56). Ordered by
  * watermark (a cursor from before REL-56 by the midnight of its lastUpdateAt). On the same watermark a backlog is
- * further along than none, since it records pages of the next window already read; between two backlogs, the one with
- * the later window top, then compareBacklogProgress; then a type that has been listed. Each cursor on its own only
- * records what its run listed, so a wrong pick makes a run list rows again, never skip them.
+ * further along than none, since it records part of the next window already read (pages, from code before the sliced
+ * listing; a narrowed slice, from this code); between two backlogs, the one with the later window top, then
+ * compareBacklogProgress; then a type that has been listed. Each cursor on its own only records what its run listed,
+ * and this code reads a backlog's top as a split point only, so a wrong pick makes a run list rows again, never skip
+ * them.
  */
 const compareCursorProgress = (a: BillTypeCursor, b: BillTypeCursor): number => {
   const byWatermark = compareIsoTimes(effectiveWatermark(a), effectiveWatermark(b));
@@ -947,7 +996,10 @@ const parseBackfillFromIso = (nowMs: number): string | null => {
   return parsed.toISOString();
 };
 
-/** The window a scan of a cursor lists (REL-56): from its watermark less OVERLAP_SECONDS to its backlog's top or now. */
+/**
+ * The window a scan of a cursor lists (REL-56): from its watermark less OVERLAP_SECONDS (or its backlog's `from`) to
+ * the run's start. A backlog's top (the oldest slice an earlier run had still to list) is listed up to first.
+ */
 interface ScanWindow {
   watermark: string;
   from: string;
@@ -955,10 +1007,12 @@ interface ScanWindow {
   backlog: BillTypeBacklog | undefined;
 }
 
-// runTopIso is the run's start, in whole seconds.
+// runTopIso is the run's start, in whole seconds. A backlog's top after it (an overlapping run's) is the window's top.
 const scanWindowFor = (cursor: BillTypeCursor, runTopIso: string): ScanWindow => {
   const watermark = effectiveWatermark(cursor);
-  return { watermark, from: windowStartIso(watermark), to: cursor.backlog?.to ?? runTopIso, backlog: cursor.backlog };
+  const backlogTop = cursor.backlog?.to;
+  const to = backlogTop && compareIsoTimes(backlogTop, runTopIso) > 0 ? backlogTop : runTopIso;
+  return { watermark, from: cursor.backlog?.from ?? windowStartIso(watermark), to, backlog: cursor.backlog };
 };
 
 /** How one scan mode ended; pollBillType adds what was enqueued. */
@@ -969,6 +1023,127 @@ interface ScanOutcome {
   unavailable: CongressApiUnavailableError | null;
   windowRows: number | null;
   probe: LateRowProbe | null;
+}
+
+/** A part of a window, in whole seconds, and what its one-page answer said once it was read. */
+interface Slice {
+  fromMs: number;
+  toMs: number;
+  answer?: {
+    /** pagination.count, or null when the answer had none. */
+    count: number | null;
+    /** Whether the answer listed every row of the slice: no more than a page, and as many rows as it counts. */
+    complete: boolean;
+  };
+  /** Its halves, once it was split. */
+  halves?: [Slice, Slice];
+  /** Its three parts, once its halves were found to share most of its rows (splitAround). */
+  parts?: [Slice, Slice, Slice] | null;
+  /** A half of a slice whose answer did not list all of it. */
+  half?: boolean;
+  /** The 5 seconds around the second a slice's halves shared, which held most of its rows: paged, not split. */
+  burst?: boolean;
+  /** Where an earlier run's paging of it stopped (the backlog's `paged`). */
+  resume?: PagingPoint;
+}
+
+const sliceRange = (slice: Slice): { from: string; to: string } => ({
+  from: new Date(slice.fromMs).toISOString(),
+  to: new Date(slice.toMs).toISOString(),
+});
+
+/**
+ * Splits [a, b] at m = a + floor((b - a) / 2), in whole seconds, into [a, m + 1] and [m, b]. The second the halves share
+ * covers the boundary whatever congress.gov's rule at it (inclusive, exclusive, or finer than a second). From
+ * MIN_SPLIT_SECONDS wide both halves are narrower than the slice.
+ */
+const splitSlice = (slice: Slice): [Slice, Slice] => {
+  const m = slice.fromMs + Math.floor((slice.toMs - slice.fromMs) / 2000) * 1000;
+  return [
+    { fromMs: slice.fromMs, toMs: m + 1000, half: true },
+    { fromMs: m, toMs: slice.toMs, half: true },
+  ];
+};
+
+/**
+ * For a slice whose halves share most of its rows: its older part [a, m - 1], the 5 seconds [m - 2, m + 3] around the
+ * second [m, m + 1] the halves share, and its newer part [m + 2, b], each sharing a second with the next. Null under
+ * MIN_THREE_PART_SECONDS wide.
+ */
+const splitAround = (slice: Slice): [Slice, Slice, Slice] | null => {
+  if (slice.toMs - slice.fromMs < MIN_THREE_PART_SECONDS * 1000) return null;
+  const m = slice.fromMs + Math.floor((slice.toMs - slice.fromMs) / 2000) * 1000;
+  return [
+    { fromMs: slice.fromMs, toMs: m - 1000, half: true },
+    { fromMs: m - 2000, toMs: m + 3000, burst: true },
+    { fromMs: m + 2000, toMs: slice.toMs, half: true },
+  ];
+};
+
+// Both halves of a slice still hold at least UNSPLIT_SHARE of its rows, and more than a page each: splitting it again
+// would read the same rows over and over.
+const halvesShareRows = (slice: Slice, older: Slice, newer: Slice): boolean => {
+  const counts = [slice.answer?.count, older.answer?.count, newer.answer?.count];
+  if (!counts.every((count): count is number => typeof count === "number")) return false;
+  const [whole, olderRows, newerRows] = counts;
+  return (
+    older.answer?.complete === false &&
+    newer.answer?.complete === false &&
+    olderRows >= UNSPLIT_SHARE * whole &&
+    newerRows >= UNSPLIT_SHARE * whole
+  );
+};
+
+const splittable = (slice: Slice): boolean => slice.toMs - slice.fromMs >= MIN_SPLIT_SECONDS * 1000;
+
+/**
+ * The slice a scan cut short names for the next run to list first: down the older halves of each slice whose answer
+ * did not list all of it, to the first not read yet or one paged whole (narrow, or its halves share rows). A first
+ * slice not read yet that is a half of such a slice gives its own older half. So a run that stops having split or read
+ * a slice that held more than a page narrows the next run's first slice, even a run that read only one.
+ */
+const oldestSliceLeft = (first: Slice): Slice => {
+  if (!first.answer) return first.half && splittable(first) ? splitSlice(first)[0] : first;
+  let left = first;
+  while (left.answer && !left.answer.complete && splittable(left)) {
+    const [older, newer] = left.halves ?? splitSlice(left);
+    if (halvesShareRows(left, older, newer)) break;
+    left = older;
+  }
+  return left;
+};
+
+/** One request of a bill type's list, as a scan reads it. */
+type PageRead =
+  | { kind: "page"; rows: UnknownRecord[]; count: number | null }
+  | { kind: "stop"; reason: ScanStopReason; unavailable: CongressApiUnavailableError | null }
+  // REL-46: an answer for a bill type with no bill yet, read as an empty list.
+  | { kind: "no_bill_yet" };
+
+/** What one scan has read so far. */
+interface ScanProgress {
+  pages: number;
+  anyRow: boolean;
+  // Rows read with no bill number to name them (none so far): counted as listed.
+  unnamedRows: number;
+  startedAt: number;
+}
+
+/** Where paging a slice by offset got to: the offset its next page starts at, and the count at the last page read. */
+interface PagingPoint {
+  offset: number;
+  count: number;
+}
+
+/** How paging a list by offset ended. */
+interface Paging {
+  /** Null when it reached the end of the list; "max_pages" when it made `maxPages` requests first. */
+  stop: ScanStopReason | "no_bill_yet" | null;
+  unavailable: CongressApiUnavailableError | null;
+  /** pagination.count on its first page. */
+  firstCount: number | null;
+  /** Where it stopped, when it stopped with a count to resume from. */
+  stoppedAt: PagingPoint | null;
 }
 
 const pollBillType = async (
@@ -987,11 +1162,12 @@ const pollBillType = async (
   const listedBefore = isListed(cursor);
   const list = `bill/${congress}/${billType}`;
 
-  // Each page's bills are sent before the next page is requested, so enqueue time is covered by the per-request
-  // reserve and a soft stop keeps what was already sent. Every row in the window is sent (REL-56): a row cannot be told
-  // from one already sent, since its updateDate is a date only. Within a scan a guid is sent once: pages overlap by
-  // PAGE_OVERLAP_ROWS, and a fallback rescan repeats rows. A trailing Congress's rows go through its outcome gate first
-  // (REL-46): a row it holds back is handled all the same, and the watermark still moves past it.
+  // Each answer's bills are sent before the next request, so enqueue time is covered by the per-request reserve and a
+  // soft stop keeps what was already sent. Every row in the window is sent (REL-56): a row cannot be told from one
+  // already sent, since its updateDate is a date only. Within a scan a guid is sent once: a slice's rows are read again
+  // by its halves, pages overlap by PAGE_OVERLAP_ROWS, and a fallback rescan repeats rows. A trailing Congress's rows
+  // go through its outcome gate first (REL-46): a row it holds back is handled all the same, and the watermark still
+  // moves past it.
   const handledGuids = new Set<string>();
   const handledNumbers = new Set<string>();
   const latestActions = new WeakMap<UpdatedBillMessage, LatestAction>();
@@ -1015,142 +1191,162 @@ const pollBillType = async (
     }
   };
 
-  const scanMode = async (filtered: boolean): Promise<ScanOutcome> => {
-    // Filtered: the window by offset, newest first. Its top stays put until the window is read in full, over several
-    // runs if need be (the backlog), so a row updated while it is read leaves it rather than moving to its top.
-    // Unfiltered (the fallback): newest first from the top of the whole list, down to the first row dated before the
-    // day the window starts (rows are dated by day); no backlog.
-    const backlog = filtered ? window.backlog : undefined;
-    const fallbackFromDay = startOfUtcDayIso(window.from);
-    // A backlog keeps an offset only with a count (parseBacklog).
-    let offset = backlog?.offset ?? 0;
-    // Where this scan's reading of the window starts: the rows above it were read by the runs before.
+  // One request, `range` null for the unfiltered fallback. A stop (the soft stop, an outage, no time left to retry)
+  // and an answer read as an empty list (REL-46) end the scan.
+  const requestPage = async (
+    scan: ScanProgress,
+    range: { from: string; to: string } | null,
+    offset: number,
+  ): Promise<PageRead> => {
+    const filtered = range !== null;
+    if (shouldSoftStop()) {
+      logger.warn("Stopping bill-type scan early due to low remaining Lambda time", {
+        billType,
+        pagesScanned: scan.pages,
+        apiCalls,
+        discovered,
+        elapsedMs: Date.now() - scan.startedAt,
+      });
+      return { kind: "stop", reason: "soft_stop", unavailable: null };
+    }
+
+    let payload: UnknownRecord;
+    try {
+      payload = await fetchCongressJson(buildListUrl(congress, billType, offset, range), remainingMs);
+    } catch (error) {
+      if (error instanceof CongressApiUnavailableError) {
+        // Stops like a soft stop: the slices already listed move the watermark. The handler ends the run and logs it
+        // once.
+        return { kind: "stop", reason: "upstream_unavailable", unavailable: error };
+      }
+      if (noBillYet && scan.pages === 0 && isNoBillYetAnswer(error, filtered)) {
+        // Read as an empty list: the watermark stays put, so the first bills are still listed from there once
+        // congress.gov lists them, and the bill types after this one are polled.
+        // WARN and a metric, so a bill type that is dead in a new Congress is seen; after the window the same answer
+        // is an error.
+        logger.warn("congress.gov answered an error for a bill type with no bill yet; read as an empty list", {
+          congress,
+          billType,
+          status: error.status,
+          filtered,
+        });
+        await emitCongressMetric("BillPollerNoBillYetAnswer", congress, 1);
+        return { kind: "no_bill_yet" };
+      }
+      if (!(error instanceof OutOfTimeError)) throw error;
+      logger.warn("Stopping bill-type scan early: no Lambda time left to retry a page", {
+        billType,
+        pagesScanned: scan.pages,
+        reason: error.message,
+      });
+      return { kind: "stop", reason: "soft_stop", unavailable: null };
+    }
+    scan.pages += 1;
+    apiCalls += 1;
+
+    const count = extractTotalCount(payload);
+    if (noBillYet && scan.pages === 1 && count === null && extractBillsArray(payload) === null) {
+      // REL-46: a 200 with no bill list and no count for a type with no bill yet reads as an empty list, as the
+      // error answers above do. The watermark stays put, so nothing is skipped, and the types after it are polled.
+      logger.warn(
+        "congress.gov answered a 200 with no bill list for a bill type with no bill yet; read as an empty list",
+        { congress, billType, status: 200, filtered },
+      );
+      await emitCongressMetric("BillPollerNoBillYetAnswer", congress, 1);
+      return { kind: "no_bill_yet" };
+    }
+    const rows = listRowsOf(payload, count, offset, list);
+    if (rows.length > 0) scan.anyRow = true;
+    return { kind: "page", rows, count };
+  };
+
+  // Enqueues an answer's rows. Returns each row's guid (null for a row with no bill number), and whether the unfiltered
+  // fallback reached a row dated before `fromDay` (rows are dated by day), where it stops.
+  const takeRows = async (
+    scan: ScanProgress,
+    rows: UnknownRecord[],
+    fromDay: string | null,
+  ): Promise<{ rowGuids: Array<string | null>; reachedEarlierDay: boolean }> => {
+    const rowGuids: Array<string | null> = [];
+    const pageMessages: UpdatedBillMessage[] = [];
+    let reachedEarlierDay = false;
+    for (const row of rows) {
+      const msg = toBillMessage(row, billType, congress);
+      rowGuids.push(msg?.guid ?? null);
+      if (!msg) {
+        scan.unnamedRows += 1;
+        continue;
+      }
+      if (fromDay !== null && msg.updateDate && msg.updateDate < fromDay) {
+        reachedEarlierDay = true;
+        break;
+      }
+      if (gate) latestActions.set(msg, latestActionOf(row));
+      pageMessages.push(msg);
+    }
+    await enqueuePage(pageMessages);
+    return { rowGuids, reachedEarlierDay };
+  };
+
+  /**
+   * Pages `range` by offset, newest first; `range` null pages the whole list (the unfiltered fallback) down to the
+   * first row dated before `fromDay`. Each page starts PAGE_OVERLAP_ROWS before the end of the one before, and earlier
+   * again by as many rows as the list lost since; a page that shares no row with the end of the one before steps back a
+   * page. With a range, a list read to its end lists at least every row it still counts from where its reading began
+   * (it only loses rows, apart from rows that show in it late), so one that lists fewer is read again from there, once.
+   * `resume` continues an earlier run's paging of the range: a page that finds the list lost more rows since than the
+   * overlap covers steps back by as many, and without a count the range is read from its top. At most `maxPages`
+   * requests. congress.gov's order is not kept from one request to the next (REL-56), so this can still miss rows; the
+   * scan pages only what it cannot split by time.
+   */
+  const pageList = async (
+    scan: ScanProgress,
+    range: { from: string; to: string } | null,
+    maxPages: number,
+    fromDay: string | null,
+    resume?: PagingPoint,
+  ): Promise<Paging> => {
+    const filtered = range !== null;
+    let offset = resume?.offset ?? 0;
+    // Where this reading starts: the rows above it were read by the run before.
     let readFrom = offset;
-    // The window's pagination.count at the last page read (null when that page had none).
-    let count: number | null = backlog?.count ?? null;
+    // pagination.count at the last page read (null when that page had none).
+    let count: number | null = resume?.count ?? null;
     // The guids of the previous page's rows that the next page should read again.
     let previousTail: Set<string> | null = null;
-    // Rows the count rose by between pages of a window whose top is this run's start, in this reading of it: rows that
-    // showed in the list while it was read (a lower bound, since rows that leave it meanwhile lower the count). Those
-    // that showed below the page being read are listed all the same.
+    // Rows the count rose by between pages of this reading: rows that showed in the list while it was read (a lower
+    // bound, since rows that leave it meanwhile lower the count).
     let risen = 0;
     let stepBacks = 0;
     let rereads = 0;
     let pages = 0;
-    let windowRows: number | null = null;
-    // pagination.count on the page that reached the end of the window.
-    let finalCount: number | null = null;
-    let anyRow = false;
-    // Rows read with no bill number to name them (none so far): counted as listed.
-    let unnamedRows = 0;
-    let noBillYetAnswer = false;
-    const scanStartedAt = Date.now();
-    let incompleteReason: ScanStopReason | null = null;
-    let unavailable: CongressApiUnavailableError | null = null;
+    let firstCount: number | null = null;
+    const listedGuids = new Set<string>();
+    const unnamedBefore = scan.unnamedRows;
 
-    // Until the window is read in full (incompleteReason stays null), or a stop.
+    const stoppedAt = (): PagingPoint | null => (count !== null ? { offset, count } : null);
     for (;;) {
-      if (pages >= MAX_PAGES_PER_BILL_TYPE) {
-        incompleteReason = "max_pages";
-        logger.warn("Reached MAX_PAGES_PER_BILL_TYPE", { billType, maxPages: MAX_PAGES_PER_BILL_TYPE });
-        break;
-      }
-
-      if (shouldSoftStop()) {
-        incompleteReason = "soft_stop";
-        logger.warn("Stopping bill-type scan early due to low remaining Lambda time", {
-          billType,
-          pagesScanned: pages,
-          apiCalls,
-          discovered,
-          elapsedMs: Date.now() - scanStartedAt,
-        });
-        break;
-      }
-
-      let payload: UnknownRecord;
-      try {
-        payload = await fetchCongressJson(
-          buildListUrl(congress, billType, offset, filtered ? { from: window.from, to: window.to } : null),
-          remainingMs,
-        );
-      } catch (error) {
-        if (error instanceof CongressApiUnavailableError) {
-          // Stops like a soft stop: the pages already read become the backlog. The handler ends the run and logs it
-          // once.
-          incompleteReason = "upstream_unavailable";
-          unavailable = error;
-          break;
-        }
-        if (noBillYet && pages === 0 && isNoBillYetAnswer(error, filtered)) {
-          // Read as an empty list: the watermark stays put, so the first bills are still listed from there once
-          // congress.gov lists them, and the bill types after this one are polled.
-          // WARN and a metric, so a bill type that is dead in a new Congress is seen; after the window the same answer
-          // is an error.
-          logger.warn("congress.gov answered an error for a bill type with no bill yet; read as an empty list", {
-            congress,
-            billType,
-            status: error.status,
-            filtered,
-          });
-          await emitCongressMetric("BillPollerNoBillYetAnswer", congress, 1);
-          noBillYetAnswer = true;
-          break;
-        }
-        if (!(error instanceof OutOfTimeError)) throw error;
-        incompleteReason = "soft_stop";
-        logger.warn("Stopping bill-type scan early: no Lambda time left to retry a page", {
-          billType,
-          pagesScanned: pages,
-          reason: error.message,
-        });
-        break;
+      if (pages >= maxPages) return { stop: "max_pages", unavailable: null, firstCount, stoppedAt: stoppedAt() };
+      const read = await requestPage(scan, range, offset);
+      if (read.kind === "no_bill_yet") return { stop: "no_bill_yet", unavailable: null, firstCount, stoppedAt: null };
+      if (read.kind === "stop") {
+        return { stop: read.reason, unavailable: read.unavailable, firstCount, stoppedAt: stoppedAt() };
       }
       pages += 1;
-      apiCalls += 1;
+      const { rows, count: pageCount } = read;
+      if (pages === 1) firstCount = pageCount;
+      // A resumed range's top is in the past: a row that shows in it now came late, so it explains nothing it lacks.
+      if (!resume && count !== null && pageCount !== null && pageCount > count) risen += pageCount - count;
+      const { rowGuids, reachedEarlierDay } = await takeRows(scan, rows, fromDay);
+      for (const guid of rowGuids) if (guid !== null) listedGuids.add(guid);
 
-      const pageCount = extractTotalCount(payload);
-      if (noBillYet && pages === 1 && pageCount === null && extractBillsArray(payload) === null) {
-        // REL-46: a 200 with no bill list and no count for a type with no bill yet reads as an empty list, as the
-        // error answers above do. The watermark stays put, so nothing is skipped, and the types after it are polled.
-        logger.warn(
-          "congress.gov answered a 200 with no bill list for a bill type with no bill yet; read as an empty list",
-          { congress, billType, status: 200, filtered },
-        );
-        await emitCongressMetric("BillPollerNoBillYetAnswer", congress, 1);
-        noBillYetAnswer = true;
-        break;
-      }
-      if (!backlog && count !== null && pageCount !== null && pageCount > count) risen += pageCount - count;
-      const rows = listRowsOf(payload, pageCount, offset, list);
-      if (pages === 1) windowRows = pageCount;
-      if (rows.length > 0) anyRow = true;
-
-      const rowGuids: Array<string | null> = [];
-      const pageMessages: UpdatedBillMessage[] = [];
-      let reachedEarlierDay = false;
-      for (const row of rows) {
-        const msg = toBillMessage(row, billType, congress);
-        rowGuids.push(msg?.guid ?? null);
-        if (!msg) {
-          unnamedRows += 1;
-          continue;
-        }
-        if (!filtered && msg.updateDate && msg.updateDate < fallbackFromDay) {
-          reachedEarlierDay = true;
-          break;
-        }
-        if (gate) latestActions.set(msg, latestActionOf(row));
-        pageMessages.push(msg);
-      }
-      await enqueuePage(pageMessages);
-
-      // A backlog resumed on a page with no count cannot be checked for rows that moved since its last page: read its
-      // window again from the top.
-      if (pages === 1 && backlog && offset > 0 && pageCount === null) {
-        logger.warn("congress.gov gave no count to check a backlog against; reading its window again from the top", {
+      // A resumed paging whose first page has no count cannot be checked for rows that moved since: read the range
+      // again from its top.
+      if (pages === 1 && resume && offset > 0 && pageCount === null) {
+        logger.warn("congress.gov gave no count to check a paged slice against; reading it again from its top", {
           congress,
           billType,
+          ...range,
           offset,
         });
         offset = 0;
@@ -1159,19 +1355,18 @@ const pollBillType = async (
         continue;
       }
 
-      // Drift: the page shares no row with the end of the page before, or a backlog's window lost more rows since its
-      // last page than the overlap covers. Rows that left the window above the offset moved the rest up past the
-      // overlap, so rows between the two pages may not have been read: read again from further up.
-      // Nothing can be missed above offset 0, and a fallback that reached an earlier day is done.
+      // Drift: the page shares no row with the end of the page before, or a resumed range lost more rows since the
+      // run before than the overlap covers. Rows that left the list above the offset moved the rest up past the
+      // overlap, so rows between the two pages may not have been read: read again from further up. Nothing can be
+      // missed above offset 0, and a fallback that reached an earlier day is done.
       const tail = previousTail;
-      const lostSinceBacklog =
-        pages === 1 && backlog?.count !== undefined && pageCount !== null ? backlog.count - pageCount : 0;
+      const lostSinceResume = pages === 1 && resume && pageCount !== null ? Math.max(0, resume.count - pageCount) : 0;
       let drifted = false;
       if (offset > 0 && !reachedEarlierDay) {
         drifted =
-          tail && tail.size > 0
+          tail !== null && tail.size > 0
             ? !rowGuids.some((guid) => guid !== null && tail.has(guid))
-            : lostSinceBacklog > PAGE_OVERLAP_ROWS;
+            : lostSinceResume > PAGE_OVERLAP_ROWS;
       }
       if (drifted) {
         await emitMetric("BillPollerPageDrift", 1);
@@ -1179,10 +1374,11 @@ const pollBillType = async (
           congress,
           billType,
           filtered,
+          ...range,
           offset,
           rows: rows.length,
           count: pageCount,
-          lostSinceBacklog,
+          ...(lostSinceResume > 0 ? { lostSinceResume } : {}),
         };
         if (stepBacks < MAX_PAGE_DRIFT_STEP_BACKS) {
           stepBacks += 1;
@@ -1190,8 +1386,8 @@ const pollBillType = async (
             ...driftLine,
             stepBack: stepBacks,
           });
-          // Back one page within a run; back as many rows as the window lost since a backlog's last page.
-          offset = Math.max(0, offset - (tail ? PAGE_STEP_ROWS : lostSinceBacklog));
+          // Back one page; back as many rows as a resumed range lost since the run before.
+          offset = Math.max(0, offset - (tail ? PAGE_STEP_ROWS : lostSinceResume));
           readFrom = Math.min(readFrom, offset);
           count = pageCount;
           continue;
@@ -1209,25 +1405,13 @@ const pollBillType = async (
         rows.length === 0 ||
         (pageCount !== null ? end >= pageCount : rows.length < LIST_PAGE_SIZE)
       ) {
-        // A window only loses rows while it is read (a row updated again leaves it), so this scan has listed every row
-        // it still counts from where its reading began, unless rows moved between pages without a trace: an order that
-        // changes from one request to the next among rows with the same time, or rows that showed up late.
-        const listedRows = handledGuids.size + unnamedRows;
+        const listedRows = listedGuids.size + (scan.unnamedRows - unnamedBefore);
         const expectedRows = filtered && pageCount !== null ? pageCount - readFrom : 0;
-        const shortLine = {
-          congress,
-          billType,
-          from: window.from,
-          to: window.to,
-          readFrom,
-          listedRows,
-          count: pageCount,
-          risen,
-        };
+        const shortLine = { congress, billType, ...range, readFrom, listedRows, count: pageCount, risen };
         if (listedRows < expectedRows) {
-          // No more short than the count rose by between pages of a window whose top is this run's start: rows that
-          // showed in the list while it was read, not page drift. Read again all the same, for any that came more than
-          // OVERLAP_SECONDS after their time; one that came within that is in the next window's overlap too.
+          // No more short than the count rose by between pages: rows that showed in the list while it was read, not
+          // page drift. Read again all the same, for any that came more than OVERLAP_SECONDS after their time; one
+          // that came within that is in the next window's overlap too.
           const showedWhileRead = expectedRows - listedRows <= risen;
           if (rereads < MAX_WINDOW_REREADS) {
             if (!showedWhileRead) await emitMetric("BillPollerPageDrift", 1);
@@ -1247,8 +1431,7 @@ const pollBillType = async (
             continue;
           }
           // Still short: counted either way. Rows that came more than OVERLAP_SECONDS after their time are in no later
-          // window, and the count cannot tell them from rows that came sooner, nor from rows an order among rows with
-          // the same time stepped over.
+          // window, and the count cannot tell them from rows that came sooner, nor from rows the order stepped over.
           await emitMetric("BillPollerPageDrift", 1);
           if (showedWhileRead) {
             logger.warn(
@@ -1262,11 +1445,10 @@ const pollBillType = async (
             );
           }
         }
-        finalCount = pageCount;
-        break;
+        return { stop: null, unavailable: null, firstCount, stoppedAt: null };
       }
-      // The next page starts PAGE_OVERLAP_ROWS before this one ends, and as many rows earlier again as the window
-      // lost since the page before (rows that left it above the offset moved the rest up).
+      // The next page starts PAGE_OVERLAP_ROWS before this one ends, and as many rows earlier again as the list lost
+      // since the page before (rows that left it above the offset moved the rest up).
       const lostSincePrevious = count !== null && pageCount !== null ? Math.max(0, count - pageCount) : 0;
       const nextOffset = Math.max(0, end - Math.min(PAGE_OVERLAP_ROWS, rows.length - 1) - lostSincePrevious);
       previousTail = new Set(
@@ -1279,50 +1461,292 @@ const pollBillType = async (
         billType,
         page: pages,
         filtered,
+        ...range,
         rows: rows.length,
         count: pageCount,
         nextOffset,
         discovered,
         apiCalls,
-        elapsedMs: Date.now() - scanStartedAt,
+        elapsedMs: Date.now() - scan.startedAt,
       });
     }
+  };
 
-    const listed = listedBefore || anyRow;
+  const newScan = (): ScanProgress => ({ pages: 0, anyRow: false, unnamedRows: 0, startedAt: Date.now() });
+
+  const capReached = (scan: ScanProgress): boolean => {
+    if (scan.pages < MAX_PAGES_PER_BILL_TYPE) return false;
+    logger.warn("Reached MAX_PAGES_PER_BILL_TYPE", { billType, maxPages: MAX_PAGES_PER_BILL_TYPE });
+    return true;
+  };
+
+  /**
+   * Filtered (REL-56): the window in time slices, oldest first, each listed by one request whose answer fits in a page.
+   * A slice whose answer does not (more than a page, or fewer rows than it counts) is split in two (splitSlice). When
+   * the older half holds most of its rows, the newer half is read before the older one is split again, so a split that
+   * separates nothing is seen (halvesShareRows): that slice is paged instead, as is one narrower than
+   * MIN_SPLIT_SECONDS. The watermark moves to the top of each slice listed in full once every slice before it is, so a
+   * scan cut short (the page cap, slices and pages alike; the soft stop; an outage) keeps what it listed, and its
+   * backlog names the oldest slice left, so the next run lists from there in narrow slices instead of finding them
+   * again, and pages on a slice from where its paging stopped.
+   */
+  const scanSliced = async (): Promise<ScanOutcome> => {
+    const scan = newScan();
+    const fromMs = Date.parse(window.from);
+    const topMs = Date.parse(window.to);
+    const runTopMs = Date.parse(runTopIso);
+    const backlogTopMs = window.backlog ? Date.parse(window.backlog.to) : null;
+    const paged = window.backlog?.paged;
+    // The backlog's slice; one an earlier run was paging is paged on from where it stopped.
+    const first: Slice =
+      backlogTopMs !== null && paged
+        ? { fromMs, toMs: backlogTopMs, answer: { count: paged.count, complete: false }, resume: paged }
+        : { fromMs, toMs: backlogTopMs ?? topMs };
+    // The slices left: in time order, each sharing a second with the next.
+    const pending: Slice[] =
+      backlogTopMs !== null && backlogTopMs < topMs ? [first, { fromMs: backlogTopMs - 1000, toMs: topMs }] : [first];
+    const watermarkMs = Date.parse(window.watermark);
+    // The top of the slices listed in full so far, from the window's start.
+    let listedToMs = fromMs;
+    // Set by the closures below.
+    const outcome: {
+      // pagination.count of the scan's first answer; undefined before it.
+      windowRows: number | null | undefined;
+      incompleteReason: ScanStopReason | null;
+      unavailable: CongressApiUnavailableError | null;
+      noBillYetAnswer: boolean;
+      // The slice being paged when the scan stopped, and where its paging got to.
+      paging: { slice: Slice; at: PagingPoint | null } | null;
+    } = { windowRows: undefined, incompleteReason: null, unavailable: null, noBillYetAnswer: false, paging: null };
+
+    // Records why the scan stops; returns false.
+    const stopOn = (read: PageRead | Paging): false => {
+      if ("kind" in read) {
+        if (read.kind === "no_bill_yet") outcome.noBillYetAnswer = true;
+        if (read.kind === "stop") {
+          outcome.incompleteReason = read.reason;
+          outcome.unavailable = read.unavailable;
+        }
+      } else if (read.stop === "no_bill_yet") {
+        outcome.noBillYetAnswer = true;
+      } else if (read.stop !== null) {
+        outcome.incompleteReason = read.stop;
+        outcome.unavailable = read.unavailable;
+      }
+      return false;
+    };
+
+    // One request for the slice; its rows are enqueued whether or not they are all of it. Returns false to stop.
+    const readSlice = async (slice: Slice): Promise<boolean> => {
+      if (capReached(scan)) {
+        outcome.incompleteReason = "max_pages";
+        return false;
+      }
+      const read = await requestPage(scan, sliceRange(slice), 0);
+      if (read.kind !== "page") return stopOn(read);
+      if (outcome.windowRows === undefined) outcome.windowRows = read.count;
+      const { rowGuids } = await takeRows(scan, read.rows, null);
+      const { rows, count } = read;
+      // Rows by bill, so a row listed twice cannot stand in for one left out; a row with no bill number counts once.
+      const distinctRows =
+        new Set(rowGuids.filter((guid) => guid !== null)).size + rowGuids.filter((guid) => guid === null).length;
+      const complete = count !== null ? count <= LIST_PAGE_SIZE && distinctRows >= count : rows.length < LIST_PAGE_SIZE;
+      slice.answer = { count, complete };
+      if (count !== null && count <= LIST_PAGE_SIZE && distinctRows < count) {
+        // Not seen yet: every answer that fit in a page listed as many rows as it counted.
+        await emitMetric("BillPollerPageDrift", 1);
+        logger.warn("congress.gov's answer listed fewer rows than it counts; listing its slice in smaller parts", {
+          congress,
+          billType,
+          ...sliceRange(slice),
+          rows: distinctRows,
+          count,
+        });
+      }
+      return true;
+    };
+
+    // A slice splitting cannot list: paged by offset, within the scan's MAX_PAGES_PER_BILL_TYPE requests. Cut short
+    // (the cap, the soft stop, an outage), its paging goes on from there next run (the backlog's `paged`), so a burst
+    // larger than one run pages is read over several. Returns false to stop.
+    const pageSlice = async (
+      slice: Slice,
+      reason: "narrow" | "burst" | "halves_share_rows" | "resumed",
+    ): Promise<boolean> => {
+      const known = slice.answer?.count ?? null;
+      if (capReached(scan)) {
+        outcome.incompleteReason = "max_pages";
+        outcome.paging = { slice, at: slice.resume ?? (known !== null ? { offset: 0, count: known } : null) };
+        return false;
+      }
+      logger.warn("congress.gov lists more rows in one slice of the window than fit in a page; paging it", {
+        congress,
+        billType,
+        ...sliceRange(slice),
+        count: known,
+        reason,
+        pagesScanned: scan.pages,
+        ...(slice.resume ? { resumeAt: slice.resume.offset } : {}),
+      });
+      const paging = await pageList(scan, sliceRange(slice), MAX_PAGES_PER_BILL_TYPE - scan.pages, null, slice.resume);
+      if (paging.stop !== null) {
+        if (paging.stop === "max_pages") {
+          logger.warn("Reached MAX_PAGES_PER_BILL_TYPE", { billType, maxPages: MAX_PAGES_PER_BILL_TYPE });
+        }
+        outcome.paging = { slice, at: paging.stoppedAt };
+        return stopOn(paging);
+      }
+      slice.answer = { count: known, complete: true };
+      return true;
+    };
+
+    // Reads each part not read yet; returns false to stop.
+    const readParts = async (parts: Slice[]): Promise<boolean> => {
+      for (const part of parts) {
+        if (!part.answer && !(await readSlice(part))) return false;
+      }
+      return true;
+    };
+
+    for (;;) {
+      while (pending.length > 0 && pending[0].answer?.complete) {
+        listedToMs = pending[0].toMs;
+        pending.shift();
+      }
+      if (pending.length === 0) break;
+      const slice = pending[0];
+      if (slice.resume) {
+        if (!(await pageSlice(slice, "resumed"))) break;
+        continue;
+      }
+      if (!slice.answer) {
+        if (!(await readSlice(slice))) break;
+        continue;
+      }
+      if (!splittable(slice) || slice.burst) {
+        if (!(await pageSlice(slice, slice.burst ? "burst" : "narrow"))) break;
+        continue;
+      }
+      slice.halves ??= splitSlice(slice);
+      const [older, newer] = slice.halves;
+      if (!older.answer && !(await readSlice(older))) break;
+      const wholeRows = slice.answer.count;
+      const olderRows = older.answer?.count ?? null;
+      if (older.answer?.complete) {
+        // The rows the older half lacks are in the newer one: more than a page of them, and it is split without a
+        // request of its own.
+        if (!newer.answer && wholeRows !== null && olderRows !== null && wholeRows - olderRows > LIST_PAGE_SIZE) {
+          newer.answer = { count: wholeRows - olderRows, complete: false };
+        }
+      } else if (wholeRows !== null && olderRows !== null && olderRows >= UNSPLIT_SHARE * wholeRows) {
+        // The older half holds most of the rows: the newer one is read now, to tell a split that separates nothing.
+        if (!newer.answer && !(await readSlice(newer))) break;
+        if (halvesShareRows(slice, older, newer)) {
+          // Most rows are in the second the halves share (a burst), or the filter does not tell the halves apart. Its
+          // older and newer parts tell: without the burst they hold far fewer rows, and only the 5 seconds around it
+          // are paged; with a coarse filter they hold as many, and the slice is paged whole.
+          if (slice.parts === undefined) slice.parts = splitAround(slice);
+          const { parts } = slice;
+          if (parts && !(await readParts(parts))) break;
+          const partRows = (part: Slice) => part.answer?.count ?? null;
+          const separated =
+            parts !== null &&
+            [parts[0], parts[2]].every((part) => {
+              const rows = partRows(part);
+              return rows !== null && wholeRows !== null && rows < UNSPLIT_SHARE * wholeRows;
+            });
+          if (parts && separated) {
+            pending.splice(0, 1, ...parts);
+            continue;
+          }
+          if (!(await pageSlice(slice, "halves_share_rows"))) break;
+          continue;
+        }
+      }
+      pending.splice(0, 1, older, newer);
+    }
+
+    const listed = listedBefore || scan.anyRow;
+    const listedTo = new Date(Math.max(watermarkMs, listedToMs)).toISOString();
     let nextCursor: BillTypeCursor;
-    if (noBillYetAnswer) {
+    if (outcome.noBillYetAnswer) {
       nextCursor = cursor;
-    } else if (incompleteReason === null) {
-      // Every row up to the window's top has been listed; the fallback has listed everything up to the run's start.
-      nextCursor = cursorAt(filtered ? window.to : runTopIso, listed);
-    } else if (pages === 0 || !filtered) {
-      // Nothing read (an earlier backlog stays as it was), or the fallback, which keeps no backlog.
+    } else if (pending.length === 0) {
+      // Every row up to the window's top has been listed.
+      nextCursor = cursorAt(listedTo, listed);
+    } else if (scan.pages === 0) {
+      // Nothing read: an earlier backlog stays as it was.
       nextCursor = cursor;
     } else {
-      // Stopped early: the same window, from where this scan got to, next run; from its top without a count.
+      // Stopped early. The next window starts a second (the one slices share) below the top of what this scan listed
+      // in full, or below OVERLAP_SECONDS before this run's start if that is earlier: a row up to there showed in the
+      // list before it was read, unless it came more than OVERLAP_SECONDS late. A scan that listed nothing keeps its
+      // window's start; none starts earlier than the watermark less OVERLAP_SECONDS. It lists up to the oldest slice
+      // left first, narrowed as far as this scan got (oldestSliceLeft), so every run lists a slice or narrows one; a
+      // top at or below where it starts is no backlog's (parseBacklog), so the first slice past it is named then.
+      const usualFromMs = Date.parse(windowStartIso(listedTo));
+      const listedFromMs =
+        listedToMs > fromMs ? Math.min(listedToMs, runTopMs - OVERLAP_SECONDS * 1000) - 1000 : fromMs;
+      const nextFromMs = Math.max(usualFromMs, listedFromMs);
+      // A slice being paged is named whole, and its paging goes on from where it stopped when the next window
+      // starts where it does.
+      const pagingLeft = outcome.paging?.slice === pending[0] ? outcome.paging : null;
+      const tops = [(pagingLeft ? pending[0] : oldestSliceLeft(pending[0])).toMs, ...pending.map((left) => left.toMs)];
+      const nextTop = tops.find((top) => top > nextFromMs);
+      const from = nextFromMs > usualFromMs ? { from: new Date(nextFromMs).toISOString() } : {};
+      const resumable =
+        pagingLeft?.at && pending[0].fromMs === nextFromMs && nextTop === pending[0].toMs
+          ? { paged: pagingLeft.at }
+          : {};
       nextCursor = cursorAt(
-        window.watermark,
+        listedTo,
         listed,
-        count !== null ? { to: window.to, offset, count } : { to: window.to, offset: 0 },
+        nextTop !== undefined ? { ...from, to: new Date(nextTop).toISOString(), ...resumable, offset: 0 } : undefined,
       );
     }
 
-    // A window this scan read in full, from its top and without a step back, small enough to keep (REL-56).
+    // A window this scan listed with one answer, from its start, small enough to keep (REL-56).
     const probeTo = Date.parse(window.to) - OVERLAP_SECONDS * 1000;
     const probe: LateRowProbe | null =
-      filtered &&
-      !backlog &&
-      incompleteReason === null &&
-      finalCount !== null &&
-      stepBacks === 0 &&
-      rereads === 0 &&
-      unnamedRows === 0 &&
+      !window.backlog &&
+      pending.length === 0 &&
+      scan.pages === 1 &&
+      outcome.windowRows !== null &&
+      scan.unnamedRows === 0 &&
       handledNumbers.size <= PROBE_MAX_ROWS &&
-      probeTo > Date.parse(window.from)
+      probeTo > fromMs
         ? { billType, from: window.from, to: new Date(probeTo).toISOString(), numbers: [...handledNumbers] }
         : null;
 
-    return { nextCursor, incompleteReason, pagesScanned: pages, unavailable, windowRows, probe };
+    return {
+      nextCursor,
+      incompleteReason: outcome.incompleteReason,
+      pagesScanned: scan.pages,
+      unavailable: outcome.unavailable,
+      windowRows: outcome.windowRows ?? null,
+      probe,
+    };
+  };
+
+  // The fallback when congress.gov rejects the filter: newest first from the top of the whole list, down to the first
+  // row dated before the day the window starts. It keeps no backlog: cut short, the next run starts again.
+  const scanUnfiltered = async (): Promise<ScanOutcome> => {
+    const scan = newScan();
+    const paging = await pageList(scan, null, MAX_PAGES_PER_BILL_TYPE, startOfUtcDayIso(window.from));
+    if (paging.stop === "max_pages") {
+      logger.warn("Reached MAX_PAGES_PER_BILL_TYPE", { billType, maxPages: MAX_PAGES_PER_BILL_TYPE });
+    }
+    const stopped = paging.stop === "no_bill_yet" ? null : paging.stop;
+    let nextCursor = cursor;
+    if (paging.stop === null) nextCursor = cursorAt(runTopIso, listedBefore || scan.anyRow);
+    return {
+      nextCursor,
+      incompleteReason: stopped,
+      pagesScanned: scan.pages,
+      unavailable: paging.unavailable,
+      windowRows: paging.firstCount,
+      probe: null,
+    };
   };
 
   const result = (outcome: ScanOutcome, fallbackUsed: boolean): PollResult => ({
@@ -1344,14 +1768,14 @@ const pollBillType = async (
   }
 
   try {
-    return result(await scanMode(true), false);
+    return result(await scanSliced(), false);
   } catch (error) {
     if (!shouldFallbackToNewestScan(error)) {
       throw error;
     }
 
     logger.warn("Filtered scan rejected; switching to fallback newest-page scan", { billType, error });
-    return result(await scanMode(false), true);
+    return result(await scanUnfiltered(), true);
   }
 };
 
@@ -1574,12 +1998,15 @@ const pollCongress = async (
 
     // An outage is reported once, below, with the run's outcome.
     if (result.incompleteReason && result.incompleteReason !== "upstream_unavailable") {
-      logger.warn("Bill-type scan incomplete; watermark kept, the next run reads the rest of the window", {
-        billType,
-        reason: result.incompleteReason,
-        pagesScanned: result.pagesScanned,
-        cursor: result.nextCursor,
-      });
+      logger.warn(
+        "Bill-type scan incomplete; the watermark moved only past what was listed, the next run lists the rest",
+        {
+          billType,
+          reason: result.incompleteReason,
+          pagesScanned: result.pagesScanned,
+          cursor: result.nextCursor,
+        },
+      );
     }
     logger.info("Saved bill poller cursor", {
       billType,

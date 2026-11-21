@@ -39,7 +39,13 @@ type PollerContext = { awsRequestId?: string; getRemainingTimeInMillis: () => nu
 let handler: (event?: unknown, context?: PollerContext) => HandlerReturn;
 let restoreEnv: (() => void) | undefined;
 
-type PersistedBacklog = { to: string; offset: number; count?: number };
+type PersistedBacklog = {
+  from?: string;
+  to: string;
+  paged?: { offset: number; count: number };
+  offset: number;
+  count?: number;
+};
 
 // REL-56: a cursor written before it has only lastUpdateAt and lastSeenKey.
 type PersistedCursor = {
@@ -316,11 +322,13 @@ type ListOptions = {
   reorder?: (rows: ListedBill[], url: URL) => ListedBill[];
   // Answers without pagination.count.
   noCount?: boolean;
+  // Which ends of fromDateTime..toDateTime match: both by default (congress.gov's rule was not checked).
+  bounds?: "inclusive" | "exclusive" | "from_inclusive" | "to_inclusive";
 };
 
-// A stand-in for congress.gov's /bill/{congress}/{type} list as production answers it: honours fromDateTime and
-// toDateTime (inclusive, to the second unless `precision` says otherwise), limit and offset; newest first by `at` (then
-// the higher number); pagination.count and, while rows remain, pagination.next.
+// A stand-in for congress.gov's /bill/{congress}/{type} list: honours fromDateTime and toDateTime (inclusive, to the
+// second, unless `bounds` or `precision` says otherwise), limit and offset; newest first by `at` (then the higher
+// number) unless `reorder` says otherwise; pagination.count and, while rows remain, pagination.next.
 const serveBillList =
   (bills: ListedBill[], options: ListOptions = {}) =>
   async (url: string) => {
@@ -334,8 +342,13 @@ const serveBillList =
     const limit = Math.min(Number(requested.searchParams.get("limit") ?? "20"), 250);
     const grain = { date: 86_400_000, hour: 3_600_000, second: 1 }[options.precision ?? "second"];
     const time = (iso: string) => Math.floor(Date.parse(iso) / grain) * grain;
+    const bounds = options.bounds ?? "inclusive";
+    const fromIncluded = bounds === "inclusive" || bounds === "from_inclusive";
+    const toIncluded = bounds === "inclusive" || bounds === "to_inclusive";
+    const afterFrom = (at: string) => !from || (fromIncluded ? time(at) >= time(from) : time(at) > time(from));
+    const beforeTo = (at: string) => !to || (toIncluded ? time(at) <= time(to) : time(at) < time(to));
     const sorted = bills
-      .filter((bill) => (!from || time(bill.at) >= time(from)) && (!to || time(bill.at) <= time(to)))
+      .filter((bill) => afterFrom(bill.at) && beforeTo(bill.at))
       .sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || Number(b.number) - Number(a.number));
     const matching = options.reorder ? options.reorder(sorted, requested) : sorted;
     const page = matching.slice(offset, offset + limit);
@@ -382,6 +395,43 @@ const billsEvery = (n: number, startIso: string, stepSeconds: number, first = 1)
     at: new Date(Date.parse(startIso) + index * stepSeconds * 1000).toISOString(),
   }));
 
+// A repeatable pseudo-random sequence in [0, 1) (mulberry32).
+const seededRandom = (seed: number) => {
+  let state = seed >>> 0;
+  return (): number => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+  };
+};
+
+// REL-56 (2026-11-21): congress.gov's list is not in the order of the time its filter uses, and the order does not hold
+// from one request to the next. For serveBillList's `reorder`: every request answered in another (repeatable) order.
+const shuffledEachRequest = (seed = 7) => {
+  const random = seededRandom(seed);
+  return (rows: ListedBill[]): ListedBill[] => {
+    const order = [...rows];
+    for (let index = order.length - 1; index > 0; index -= 1) {
+      const other = Math.floor(random() * (index + 1));
+      [order[index], order[other]] = [order[other], order[index]];
+    }
+    return order;
+  };
+};
+
+// `n` bills at whole seconds drawn at random from fromIso to toIso, numbered from `first`.
+const billsAtRandom = (n: number, fromIso: string, toIso: string, seed = 11, first = 1): ListedBill[] => {
+  const random = seededRandom(seed);
+  const fromS = Date.parse(fromIso) / 1000;
+  const spanS = Date.parse(toIso) / 1000 - fromS;
+  return Array.from({ length: n }, (_, index) => ({
+    number: String(first + index),
+    at: new Date((fromS + Math.floor(random() * (spanS + 1))) * 1000).toISOString(),
+  }));
+};
+
 const guidsOf = (bills: Array<{ number: string }>): string[] => bills.map((bill) => `BILLS-119hr${bill.number}`);
 
 const enqueuedGuids = (): string[] =>
@@ -423,16 +473,60 @@ const runAt = async (iso: string, context?: PollerContext): Promise<string[]> =>
   return enqueuedGuids();
 };
 
-// REL-06 and REL-56: a window that takes more than one run (the page cap, the soft stop) is read in full over the next
-// runs, with the same top, before the watermark moves; nothing in it is skipped.
+// Runs the handler every 5 minutes from `startIso` until a run lists its whole window (the hr cursor at the run's start,
+// no backlog), or with `untilIso` until the hr watermark reaches it; at most `maxRuns` times; `before` runs before each.
+// Returns the guids each run enqueued.
+const runUntilListed = async (
+  startIso: string,
+  maxRuns: number,
+  before?: (run: number, iso: string) => void,
+  untilIso?: string,
+): Promise<string[][]> => {
+  const runs: string[][] = [];
+  for (let run = 0; run < maxRuns; run += 1) {
+    const iso = new Date(Date.parse(startIso) + run * 300_000).toISOString();
+    before?.(run, iso);
+    runs.push(await runAt(iso));
+    const cursor = persistedState.cursors.hr;
+    if (
+      untilIso
+        ? Date.parse(cursor.watermark ?? "") >= Date.parse(untilIso)
+        : !cursor.backlog && cursor.watermark === iso
+    ) {
+      return runs;
+    }
+  }
+  throw new Error(`The window was not listed in ${maxRuns} runs`);
+};
+
+// The list requests' offsets.
+const requestOffsets = (): string[] => requestUrls().map((url) => url.searchParams.get("offset") ?? "");
+
+// REL-56: the slice of the window a request lists, as "<from>..<to>".
+const requestRange = (url: URL): string =>
+  `${url.searchParams.get("fromDateTime")}..${url.searchParams.get("toDateTime")}`;
+
+const pagingWarnings = () => logLinesWithMessage(console.warn, /^congress\.gov lists more rows in one slice/);
+
+// REL-06 and REL-56: a window is listed in time slices, oldest first. A scan cut short (the page cap, the soft stop, an
+// outage) moves the watermark past the slices it listed and names the oldest slice left as its backlog; the next runs
+// list the rest. Nothing in the window is skipped.
 describe("billsApiPoller windows across runs (REL-06, REL-56)", () => {
-  const cursorIso = "2026-03-01T00:00:00.000Z";
-  // 600 updates after the cursor, one a minute from 2026-03-02T00:00Z, newest first: more than two pages.
+  const topIso = "2026-03-02T10:00:00.000Z";
+  // 600 updates after the cursor, one a minute from 2026-03-02T00:00Z: more than two pages.
   const backlogBills = () => billsEvery(600, "2026-03-02T00:00:00.000Z", 60);
+  // The window; its older half; then down the newer halves, which the counts show hold more than a page, their older
+  // halves.
+  const RUN1_RANGES = [
+    "2026-02-28T23:58:00Z..2026-03-02T10:00:00Z",
+    "2026-02-28T23:58:00Z..2026-03-01T16:59:01Z",
+    "2026-03-01T16:59:00Z..2026-03-02T01:29:31Z",
+    "2026-03-02T01:29:30Z..2026-03-02T05:44:46Z",
+  ];
 
   beforeEach(() => {
     jest.useFakeTimers({ doNotFake: ["setTimeout", "setImmediate", "nextTick"] });
-    jest.setSystemTime(new Date("2026-03-02T10:00:00.000Z"));
+    jest.setSystemTime(new Date(topIso));
   });
 
   it("enqueues every row in the window, its overlap included, and none before it", async () => {
@@ -450,14 +544,16 @@ describe("billsApiPoller windows across runs (REL-06, REL-56)", () => {
 
     expect(result.discovered).toBe(5);
     expect(enqueuedGuids()).toEqual(guidsOf([7, 6, 5, 900, 901].map((n) => ({ number: String(n) }))));
+    // A window that fits in one page is one request, as before REL-56's slices.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
     const url = requestUrls()[0];
     expect(url.searchParams.get("fromDateTime")).toBe("2026-02-28T23:58:00Z");
     expect(url.searchParams.get("toDateTime")).toBe("2026-03-02T10:00:00Z");
     expect(url.searchParams.get("offset")).toBe("0");
     expect(url.searchParams.get("limit")).toBe("250");
-    // Newest first: the offsets, the overlap and the drift checks rely on this order.
+    // Asked for, though congress.gov does not keep to it (REL-56): nothing here relies on the order.
     expect(url.searchParams.get("sort")).toBe("updateDate+desc");
-    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-03-02T10:00:00.000Z"));
+    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark(topIso));
     // The fields code from before REL-56 reads: the midnight that starts the next window.
     expect(persistedState.cursors.hr).toMatchObject({
       lastUpdateAt: "2026-03-02T00:00:00.000Z",
@@ -465,137 +561,531 @@ describe("billsApiPoller windows across runs (REL-06, REL-56)", () => {
     });
   });
 
-  it("keeps the watermark when MAX_PAGES_PER_BILL_TYPE stops the scan, and reads the rest of the same window next run", async () => {
-    reloadHandler({ MAX_PAGES_PER_BILL_TYPE: "2" });
+  it("moves the watermark past the slices listed when MAX_PAGES_PER_BILL_TYPE stops a scan, and lists the rest next run", async () => {
+    reloadHandler({ MAX_PAGES_PER_BILL_TYPE: "4" });
     const bills = backlogBills();
-    mockFetch.mockImplementation(serveBillList(bills));
+    mockFetch.mockImplementation(serveBillList(bills, { reorder: shuffledEachRequest() }));
 
-    // Run 1 reads offsets 0 and 225 (each page reads the last 25 rows of the one before again), then hits the cap.
-    const run1 = await runAt("2026-03-02T10:00:00.000Z");
-    expect(new Set(run1)).toEqual(new Set(guidsOf(bills.slice(125))));
+    const run1 = await runAt(topIso);
+
+    expect(requestOffsets()).toEqual(["0", "0", "0", "0"]);
+    // The window, its older half (empty: listed), the newer half's older half (90 rows: listed), and the next older
+    // half (255 rows: more than a page); then the cap.
+    expect(requestUrls().map(requestRange)).toEqual(RUN1_RANGES);
+    // The watermark is the top of the slices listed; the backlog names the oldest left, the older half of the one that
+    // held more than a page, and starts the next window a second below the watermark (the second slices share): what
+    // is below it was listed more than 120 s after its time, so nothing there can still show late.
     expect(persistedState.cursors.hr).toEqual(
-      cursorAtWatermark("2026-03-01T00:00:00.000Z", true, {
-        to: "2026-03-02T10:00:00.000Z",
-        offset: 450,
-        count: 600,
+      cursorAtWatermark("2026-03-02T01:29:31.000Z", true, {
+        from: "2026-03-02T01:29:30.000Z",
+        to: "2026-03-02T03:37:09.000Z",
+        offset: 0,
       }),
     );
-    expect(logLines(console.warn)).toContainEqual(
-      expect.objectContaining({
-        message: expect.stringContaining("Bill-type scan incomplete"),
-        billType: "hr",
-        reason: "max_pages",
-      }),
-    );
+    expect(logLinesWithMessage(console.warn, /^Bill-type scan incomplete/)).toEqual([
+      expect.objectContaining({ billType: "hr", reason: "max_pages" }),
+    ]);
 
-    // Updates while the backlog is read: one bill already read and one not yet read leave the window (their new
-    // time is after its top), and a new bill arrives. None is lost.
-    const readEarlier = bills[599];
-    const notReadYet = bills[0];
-    readEarlier.at = "2026-03-02T10:01:00.000Z";
-    notReadYet.at = "2026-03-02T10:02:00.000Z";
+    // Updates while the rest is listed: one bill listed already and one not yet leave the window (their new time is
+    // after its top), and a new bill comes. None is lost.
+    const listedEarlier = bills.find((bill) => run1.includes(`BILLS-119hr${bill.number}`))!;
+    const notListedYet = bills.find((bill) => !run1.includes(`BILLS-119hr${bill.number}`))!;
+    listedEarlier.at = "2026-03-02T10:01:00.000Z";
+    notListedYet.at = "2026-03-02T10:02:00.000Z";
     bills.push({ number: "9000", at: "2026-03-02T10:03:00.000Z" });
 
-    // Run 2 reads the same window, same top, from offset 450, and finishes it: the watermark moves to its top.
+    // The next run lists from the backlog's start, up to its top first.
     mockFetch.mockClear();
-    const run2 = await runAt("2026-03-02T10:05:00.000Z");
-    const resumed = requestUrls()[0];
-    expect(resumed.searchParams.get("fromDateTime")).toBe("2026-02-28T23:58:00Z");
-    expect(resumed.searchParams.get("toDateTime")).toBe("2026-03-02T10:00:00Z");
-    expect(resumed.searchParams.get("offset")).toBe("450");
-    expect(run2).not.toContain("BILLS-119hr9000");
-    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-03-02T10:00:00.000Z"));
+    const runs = await runUntilListed("2026-03-02T10:05:00.000Z", 10);
+    expect(requestRange(requestUrls()[0])).toBe("2026-03-02T01:29:30Z..2026-03-02T03:37:09Z");
+    expect(new Set([run1, ...runs].flat())).toEqual(new Set(guidsOf(bills)));
+    expect(runs.flat()).toEqual(expect.arrayContaining(guidsOf([listedEarlier, notListedYet, { number: "9000" }])));
+    expect(metricData("BillPollerPageDrift")).toEqual([]);
 
-    // Run 3 lists the next window: the three updates made during the backlog, and the rows of its 120 s overlap.
-    const run3 = await runAt("2026-03-02T10:10:00.000Z");
-    expect(run3).toEqual(
-      expect.arrayContaining([
-        "BILLS-119hr9000",
-        `BILLS-119hr${notReadYet.number}`,
-        `BILLS-119hr${readEarlier.number}`,
-      ]),
-    );
-    expect(new Set([...run1, ...run2, ...run3])).toEqual(new Set([...guidsOf(bills)]));
-
-    // Run 4 finds only its overlap.
-    expect(await runAt("2026-03-02T10:15:00.000Z")).toEqual([]);
+    // The next run lists the rest; the one after only its 120 s overlap, which holds hr9000 (10:03:00).
+    expect(runs).toHaveLength(1);
+    expect(await runAt("2026-03-02T10:10:00.000Z")).toEqual(["BILLS-119hr9000"]);
   });
 
-  it("covers every bill across runs whatever the page cap", async () => {
-    for (const maxPages of ["1", "2", "3"]) {
+  // Whatever the cap, and whatever order each answer comes in: each run lists slices or narrows the next run's first.
+  // (At one request a run, a run lists the backlog's slice and leaves the rest of its window to the next: it keeps up
+  // one run behind, with a backlog each time.)
+  it.each(["1", "2", "3", "5", "20"])(
+    "lists every bill across runs with MAX_PAGES_PER_BILL_TYPE %s, whatever order each answer comes in",
+    async (maxPages) => {
       reloadHandler({ MAX_PAGES_PER_BILL_TYPE: maxPages });
-      persistedState.cursors = { hr: { lastUpdateAt: cursorIso, lastSeenKey: `${cursorIso}#` } };
       const bills = backlogBills();
-      mockFetch.mockImplementation(serveBillList(bills));
+      mockFetch.mockImplementation(serveBillList(bills, { reorder: shuffledEachRequest() }));
 
-      const seen = new Set<string>();
-      let minute = 0;
-      do {
-        for (const guid of await runAt(
-          new Date(Date.parse("2026-03-02T10:00:00.000Z") + minute * 60_000).toISOString(),
-        )) {
-          seen.add(guid);
-        }
-        minute += 5;
-      } while (persistedState.cursors.hr.backlog && minute < 60);
+      const runs = await runUntilListed(topIso, 60, undefined, topIso);
 
-      expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-03-02T10:00:00.000Z"));
-      expect(seen).toEqual(new Set(guidsOf(bills)));
-    }
+      expect(new Set(runs.flat())).toEqual(new Set(guidsOf(bills)));
+      expect(requestOffsets().every((offset) => offset === "0")).toBe(true);
+      expect(runs.length).toBe({ "1": 10, "2": 5, "3": 3, "5": 2, "20": 1 }[maxPages]);
+    },
+  );
+
+  it("keeps what it listed when the soft stop interrupts a scan, then lists the rest of the window", async () => {
+    const bills = backlogBills();
+    mockFetch.mockImplementation(serveBillList(bills, { reorder: shuffledEachRequest() }));
+    // Plenty of time for two requests, then below the reserve for one more.
+    const context = { getRemainingTimeInMillis: () => (mockFetch.mock.calls.length >= 2 ? 1_000 : 60_000) };
+
+    const run1 = await runAt(topIso, context);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    // The window, and its older half (empty: listed): the newer half is left, its older half first.
+    expect(persistedState.cursors.hr).toEqual(
+      cursorAtWatermark("2026-03-01T16:59:01.000Z", true, {
+        from: "2026-03-01T16:59:00.000Z",
+        to: "2026-03-02T01:29:31.000Z",
+        offset: 0,
+      }),
+    );
+    expect(
+      logLinesWithMessage(console.warn, /^Stopping bill-type scan early due to low remaining Lambda time/),
+    ).toEqual([expect.objectContaining({ billType: "hr", pagesScanned: 2 })]);
+
+    const runs = await runUntilListed("2026-03-02T10:05:00.000Z", 3);
+
+    expect(runs).toHaveLength(1);
+    expect(new Set([run1, ...runs].flat())).toEqual(new Set(guidsOf(bills)));
+  });
+});
+
+// REL-56 (2026-11-21): congress.gov's list is not in the order of the time its filter uses, and offset paging over it
+// dropped rows (11,137 distinct of 11,141 counted, with no bill updated meanwhile), while an answer that fit in one page
+// was always exact. So the poller lists each window in time slices whose answers each fit in one page.
+describe("billsApiPoller sliced listing (REL-56)", () => {
+  const topIso = "2026-11-07T14:00:00.000Z";
+  const hr = (...numbers: string[]) => numbers.map((number) => `BILLS-119hr${number}`);
+  const driftWarnings = () => logLinesWithMessage(console.warn, /^congress\.gov's list moved between two pages/);
+
+  beforeEach(() => {
+    jest.useFakeTimers({ doNotFake: ["setTimeout", "setImmediate", "nextTick"] });
+    persistedState = {
+      schemaVersion: 1,
+      congress: "119",
+      lastRunAt: "2026-11-07T09:00:00.000Z",
+      lastPolledAt: "2026-11-07T09:00:00.000Z",
+      cursors: { hr: cursorAtWatermark("2026-11-07T09:00:00.000Z") },
+    };
   });
 
-  it("keeps the watermark when the soft stop interrupts a scan, then reads the rest of the window", async () => {
-    const bills = backlogBills();
+  // The stand-in's premise: with an order that changes on every request, as congress.gov's does, offset paging (250 a
+  // page, 25 of overlap) misses rows that a reading in one-page slices does not.
+  it("misses rows when it pages such a list by offset, which is why the poller does not", async () => {
+    const bills = billsAtRandom(600, "2026-11-07T09:00:00.000Z", "2026-11-07T13:59:59.000Z");
+    const serve = serveBillList(bills, { reorder: shuffledEachRequest() });
+    const seen = new Set<string>();
+    for (const offset of [0, 225, 450]) {
+      const url = `https://api.congress.gov/v3/bill/119/hr?limit=250&offset=${offset}&fromDateTime=2026-11-07T08:58:00Z&toDateTime=2026-11-07T14:00:00Z`;
+      const page = JSON.parse(await (await serve(url)).text()) as { bills: Array<{ number: string }> };
+      page.bills.forEach((bill) => seen.add(bill.number));
+    }
+
+    expect(seen.size).toBeLessThan(600);
+  });
+
+  it("lists every bill of a 2,000-row window once, in slices that each fit one answer, whatever order each answer comes in", async () => {
+    reloadHandler({ MAX_PAGES_PER_BILL_TYPE: "100" });
+    const bills = billsAtRandom(2000, "2026-11-07T08:58:00.000Z", topIso);
+    mockFetch.mockImplementation(serveBillList(bills, { reorder: shuffledEachRequest() }));
+
+    const guids = await runAt(topIso);
+
+    expect(guids).toHaveLength(new Set(guidsOf(bills)).size);
+    expect(new Set(guids)).toEqual(new Set(guidsOf(bills)));
+    // Every request is a first page; none is paged by offset.
+    expect(requestOffsets().every((offset) => offset === "0")).toBe(true);
+    // 2,000 rows in slices of up to 250: 25 requests, where offset paging would take 9.
+    expect(mockFetch).toHaveBeenCalledTimes(25);
+    expect(pagingWarnings()).toEqual([]);
+    expect(metricData("BillPollerPageDrift")).toEqual([]);
+    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark(topIso));
+  });
+
+  it("splits a slice at a + floor((b - a) / 2) into [a, m + 1] and [m, b], in whole seconds", async () => {
+    // 300 bills, one every 30 s from 09:00:00: all but two in the window's older half.
+    const bills = billsEvery(300, "2026-11-07T09:00:00.000Z", 30);
     mockFetch.mockImplementation(serveBillList(bills));
-    // Plenty of time for the first page, then below the reserve for one more request.
-    const context = { getRemainingTimeInMillis: () => (mockFetch.mock.calls.length >= 1 ? 1_000 : 60_000) };
 
-    const run1 = await runAt("2026-03-02T10:00:00.000Z", context);
+    await runAt(topIso);
 
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(new Set(run1)).toEqual(new Set(guidsOf(bills.slice(350))));
+    // The window is 18,120 s: m = 08:58:00 + 9,060 s = 11:29:00. The older half holds 299 of the 300 rows, so the
+    // newer one (2 rows: listed) is read too, to tell a split that separates nothing; then the older half is split
+    // again, at 08:58:00 + 4,530 s.
+    expect(requestUrls().slice(0, 4).map(requestRange)).toEqual([
+      "2026-11-07T08:58:00Z..2026-11-07T14:00:00Z",
+      "2026-11-07T08:58:00Z..2026-11-07T11:29:01Z",
+      "2026-11-07T11:29:00Z..2026-11-07T14:00:00Z",
+      "2026-11-07T08:58:00Z..2026-11-07T10:13:31Z",
+    ]);
+    expect(new Set(enqueuedGuids())).toEqual(new Set(guidsOf(bills)));
+  });
+
+  // congress.gov's rule at fromDateTime and toDateTime was not checked: the second two halves share covers either.
+  it.each(["inclusive", "exclusive", "from_inclusive", "to_inclusive"] as const)(
+    "misses no bill on a slice's boundary when congress.gov's bounds are %s",
+    async (bounds) => {
+      persistedState.cursors.hr = cursorAtWatermark("2026-11-07T13:52:00.000Z");
+      // A bill every second of the window, 13:50:00 to 14:00:00: every boundary falls on one.
+      const bills = billsEvery(601, "2026-11-07T13:50:00.000Z", 1);
+      mockFetch.mockImplementation(serveBillList(bills, { bounds, reorder: shuffledEachRequest() }));
+
+      const guids = await runAt(topIso);
+
+      // All of them, but for the window's own ends where the bounds leave them out (each is in the window before or
+      // after it).
+      const inside = bills.filter(
+        (bill) =>
+          (bounds === "inclusive" || bounds === "from_inclusive" || bill.at !== "2026-11-07T13:50:00.000Z") &&
+          (bounds === "inclusive" || bounds === "to_inclusive" || bill.at !== topIso),
+      );
+      expect(new Set(guids)).toEqual(new Set(guidsOf(inside)));
+      expect(pagingWarnings()).toEqual([]);
+    },
+  );
+
+  // congress.gov's hidden time may be finer than the whole seconds the poller asks for.
+  it.each(["inclusive", "exclusive"] as const)(
+    "misses no bill whose time falls between whole seconds when congress.gov's bounds are %s",
+    async (bounds) => {
+      persistedState.cursors.hr = cursorAtWatermark("2026-11-07T13:52:00.000Z");
+      // A bill every half second, 13:50:00.250 to 13:59:59.750: none on a whole second.
+      const bills = Array.from({ length: 1200 }, (_, index) => ({
+        number: String(index + 1),
+        at: new Date(Date.parse("2026-11-07T13:50:00.250Z") + index * 500).toISOString(),
+      }));
+      mockFetch.mockImplementation(serveBillList(bills, { bounds, reorder: shuffledEachRequest() }));
+
+      const guids = await runAt(topIso);
+
+      expect(new Set(guids)).toEqual(new Set(guidsOf(bills)));
+      expect(pagingWarnings()).toEqual([]);
+    },
+  );
+
+  // A filter that matched only whole hours (BillPollerFilterImprecise) would make every slice inside an hour count
+  // that whole hour: splitting would never shrink it. The halves sharing most of the rows says so, and the slice is
+  // paged instead of split down to the second.
+  it("pages a slice whose halves share most of its rows rather than split it down to the second", async () => {
+    persistedState.cursors.hr = cursorAtWatermark("2026-11-07T13:55:00.000Z");
+    const bills = billsAtRandom(400, "2026-11-07T13:00:00.000Z", "2026-11-07T13:59:59.000Z");
+    mockFetch.mockImplementation(serveBillList(bills, { precision: "hour" }));
+
+    const guids = await runAt(topIso);
+
+    // Its older and newer parts, around the second its halves share, count the whole hour too: the filter does not
+    // tell them apart, so the window is paged whole.
+    expect(pagingWarnings()).toEqual([
+      expect.objectContaining({
+        from: "2026-11-07T13:53:00.000Z",
+        to: topIso,
+        count: 400,
+        reason: "halves_share_rows",
+        pagesScanned: 6,
+      }),
+    ]);
+    // The window, its two halves, its three parts, then two pages.
+    expect(requestOffsets()).toEqual(["0", "0", "0", "0", "0", "0", "0", "225"]);
+    expect(new Set(guids)).toEqual(new Set(guidsOf(bills)));
+  });
+
+  // REL-56 review: a burst in the second a wide slice's halves share made both halves hold most of its rows, and the
+  // whole slice was paged, so rows the slices would list exactly were paged by offset too. The burst is paged alone.
+  it("pages only the 5 seconds around a burst in the second a slice's halves share, and lists the rest in slices", async () => {
+    persistedState.cursors.hr = cursorAtWatermark("2026-11-07T13:55:00.000Z");
+    // The window is 13:53:00 to 14:00:00: its halves share 13:56:30 to 13:56:31.
+    const burst = Array.from({ length: 600 }, (_, index) => ({
+      number: String(10000 + index),
+      at: "2026-11-07T13:56:30.000Z",
+    }));
+    const spread = billsAtRandom(300, "2026-11-07T13:53:00.000Z", topIso).filter(
+      (bill) => Math.abs(Date.parse(bill.at) - Date.parse("2026-11-07T13:56:30.000Z")) > 3_000,
+    );
+    mockFetch.mockImplementation(serveBillList([...burst, ...spread], { reorder: shuffledEachRequest() }));
+
+    const guids = await runAt(topIso);
+
+    expect(pagingWarnings()).toEqual([
+      expect.objectContaining({
+        from: "2026-11-07T13:56:28.000Z",
+        to: "2026-11-07T13:56:33.000Z",
+        reason: "burst",
+      }),
+    ]);
+    // Every spread bill, listed by answers that fit in a page whatever their order.
+    expect(guids).toEqual(expect.arrayContaining(guidsOf(spread)));
+    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark(topIso));
+  });
+
+  // A burst larger than one run pages is paged over several runs: each goes on from where the one before stopped
+  // (the backlog's `paged`), so none starts it again from its top.
+  it("pages a burst larger than one run pages over several runs, from where each stopped", async () => {
+    reloadHandler({ MAX_PAGES_PER_BILL_TYPE: "16" });
+    persistedState.cursors.hr = cursorAtWatermark("2026-11-07T13:55:00.000Z");
+    const bills = Array.from({ length: 4000 }, (_, index) => ({
+      number: String(10000 + index),
+      at: "2026-11-07T13:56:00.000Z",
+    }));
+    mockFetch.mockImplementation(serveBillList(bills));
+
+    const first = await runAt(topIso);
+
+    // 13 requests to find it, then 3 pages before the cap: the backlog names its slice and where its paging got.
     expect(persistedState.cursors.hr).toEqual(
-      cursorAtWatermark("2026-03-01T00:00:00.000Z", true, {
-        to: "2026-03-02T10:00:00.000Z",
-        offset: 225,
-        count: 600,
+      cursorAtWatermark("2026-11-07T13:55:59.000Z", true, {
+        from: "2026-11-07T13:55:58.000Z",
+        to: "2026-11-07T13:56:02.000Z",
+        paged: { offset: 675, count: 4000 },
+        offset: 0,
       }),
     );
 
-    const run2 = await runAt("2026-03-02T10:05:00.000Z");
+    mockFetch.mockClear();
+    const runs = await runUntilListed("2026-11-07T14:05:00.000Z", 3);
 
-    expect(new Set(run2)).toEqual(new Set(guidsOf(bills.slice(0, 375))));
-    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-03-02T10:00:00.000Z"));
+    expect(requestUrls()[0].searchParams.get("offset")).toBe("675");
+    expect(requestRange(requestUrls()[0])).toBe("2026-11-07T13:55:58Z..2026-11-07T13:56:02Z");
+    expect(pagingWarnings().at(-1)).toMatchObject({ reason: "resumed", resumeAt: 675, pagesScanned: 0 });
+    expect(runs).toHaveLength(1);
+    expect(new Set([...first, ...runs.flat()])).toEqual(new Set(guidsOf(bills)));
+    expect(metricData("BillPollerPageDrift")).toEqual([]);
+  });
+
+  // A resumed paging checks the slice against the count it stopped at: rows that left it since moved the rest up.
+  it("steps back when a paged slice lost more rows since the run before than the overlap covers", async () => {
+    const at = "2026-11-07T13:56:00.000Z";
+    const bills = Array.from({ length: 600 }, (_, index) => ({ number: String(10000 + index), at }));
+    persistedState.cursors.hr = cursorAtWatermark("2026-11-07T13:55:59.000Z", true, {
+      from: "2026-11-07T13:55:58.000Z",
+      to: "2026-11-07T13:56:02.000Z",
+      paged: { offset: 225, count: 600 },
+      offset: 0,
+    });
+    // Since then 60 of the rows the run before read left the slice (updated after its top).
+    [...bills]
+      .sort((a, b) => Number(b.number) - Number(a.number))
+      .slice(100, 160)
+      .forEach((bill) => {
+        bill.at = "2026-11-07T14:02:00.000Z";
+      });
+    mockFetch.mockImplementation(serveBillList(bills));
+
+    const guids = await runAt("2026-11-07T14:05:00.000Z");
+
+    // Back 60 rows, to read what moved above offset 225.
+    expect(requestOffsets().slice(0, 3)).toEqual(["225", "165", "390"]);
+    expect(driftWarnings()).toEqual([expect.objectContaining({ offset: 225, lostSinceResume: 60, stepBack: 1 })]);
+    expect(metricData("BillPollerPageDrift")).toEqual([{ MetricName: "BillPollerPageDrift", Unit: "Count", Value: 1 }]);
+    const order = [...bills].sort((a, b) => Number(b.number) - Number(a.number));
+    expect(guids).toEqual(expect.arrayContaining(guidsOf(order.filter((bill) => bill.at === at).slice(165))));
+    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-11-07T14:05:00.000Z"));
+  });
+
+  it("pages a slice again from its top when the resumed page has no count to check it against", async () => {
+    const bills = Array.from({ length: 300 }, (_, index) => ({
+      number: String(10000 + index),
+      at: "2026-11-07T13:56:00.000Z",
+    }));
+    persistedState.cursors.hr = cursorAtWatermark("2026-11-07T13:55:59.000Z", true, {
+      from: "2026-11-07T13:55:58.000Z",
+      to: "2026-11-07T13:56:02.000Z",
+      paged: { offset: 225, count: 300 },
+      offset: 0,
+    });
+    mockFetch.mockImplementation(serveBillList(bills, { noCount: true }));
+
+    const guids = await runAt("2026-11-07T14:05:00.000Z");
+
+    expect(requestOffsets().slice(0, 3)).toEqual(["225", "0", "225"]);
+    expect(logLinesWithMessage(console.warn, /^congress\.gov gave no count to check a paged slice against/)).toEqual([
+      expect.objectContaining({ billType: "hr", offset: 225 }),
+    ]);
+    expect(new Set(guids)).toEqual(new Set(guidsOf(bills)));
+  });
+
+  // REL-56 review: a paging cut short by the soft stop was started again from its top by the next run, so a burst that
+  // takes longer than a run while congress.gov is slow was never finished, and the types after it were not polled.
+  it("goes on with a paging the soft stop cut short from where it stopped", async () => {
+    persistedState.cursors.hr = cursorAtWatermark("2026-11-07T13:55:00.000Z");
+    const bills = Array.from({ length: 2000 }, (_, index) => ({
+      number: String(10000 + index),
+      at: "2026-11-07T13:56:00.000Z",
+    }));
+    mockFetch.mockImplementation(serveBillList(bills));
+    // Time for 16 requests, then below the reserve for one more: 13 to find the burst and 3 of its 9 pages.
+    let limit = 16;
+    const context = { getRemainingTimeInMillis: () => (mockFetch.mock.calls.length >= limit ? 1_000 : 60_000) };
+
+    const first = await runAt(topIso, context);
+    expect(persistedState.cursors.hr.backlog).toEqual({
+      from: "2026-11-07T13:55:58.000Z",
+      to: "2026-11-07T13:56:02.000Z",
+      paged: { offset: 675, count: 2000 },
+      offset: 0,
+    });
+
+    // The next run, as slow: 5 more pages. Then one with time to spare finishes it.
+    mockFetch.mockClear();
+    limit = 5;
+    const second = await runAt("2026-11-07T14:05:00.000Z", context);
+    expect(requestOffsets()).toEqual(["675", "900", "1125", "1350", "1575"]);
+    expect(persistedState.cursors.hr.backlog?.paged).toEqual({ offset: 1800, count: 2000 });
+    limit = 1_000;
+    const third = await runAt("2026-11-07T14:10:00.000Z", context);
+
+    expect(new Set([...first, ...second, ...third])).toEqual(new Set(guidsOf(bills)));
+    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-11-07T14:10:00.000Z"));
+  });
+
+  // Not seen yet: every answer that fit in a page listed as many rows as it counted. One that lists fewer distinct bills
+  // is split, so its rows are listed in smaller answers.
+  it.each([
+    ["leaves out a row", (rows: unknown[]) => rows.splice(40, 1)],
+    ["lists a row twice in place of another", (rows: unknown[]) => rows.splice(40, 1, rows[41])],
+  ])("lists a slice whose answer %s in smaller parts", async (_label, change) => {
+    const bills = billsEvery(100, "2026-11-07T10:00:00.000Z", 60);
+    const serve = serveBillList(bills);
+    mockFetch.mockImplementation(async (url: string) => {
+      const response = await serve(url);
+      if (mockFetch.mock.calls.length > 1) return response;
+      // The first answer lists one row it counts fewer.
+      const body = JSON.parse(await response.text()) as { bills: unknown[] };
+      change(body.bills);
+      return { ...response, text: async () => JSON.stringify(body) };
+    });
+
+    const guids = await runAt(topIso);
+
+    expect(new Set(guids)).toEqual(new Set(guidsOf(bills)));
+    expect(logLinesWithMessage(console.warn, /^congress\.gov's answer listed fewer rows than it counts/)).toEqual([
+      expect.objectContaining({ billType: "hr", rows: 99, count: 100 }),
+    ]);
+    expect(metricData("BillPollerPageDrift")).toHaveLength(1);
+    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark(topIso));
+  });
+
+  // A backlog's `from` starts the next window above the overlap that run listed long after its time; one outside the
+  // overlap below its watermark is not this code's and is not used.
+  it.each([
+    ["inside the overlap", "2026-11-07T13:59:00.000Z", "2026-11-07T13:59:00Z"],
+    ["at the watermark", "2026-11-07T14:00:00.000Z", "2026-11-07T14:00:00Z"],
+    ["before the overlap", "2026-11-07T13:57:00.000Z", "2026-11-07T13:58:00Z"],
+    ["after the watermark", "2026-11-07T14:00:01.000Z", "2026-11-07T13:58:00Z"],
+  ])("starts the window at a backlog's from %s only when it is in the overlap", async (_label, from, expected) => {
+    persistedState.cursors.hr = cursorAtWatermark("2026-11-07T14:00:00.000Z", true, {
+      from,
+      to: "2026-11-07T14:02:00.000Z",
+      offset: 0,
+    });
+    mockFetch.mockImplementation(serveBillList([{ number: "1", at: "2026-11-07T14:01:00.000Z" }]));
+
+    expect(await runAt("2026-11-07T14:05:00.000Z")).toEqual(hr("1"));
+    expect(requestUrls()[0].searchParams.get("fromDateTime")).toBe(expected);
+    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-11-07T14:05:00.000Z"));
+  });
+
+  it("keeps a backlog's from when a run cut short lists nothing new", async () => {
+    reloadHandler({ MAX_PAGES_PER_BILL_TYPE: "1" });
+    persistedState.cursors.hr = cursorAtWatermark("2026-11-07T13:56:00.000Z", true, {
+      from: "2026-11-07T13:55:30.000Z",
+      to: "2026-11-07T13:57:00.000Z",
+      offset: 0,
+    });
+    mockFetch.mockImplementation(serveBillList(billsEvery(300, "2026-11-07T13:56:30.000Z", 0)));
+
+    await runAt("2026-11-07T14:05:00.000Z");
+
+    // The backlog's slice held more than a page: its older half is named next, from the same start.
+    expect(requestUrls().map(requestRange)).toEqual(["2026-11-07T13:55:30Z..2026-11-07T13:57:00Z"]);
+    expect(persistedState.cursors.hr).toEqual(
+      cursorAtWatermark("2026-11-07T13:56:00.000Z", true, {
+        from: "2026-11-07T13:55:30.000Z",
+        to: "2026-11-07T13:56:16.000Z",
+        offset: 0,
+      }),
+    );
+  });
+
+  // A run cut short after listing a burst more than 120 s after its time names where the next window starts: past the
+  // burst, which no row can still join late, so the next run does not list (and page) it again.
+  it("does not page a burst again in the next run once it was listed more than 120 s after its time", async () => {
+    // 13 requests to find the burst and 3 to page it: the cap stops the scan right after.
+    reloadHandler({ MAX_PAGES_PER_BILL_TYPE: "16" });
+    persistedState.cursors.hr = cursorAtWatermark("2026-11-07T13:55:00.000Z");
+    const bills = [
+      ...Array.from({ length: 600 }, (_, index) => ({ number: String(10000 + index), at: "2026-11-07T13:56:00.000Z" })),
+      // Two a second after the burst: the slices after it need requests of their own.
+      ...billsEvery(180, "2026-11-07T13:57:00.000Z", 1, 1),
+      ...billsEvery(180, "2026-11-07T13:57:00.000Z", 1, 1001),
+    ];
+    // In one order: a burst is paged by offset, which an order that changes between requests can defeat.
+    mockFetch.mockImplementation(serveBillList(bills));
+
+    const first = await runAt(topIso);
+
+    expect(pagingWarnings()).toHaveLength(1);
+    // Listed up to 13:56:31 (the burst's slice and the empty one after it), long before the run's start: the next
+    // window starts a second below that, past the burst.
+    expect(persistedState.cursors.hr).toEqual(
+      cursorAtWatermark("2026-11-07T13:56:31.000Z", true, {
+        from: "2026-11-07T13:56:30.000Z",
+        to: "2026-11-07T13:58:16.000Z",
+        offset: 0,
+      }),
+    );
+
+    mockFetch.mockClear();
+    const runs = await runUntilListed("2026-11-07T14:05:00.000Z", 3);
+    expect(runs).toHaveLength(1);
+    expect(pagingWarnings()).toHaveLength(1);
+    expect(requestUrls().every((url) => url.searchParams.get("fromDateTime")! > "2026-11-07T13:56:00Z")).toBe(true);
+    expect(new Set([...first, ...runs.flat()])).toEqual(new Set(guidsOf(bills)));
   });
 });
 
 describe("billsApiPoller enqueue timing", () => {
   const bills = billsEvery(600, "2026-03-02T00:00:00.000Z", 60);
 
-  it("sends each page's bills before requesting the next page", async () => {
+  beforeEach(() => {
+    jest.useFakeTimers({ doNotFake: ["setTimeout", "setImmediate", "nextTick"] });
+    jest.setSystemTime(new Date("2026-03-02T10:00:00.000Z"));
+  });
+
+  it("sends each answer's bills before the next request, a slice's rows once", async () => {
     mockFetch.mockImplementation(serveBillList(bills));
 
     const result = await handler();
 
     expect(result.processed).toBe(600);
-    expect(requestUrls().map((url) => url.searchParams.get("offset"))).toEqual(["0", "225", "450"]);
-    // Fetch, send, fetch, send, ...: page N's sends happen before page N+1 is requested.
+    expect(enqueuedGuids()).toHaveLength(600);
+    expect(requestOffsets().every((offset) => offset === "0")).toBe(true);
+    // Fetch, send, fetch, send, ...: answer N's sends happen before request N+1, even the first answer's, which held
+    // more than a page.
     const fetchOrder = mockFetch.mock.invocationCallOrder;
     const sendOrder = mockSQSSend.mock.invocationCallOrder;
     expect(sendOrder[0]).toBeGreaterThan(fetchOrder[0]);
     expect(sendOrder[0]).toBeLessThan(fetchOrder[1]);
-    expect(new Set(enqueuedGuids()).size).toBe(600);
   });
 
-  it("keeps sent pages and the backlog when a soft stop comes mid-window", async () => {
+  it("keeps the bills sent and the slices listed when a soft stop comes mid-window", async () => {
     mockFetch.mockImplementation(serveBillList(bills));
-    const context = { getRemainingTimeInMillis: () => (mockFetch.mock.calls.length >= 2 ? 1_000 : 60_000) };
+    const context = { getRemainingTimeInMillis: () => (mockFetch.mock.calls.length >= 4 ? 1_000 : 60_000) };
 
     const result = await handler(undefined, context);
 
-    expect(result.processed).toBe(475);
-    expect(new Set(enqueuedGuids())).toEqual(new Set(guidsOf(bills.slice(125))));
-    expect(persistedState.cursors.hr.backlog).toMatchObject({ offset: 450, count: 600 });
+    // The window's 250 newest rows, its older half (empty), the newer half's older half (the 90 rows up to 01:29), and
+    // 250 of the next 255: sent as they came, and the slices up to 01:29:31 listed.
+    expect(result.processed).toBe(590);
+    expect(persistedState.cursors.hr).toEqual(
+      cursorAtWatermark("2026-03-02T01:29:31.000Z", true, {
+        from: "2026-03-02T01:29:30.000Z",
+        to: "2026-03-02T03:37:09.000Z",
+        offset: 0,
+      }),
+    );
   });
 
   it("reserves time to enqueue a full page one message at a time when QUEUE_BATCH_SIZE is 1", async () => {
@@ -992,28 +1482,30 @@ describe("billsApiPoller congress.gov outages", () => {
     expect(persistedState.lastRunAt).not.toBe(cursorIso);
   });
 
-  it("keeps the watermark, and the pages read as a backlog, when the outage comes mid-window; the next run misses nothing", async () => {
+  it("keeps the slices listed, and the oldest left as a backlog, when the outage comes mid-window; the next run misses nothing", async () => {
     jest.useFakeTimers({ doNotFake: ["setTimeout", "setImmediate", "nextTick"] });
     jest.setSystemTime(new Date("2026-03-02T10:00:00.000Z"));
     const bills = billsEvery(600, "2026-03-02T00:00:00.000Z", 60);
-    const serve = serveBillList(bills);
+    const serve = serveBillList(bills, { reorder: shuffledEachRequest() });
     let down = true;
+    // congress.gov fails from the fourth request on.
     mockFetch.mockImplementation(async (url: string) =>
-      down && new URL(url).searchParams.get("offset") !== "0" ? statusResponse(503) : serve(url),
+      down && mockFetch.mock.calls.length > 3 ? statusResponse(503) : serve(url),
     );
 
     const result = await handler();
+    const first = enqueuedGuids();
 
-    expect(result).toMatchObject({ status: "congress_api_unavailable", processed: 250 });
-    expect(new Set(enqueuedGuids())).toEqual(new Set(guidsOf(bills.slice(350))));
-    // The watermark does not move past the unread pages; the page already read is the backlog's offset.
-    const backlogCursor = cursorAtWatermark(cursorIso, true, {
-      to: "2026-03-02T10:00:00.000Z",
-      offset: 225,
-      count: 600,
+    expect(result).toMatchObject({ status: "congress_api_unavailable" });
+    // The window, its older half (empty) and the newer half's older half (90 rows) were answered: the watermark moves
+    // past those, and the backlog names the older half of the rest, which holds more than a page.
+    const backlogCursor = cursorAtWatermark("2026-03-02T01:29:31.000Z", true, {
+      from: "2026-03-02T01:29:30.000Z",
+      to: "2026-03-02T05:44:46.000Z",
+      offset: 0,
     });
     expect(persistedState.cursors.hr).toEqual(backlogCursor);
-    expect(outageWarnings()).toEqual([expect.objectContaining({ pagesScanned: 1, cursor: backlogCursor })]);
+    expect(outageWarnings()).toEqual([expect.objectContaining({ pagesScanned: 3, cursor: backlogCursor })]);
     expect(logLinesWithMessage(console.warn, /Bill-type scan incomplete/)).toEqual([]);
 
     down = false;
@@ -1021,8 +1513,8 @@ describe("billsApiPoller congress.gov outages", () => {
     mockSQSSend.mockClear();
     await expect(handler()).resolves.toMatchObject({ status: "ok" });
 
-    expect(new Set(enqueuedGuids())).toEqual(new Set(guidsOf(bills.slice(0, 375))));
-    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-03-02T10:00:00.000Z"));
+    expect(new Set([...first, ...enqueuedGuids()])).toEqual(new Set(guidsOf(bills)));
+    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-03-02T10:05:00.000Z"));
   });
 
   it("keeps the lag growing from the last poll through an outage, so it reaches the alarm after an hour, and drops it on the run that polls again", async () => {
@@ -1223,24 +1715,21 @@ describe("billsApiPoller BACKFILL_FROM_ISO (REC-05)", () => {
       persistedState = JSON.parse(command.input!.Value);
       return {};
     });
-    // 1,500 updates since 2026-11-01, date-only rows: four runs of two pages each.
+    // 1,500 updates since 2026-11-01, date-only rows, in another order on every request: listed in slices, two requests
+    // a run (each slice of up to 250 rows costs about two: its own, and its share of the slices split to find it).
     const bills = billsEvery(1500, "2026-11-01T00:00:00.000Z", 360);
-    mockFetch.mockImplementation(serveBillList(bills));
+    mockFetch.mockImplementation(serveBillList(bills, { reorder: shuffledEachRequest() }));
 
-    const seen = new Set<string>();
-    const runs: string[] = [];
-    for (let minute = 5; minute <= 60 && (runs.length === 0 || persistedState.cursors.hr.backlog); minute += 5) {
-      const iso = new Date(Date.parse("2026-11-07T12:00:00.000Z") + minute * 60_000).toISOString();
-      runs.push(iso);
-      for (const guid of await runAt(iso)) seen.add(guid);
-    }
+    const runs = await runUntilListed("2026-11-07T12:05:00.000Z", 40);
 
-    expect(runs).toHaveLength(4);
-    expect(seen).toEqual(new Set(guidsOf(bills)));
-    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-11-07T12:05:00.000Z"));
+    expect(runs).toHaveLength(12);
+    expect(new Set(runs.flat())).toEqual(new Set(guidsOf(bills)));
+    const listedAt = persistedState.cursors.hr.watermark!;
     mockFetch.mockClear();
-    await runAt("2026-11-07T12:25:00.000Z");
-    expect(requestUrls()[0].searchParams.get("fromDateTime")).toBe("2026-11-07T12:03:00Z");
+    await runAt(new Date(Date.parse(listedAt) + 300_000).toISOString());
+    expect(requestUrls()[0].searchParams.get("fromDateTime")).toBe(
+      new Date(Date.parse(listedAt) - 120_000).toISOString().replace(".000", ""),
+    );
   });
 
   it.each(["not-a-date", "2999-01-01T00:00:00Z"])("rejects an invalid or future value (%s)", async (value) => {
@@ -1419,56 +1908,36 @@ describe("billsApiPoller monotonic state save (REL-06 defense in depth)", () => 
     expect(mergeWarnings()).toEqual([]);
   });
 
-  // REL-56: which of two cursors on the same watermark is further along. This run reads one page of 300 rows
-  // (MAX_PAGES_PER_BILL_TYPE=1), so it saves a backlog at offset 225 on the watermark 2026-03-01T00:00:00Z: 75 rows
-  // left below its offset. Between two backlogs of one window, fewer rows left is further along (the window only loses
-  // rows, and a later page sees the rest moved up by as many), then the later reading (the lower count).
+  // REL-56: which of two cursors on the same watermark is further along. This run reads one answer, the whole window of
+  // 300 rows (MAX_PAGES_PER_BILL_TYPE=1), so it saves the watermark 2026-03-01T00:00:00Z with a backlog that names the
+  // window's older half (offset 0, no count). On the same watermark a backlog is further along than none; between two,
+  // the later top, then (from code before the sliced listing, which wrote offsets and counts) the further offset.
   describe("on the same watermark", () => {
-    const own = cursorAtWatermark(cursorIso, true, { to: nowIso, offset: 225, count: 300 });
+    const olderHalfTop = "2026-03-01T16:59:01.000Z";
+    const own = cursorAtWatermark(cursorIso, true, { to: olderHalfTop, offset: 0 });
 
     it.each([
+      // Code from before the sliced listing, one page into the window: this code would read it from its top all the
+      // same (its offset is not used), so either is safe.
       [
-        "fewer rows left in the same window",
-        cursorAtWatermark(cursorIso, true, { to: nowIso, offset: 450, count: 500 }),
+        "a backlog from code before the sliced listing, further into the same window",
+        cursorAtWatermark(cursorIso, true, { to: olderHalfTop, offset: 225, count: 300 }),
         "stored",
       ],
       [
-        "more rows left in the same window",
-        cursorAtWatermark(cursorIso, true, { to: nowIso, offset: 100, count: 300 }),
+        "an earlier backlog top",
+        cursorAtWatermark(cursorIso, true, { to: "2026-03-01T08:00:00.000Z", offset: 0 }),
         "own",
       ],
       [
-        "a higher offset but more rows left",
-        cursorAtWatermark(cursorIso, true, { to: nowIso, offset: 300, count: 400 }),
-        "own",
-      ],
-      // A scan that stepped back for 100 rows that left the window: as far along, and read later.
-      [
-        "as many rows left, read later",
-        cursorAtWatermark(cursorIso, true, { to: nowIso, offset: 125, count: 200 }),
-        "stored",
-      ],
-      [
-        "as many rows left, read earlier",
-        cursorAtWatermark(cursorIso, true, { to: nowIso, offset: 325, count: 400 }),
-        "own",
-      ],
-      // Without a count a backlog is read from its window's top again (parseBacklog), whatever its offset.
-      ["a higher offset without a count", cursorAtWatermark(cursorIso, true, { to: nowIso, offset: 450 }), "own"],
-      [
-        "an earlier window top",
-        cursorAtWatermark(cursorIso, true, { to: "2026-03-02T09:55:00.000Z", offset: 450, count: 300 }),
-        "own",
-      ],
-      [
-        "a later window top",
-        cursorAtWatermark(cursorIso, true, { to: "2026-03-02T10:00:01.000Z", offset: 0, count: 300 }),
+        "a later backlog top",
+        cursorAtWatermark(cursorIso, true, { to: "2026-03-02T09:55:00.000Z", offset: 0 }),
         "stored",
       ],
       ["no backlog", cursorAtWatermark(cursorIso, true), "own"],
       [
         "the same backlog, for a type not listed yet",
-        cursorAtWatermark(cursorIso, false, { to: nowIso, offset: 225, count: 300 }),
+        cursorAtWatermark(cursorIso, false, { to: olderHalfTop, offset: 0 }),
         "own",
       ],
       // A cursor from before REL-56 on that day has no backlog.
@@ -2361,6 +2830,23 @@ describe("billsApiPoller same-day updates and the watermark (REL-56)", () => {
   const newestFirst = (list: ListedBill[]) =>
     [...list].sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || Number(b.number) - Number(a.number));
   const driftWarnings = () => logLinesWithMessage(console.warn, /^congress\.gov's list moved between two pages/);
+  // `n` bills updated in one second (a congress.gov batch), numbered from `first`: more than a page of them cannot be
+  // split by time, so the slice that holds them is paged (REL-56). In a run's window as production has it, from a
+  // watermark 5 minutes back.
+  const burstAt = "2026-11-07T13:56:00.000Z";
+  const burst = (n: number, at = burstAt, first = 10000): ListedBill[] => {
+    persistedState.cursors.hr = cursorAtWatermark("2026-11-07T13:55:00.000Z");
+    return Array.from({ length: n }, (_, index) => ({ number: String(first + index), at }));
+  };
+  // The offsets that paged the first slice the scan paged.
+  const pagedOffsets = (): string[] => {
+    const [line] = pagingWarnings();
+    const range = `${String(line.from).replace(".000Z", "Z")}..${String(line.to).replace(".000Z", "Z")}`;
+    return requestUrls()
+      .slice(Number(line.pagesScanned))
+      .filter((url) => requestRange(url) === range)
+      .map((url) => url.searchParams.get("offset") ?? "");
+  };
 
   beforeEach(() => {
     jest.useFakeTimers({ doNotFake: ["setTimeout", "setImmediate", "nextTick"] });
@@ -2442,43 +2928,42 @@ describe("billsApiPoller same-day updates and the watermark (REL-56)", () => {
     ]);
   });
 
-  it("reads a 600-row window one page a run, with rows updated between runs, and enqueues every bill", async () => {
+  it("lists a 600-row window at one request a run, with rows updated between runs, and enqueues every bill", async () => {
     reloadHandler({ MAX_PAGES_PER_BILL_TYPE: "1" });
     bills.push(...billsEvery(600, "2026-11-07T09:00:00.000Z", 30, 10000));
-    const runs: Record<string, string[]> = {};
-    const cursors: PersistedCursor[] = [];
-    const run = async (iso: string) => {
-      runs[iso] = await runAt(iso);
-      cursors.push(persistedState.cursors.hr);
-    };
+    mockFetch.mockImplementation(serveBillList(bills, { reorder: shuffledEachRequest() }));
+    let updated: ListedBill[] = [];
 
-    await run("2026-11-07T14:00:00.000Z");
-    // Updated again after the window's top: five rows the first run read, and five it has not reached.
-    const order = newestFirst(bills);
-    const updated = [...order.slice(0, 5), ...order.slice(595)];
-    updated.forEach((bill, index) => {
-      bill.at = new Date(Date.parse("2026-11-07T14:01:00.000Z") + index * 10_000).toISOString();
-    });
-    await run("2026-11-07T14:05:00.000Z");
-    await run("2026-11-07T14:10:00.000Z");
-    await run("2026-11-07T14:15:00.000Z");
+    const runs = await runUntilListed(
+      "2026-11-07T14:00:00.000Z",
+      30,
+      (run, iso) => {
+        if (run !== 1) return;
+        // Updated again after the first run's top: five rows it listed, and five it has not reached.
+        const listed = new Set(enqueuedGuids());
+        updated = [
+          ...bills.filter((bill) => listed.has(`BILLS-119hr${bill.number}`)).slice(0, 5),
+          ...bills.filter((bill) => !listed.has(`BILLS-119hr${bill.number}`)).slice(0, 5),
+        ];
+        updated.forEach((bill, index) => {
+          bill.at = new Date(Date.parse(iso) - 240_000 + index * 10_000).toISOString();
+        });
+      },
+      "2026-11-07T14:05:00.000Z",
+    );
 
-    const top = "2026-11-07T14:00:00.000Z";
-    expect(cursors).toEqual([
-      cursorAtWatermark("2026-11-07T09:00:00.000Z", true, { to: top, offset: 225, count: 600 }),
-      // The window lost 10 rows since the first page: the next page starts 10 rows earlier again.
-      cursorAtWatermark("2026-11-07T09:00:00.000Z", true, { to: top, offset: 440, count: 590 }),
-      cursorAtWatermark(top),
-      cursorAtWatermark("2026-11-07T14:15:00.000Z"),
-    ]);
-    expect(new Set(Object.values(runs).flat())).toEqual(new Set(guidsOf(bills)));
-    // The run after the window lists the ten updates with the next one.
-    expect(runs["2026-11-07T14:15:00.000Z"]).toEqual(expect.arrayContaining(guidsOf(updated)));
+    expect(runs).toHaveLength(6);
+    expect(new Set(runs.flat())).toEqual(new Set(guidsOf(bills)));
+    // Each update is listed by a run after it.
+    expect(runs.slice(1).flat()).toEqual(expect.arrayContaining(guidsOf(updated)));
     expect(metricData("BillPollerPageDrift")).toEqual([]);
+    expect(pagingWarnings()).toEqual([]);
   });
 
-  it("does not skip the row at a page boundary when a row above it leaves the window mid-scan", async () => {
-    bills.push(...billsEvery(600, "2026-11-07T09:00:00.000Z", 30, 10000));
+  // REL-56: more than a page of rows with one time (a congress.gov batch) cannot be split by time: that slice is paged
+  // by offset, each page starting 25 rows before the end of the one before.
+  it("does not skip the row at a page boundary when a row above it leaves a paged slice mid-scan", async () => {
+    bills.push(...burst(600));
     const order = newestFirst(bills);
     let moved = false;
     mockFetch.mockImplementation(
@@ -2494,15 +2979,17 @@ describe("billsApiPoller same-day updates and the watermark (REL-56)", () => {
 
     const guids = await runAt("2026-11-07T14:00:00.000Z");
 
+    expect(pagingWarnings()).toEqual([expect.objectContaining({ count: 600 })]);
     // The row that was 251st is now 250th; the next page starts 25 rows back, and one more for the row that left.
-    expect(requestUrls().map((url) => url.searchParams.get("offset"))).toEqual(["0", "225", "449"]);
+    expect(pagedOffsets()).toEqual(["0", "225", "449"]);
     expect(guids).toContain(`BILLS-119hr${order[250].number}`);
     expect(new Set(guids)).toEqual(new Set(guidsOf(bills)));
     expect(metricData("BillPollerPageDrift")).toEqual([]);
+    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-11-07T14:00:00.000Z"));
   });
 
-  it("steps back a page when more rows leave the window between two pages than the overlap covers", async () => {
-    bills.push(...billsEvery(600, "2026-11-07T09:00:00.000Z", 30, 10000));
+  it("steps back a page when more rows leave a paged slice between two pages than the overlap covers", async () => {
+    bills.push(...burst(600));
     const order = newestFirst(bills);
     let moved = false;
     mockFetch.mockImplementation(
@@ -2522,60 +3009,51 @@ describe("billsApiPoller same-day updates and the watermark (REL-56)", () => {
     const guids = await runAt("2026-11-07T14:00:00.000Z");
 
     // Page 2 shares no row with the end of page 1, so the scan reads again from offset 0.
-    expect(requestUrls().map((url) => url.searchParams.get("offset"))).toEqual(["0", "225", "0", "225", "450"]);
+    expect(pagedOffsets()).toEqual(["0", "225", "0", "225", "450"]);
     expect(new Set(guids)).toEqual(new Set(guidsOf(bills)));
     expect(metricData("BillPollerPageDrift")).toEqual([{ MetricName: "BillPollerPageDrift", Unit: "Count", Value: 1 }]);
     expect(driftWarnings()).toEqual([expect.objectContaining({ billType: "hr", offset: 225, stepBack: 1 })]);
   });
 
-  it("steps back when a backlog's window lost more rows above its offset between runs than the overlap covers", async () => {
-    bills.push(...billsEvery(600, "2026-11-07T09:00:00.000Z", 30, 10000));
-    const order = newestFirst(bills);
-    // The run before read the window's first page (offset 0) and stopped.
-    persistedState.cursors.hr = cursorAtWatermark("2026-11-07T08:00:00.000Z", true, {
-      to: "2026-11-07T14:00:00.000Z",
-      offset: 225,
-      count: 600,
-    });
-    // Since then 60 rows on that page left the window: the rows from position 250 on moved up 60.
-    order.slice(100, 160).forEach((bill) => {
-      bill.at = "2026-11-07T14:02:00.000Z";
-    });
-
-    const guids = await runAt("2026-11-07T14:05:00.000Z");
-
-    // Back 60 rows, to read what moved above offset 225.
-    expect(requestUrls().map((url) => url.searchParams.get("offset"))).toEqual(["225", "165", "390"]);
-    expect(guids).toEqual(expect.arrayContaining(guidsOf(order.slice(250))));
-    expect(metricData("BillPollerPageDrift")).toEqual([{ MetricName: "BillPollerPageDrift", Unit: "Count", Value: 1 }]);
-    expect(driftWarnings()).toEqual([expect.objectContaining({ offset: 225, lostSinceBacklog: 60, stepBack: 1 })]);
-    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-11-07T14:00:00.000Z"));
-  });
-
-  it("keeps a backlog's offset through an outage, and the progress of a run cut short by one", async () => {
+  it("keeps what each run listed through outages that cut runs short, and misses nothing", async () => {
     bills.push(...billsEvery(900, "2026-11-07T06:00:00.000Z", 30, 10000));
-    const order = newestFirst(bills);
-    const top = "2026-11-07T14:00:00.000Z";
-    const backlogAt = (offset: number) =>
-      cursorAtWatermark("2026-11-07T05:00:00.000Z", true, { to: top, offset, count: 900 });
-    persistedState.cursors.hr = backlogAt(450);
-    const serve = serveBillList(bills);
-    let failing: string | null = "450";
-    mockFetch.mockImplementation(async (url: string) =>
-      new URL(url).searchParams.get("offset") === failing ? statusResponse(503) : serve(url),
-    );
+    persistedState.cursors.hr = cursorAtWatermark("2026-11-07T05:00:00.000Z");
+    const serve = serveBillList(bills, { reorder: shuffledEachRequest() });
+    // congress.gov fails from this many requests into a run (null: not at all).
+    let failFrom: number | null = 3;
+    let requests = 0;
+    mockFetch.mockImplementation(async (url: string) => {
+      requests += 1;
+      return failFrom !== null && requests >= failFrom ? statusResponse(503) : serve(url);
+    });
+    const cursors: PersistedCursor[] = [];
+    const run = async (iso: string, failAt: number | null) => {
+      requests = 0;
+      failFrom = failAt;
+      const guids = await runAt(iso);
+      cursors.push(persistedState.cursors.hr);
+      return guids;
+    };
 
-    await runAt("2026-11-07T14:05:00.000Z");
-    expect(persistedState.cursors.hr).toEqual(backlogAt(450));
+    const first = await run("2026-11-07T14:00:00.000Z", 3);
+    const second = await run("2026-11-07T14:05:00.000Z", 4);
+    const third = await run("2026-11-07T14:10:00.000Z", null);
 
-    failing = "675";
-    const second = await runAt("2026-11-07T14:10:00.000Z");
-    expect(persistedState.cursors.hr).toEqual(backlogAt(675));
-
-    failing = null;
-    const third = await runAt("2026-11-07T14:15:00.000Z");
-    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark(top));
-    expect(new Set([...second, ...third])).toEqual(new Set(guidsOf(order.slice(450))));
+    expect(cursors).toEqual([
+      // The window and its older half (420 rows) were answered, then congress.gov failed: nothing listed yet, and the
+      // backlog names the older half's older half.
+      cursorAtWatermark("2026-11-07T05:00:00.000Z", true, { to: "2026-11-07T07:13:31.000Z", offset: 0 }),
+      // That slice (148 rows) was listed, more than 120 s after its time, so the next window starts a second below its
+      // top; the rest was split once more before the next failure.
+      cursorAtWatermark("2026-11-07T07:13:31.000Z", true, {
+        from: "2026-11-07T07:13:30.000Z",
+        to: "2026-11-07T08:56:24.000Z",
+        offset: 0,
+      }),
+      cursorAtWatermark("2026-11-07T14:10:00.000Z"),
+    ]);
+    // The watermark never moves back, and the run after the outages lists the rest.
+    expect(new Set([...first, ...second, ...third])).toEqual(new Set(guidsOf(bills)));
   });
 
   // The 119th's state as stored on 2026-11-08, before REL-56: each cursor at the midnight of its date and the
@@ -2695,8 +3173,9 @@ describe("billsApiPoller same-day updates and the watermark (REL-56)", () => {
   // The parameter is Standard tier, 4 KB at most: a larger write fails. Pinned, so a new field is a choice.
   it("never writes a state over 3,500 bytes for 8 bill types, each with the largest backlog, and the largest probe", async () => {
     reloadHandler({ BILL_TYPES: ALL_TYPES, MAX_PAGES_PER_BILL_TYPE: "1" });
-    // The largest state: every type mid-window, at an offset and count past any Congress's bills, and a late-row probe
-    // of 20 bills with 5-digit numbers.
+    // The largest state: every type mid-window with a backlog from code before the sliced listing (an offset and a
+    // count past any Congress's bills; this code writes neither, but keeps one for a type it does not reach), and a
+    // late-row probe of 20 bills with 5-digit numbers.
     const backlog = { to: "2026-11-08T22:25:00.000Z", offset: 999_000, count: 999_999 };
     const probe = {
       billType: "hconres",
@@ -2711,6 +3190,7 @@ describe("billsApiPoller same-day updates and the watermark (REL-56)", () => {
       ),
       probe,
     };
+    const largest = JSON.stringify(persistedState);
     // A full page for whatever is asked, of a list that counts 999,999 rows.
     mockFetch.mockImplementation(async (url: string) => ({
       ok: true,
@@ -2731,73 +3211,66 @@ describe("billsApiPoller same-day updates and the watermark (REL-56)", () => {
 
     const puts = mockSSMSend.mock.calls.filter(([command]) => command.__type === "PutParameterCommand");
     const written: string = puts.at(-1)![0].input.Value;
-    expect(JSON.parse(written).cursors.sres.backlog).toEqual({ ...backlog, offset: 999_225 });
+    // Each type read its backlog's slice, found it over a page, and names that slice's older half.
+    expect(JSON.parse(written).cursors.sres.backlog).toEqual({ to: "2026-11-08T22:21:31.000Z", offset: 0 });
     // Runs between the hourly checks keep the probe as it is.
     expect(JSON.parse(written).probe).toEqual(probe);
-    expect(Buffer.byteLength(written)).toBeLessThan(3_500);
-    expect(Buffer.byteLength(written)).toBe(2169);
-  });
-
-  // A run that steps back for rows that left the window, then stops before it is past the offset it resumed from, saves
-  // the stepped-back backlog: the stored one is the one it loaded, so no other run is further along.
-  it("keeps a backlog that stepped back for rows that left the window when the run stops right after", async () => {
-    reloadHandler({ MAX_PAGES_PER_BILL_TYPE: "1" });
-    bills.push(...billsEvery(300, "2026-11-07T09:00:00.000Z", 30, 10000));
-    const order = newestFirst(bills);
-    const top = "2026-11-07T14:00:00.000Z";
-    const backlogAt = (offset: number, count: number) =>
-      cursorAtWatermark("2026-11-07T08:00:00.000Z", true, { to: top, offset, count });
-    // The run before read the window's first page (offset 0). Since then the 100 newest rows were updated again (they
-    // left the window), and a new bill came.
-    persistedState.cursors.hr = backlogAt(225, 300);
-    order.slice(0, 100).forEach((bill) => {
-      bill.at = "2026-11-07T14:01:00.000Z";
+    expect(Buffer.byteLength(written)).toBeLessThan(Buffer.byteLength(largest));
+    expect(Buffer.byteLength(largest)).toBeLessThan(3_500);
+    expect(Buffer.byteLength(largest)).toBe(2169);
+    // The largest backlog this code writes: a start, a top and a paging point past any Congress's bills.
+    const largestSliced = JSON.stringify({
+      ...JSON.parse(largest),
+      cursors: Object.fromEntries(
+        ALL_TYPES.split(",").map((type) => [
+          type,
+          cursorAtWatermark("2026-11-08T22:20:00.000Z", true, {
+            from: "2026-11-08T22:19:59.000Z",
+            to: "2026-11-08T22:25:00.000Z",
+            paged: { offset: 999_000, count: 999_999 },
+            offset: 0,
+          }),
+        ]),
+      ),
     });
-    touch("9000", "2026-11-07T14:03:00Z");
-
-    // Offset 225 of the 200 rows left: nothing, and 100 rows lost, so back 100; then the page cap.
-    expect(await runAt("2026-11-07T14:05:00.000Z")).toEqual([]);
-    expect(persistedState.cursors.hr).toEqual(backlogAt(125, 200));
-    expect(metricData("BillPollerPageDrift")).toHaveLength(1);
-    expect(logLinesWithMessage(console.warn, /overlapping run/)).toEqual([]);
-
-    // The rows the run before had not reached moved up to 125..199.
-    const second = await runAt("2026-11-07T14:10:00.000Z");
-    expect(new Set(second)).toEqual(new Set(guidsOf(order.slice(225))));
-    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark(top));
-    expect(await runAt("2026-11-07T14:15:00.000Z")).toEqual(
-      expect.arrayContaining([...hr("9000"), ...guidsOf(order.slice(0, 100))]),
-    );
+    expect(Buffer.byteLength(largestSliced)).toBeLessThan(3_500);
+    expect(Buffer.byteLength(largestSliced)).toBe(2609);
   });
 
-  // REL-56: without a count the next run cannot tell how far rows moved since a page, so a backlog keeps no offset.
-  it("reads a backlog's window again from its top when congress.gov gives no count, and keeps no offset without one", async () => {
-    reloadHandler({ MAX_PAGES_PER_BILL_TYPE: "2" });
+  // A cursor written by code from before the sliced listing (a roll forward after a rollback) keeps where its next page
+  // started; an offset into congress.gov's list does not keep its place (REL-56), so its top is only a split point.
+  it("lists a backlog from code before the sliced listing from its window's start, its top a split point", async () => {
     bills.push(...billsEvery(300, "2026-11-07T09:00:00.000Z", 30, 10000));
-    const top = "2026-11-07T14:00:00.000Z";
     persistedState.cursors.hr = cursorAtWatermark("2026-11-07T08:00:00.000Z", true, {
-      to: top,
+      to: "2026-11-07T14:00:00.000Z",
       offset: 225,
       count: 300,
     });
-    mockFetch.mockImplementation(serveBillList(bills, { noCount: true }));
+    touch("9000", "2026-11-07T14:03:00Z");
+    mockFetch.mockImplementation(serveBillList(bills, { reorder: shuffledEachRequest() }));
 
-    const first = await runAt("2026-11-07T14:05:00.000Z");
+    const guids = await runAt("2026-11-07T14:05:00.000Z");
 
-    expect(requestUrls().map((url) => url.searchParams.get("offset"))).toEqual(["225", "0"]);
-    expect(logLinesWithMessage(console.warn, /^congress\.gov gave no count to check a backlog against/)).toEqual([
-      expect.objectContaining({ billType: "hr", offset: 225 }),
-    ]);
-    expect(persistedState.cursors.hr).toEqual(
-      cursorAtWatermark("2026-11-07T08:00:00.000Z", true, { to: top, offset: 0 }),
-    );
+    // Up to the backlog's top first, from the watermark less 120 s, in slices; then on to this run's start.
+    expect(requestOffsets().every((offset) => offset === "0")).toBe(true);
+    expect(requestRange(requestUrls()[0])).toBe("2026-11-07T07:58:00Z..2026-11-07T14:00:00Z");
+    expect(requestUrls().map(requestRange)).toContain("2026-11-07T13:59:59Z..2026-11-07T14:05:00Z");
+    expect(new Set(guids)).toEqual(new Set(guidsOf(bills)));
+    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-11-07T14:05:00.000Z"));
     expect(logLinesWithMessage(console.warn, /overlapping run/)).toEqual([]);
+  });
 
-    mockFetch.mockClear();
-    const second = await runAt("2026-11-07T14:10:00.000Z");
-    expect(requestUrls().map((url) => url.searchParams.get("offset"))).toEqual(["0", "225"]);
-    expect(new Set([...first, ...second])).toEqual(new Set(guidsOf(bills)));
-    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark(top));
+  // Without pagination.count an answer of a full page may hold more: its slice is split; a short one is all of it.
+  it("lists a window longer than a page without pagination.count, splitting each slice whose answer is a full page", async () => {
+    bills.push(...billsEvery(600, "2026-11-07T09:00:00.000Z", 30, 10000));
+    mockFetch.mockImplementation(serveBillList(bills, { noCount: true, reorder: shuffledEachRequest() }));
+
+    const guids = await runAt("2026-11-07T14:00:00.000Z");
+
+    expect(requestOffsets().every((offset) => offset === "0")).toBe(true);
+    expect(new Set(guids)).toEqual(new Set(guidsOf(bills)));
+    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-11-07T14:00:00.000Z"));
+    expect(pagingWarnings()).toEqual([]);
   });
 
   // A row with no bill number cannot be enqueued, but it was listed: the count check does not read the window again.
@@ -2821,19 +3294,28 @@ describe("billsApiPoller same-day updates and the watermark (REL-56)", () => {
     expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-11-07T14:00:00.000Z"));
   });
 
-  it("reads a window longer than a page without pagination.count until a page comes back short", async () => {
-    bills.push(...billsEvery(300, "2026-11-07T09:00:00.000Z", 30, 10000));
+  it("pages a burst of more than a page without pagination.count until a page comes back short", async () => {
+    bills.push(...burst(300));
     mockFetch.mockImplementation(serveBillList(bills, { noCount: true }));
 
-    const guids = await runAt("2026-11-07T14:00:00.000Z");
+    const runs = await runUntilListed("2026-11-07T14:00:00.000Z", 3);
 
-    expect(requestUrls().map((url) => url.searchParams.get("offset"))).toEqual(["0", "225"]);
-    expect(new Set(guids)).toEqual(new Set(guidsOf(bills)));
-    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-11-07T14:00:00.000Z"));
+    // Without counts the halves cannot be compared, so slices are split down to under 3 seconds, then paged: here each
+    // of the three that hold the burst's second (repeats, but nothing missed; the hourly filter check flags an answer
+    // without a count).
+    expect(pagingWarnings().map((line) => [line.from, line.count, line.reason])).toEqual([
+      ["2026-11-07T13:55:58.000Z", null, "narrow"],
+      ["2026-11-07T13:55:59.000Z", null, "narrow"],
+      ["2026-11-07T13:56:00.000Z", null, "narrow"],
+    ]);
+    expect(pagedOffsets()).toEqual(["0", "225"]);
+    // That spends the page cap: the next run lists the rest of the window.
+    expect(runs).toHaveLength(2);
+    expect(new Set(runs.flat())).toEqual(new Set(guidsOf(bills)));
   });
 
-  it("logs an error and reads on after two step-backs in one scan when the list keeps moving", async () => {
-    bills.push(...billsEvery(600, "2026-11-07T09:00:00.000Z", 30, 10000));
+  it("logs an error and reads on after two step-backs in one paging when the list keeps moving", async () => {
+    bills.push(...burst(600));
     const top = Date.parse("2026-11-07T14:00:00.000Z");
     let moves = 0;
     mockFetch.mockImplementation(
@@ -2854,15 +3336,7 @@ describe("billsApiPoller same-day updates and the watermark (REL-56)", () => {
 
     const guids = await runAt("2026-11-07T14:00:00.000Z");
 
-    expect(requestUrls().map((url) => url.searchParams.get("offset"))).toEqual([
-      "0",
-      "225",
-      "0",
-      "225",
-      "0",
-      "225",
-      "410",
-    ]);
+    expect(pagedOffsets()).toEqual(["0", "225", "0", "225", "0", "225", "410"]);
     expect(metricData("BillPollerPageDrift")).toHaveLength(3);
     expect(driftWarnings()).toHaveLength(2);
     expect(logLinesWithMessage(console.error, /^congress\.gov's list kept moving between pages/)).toEqual([
@@ -2872,65 +3346,67 @@ describe("billsApiPoller same-day updates and the watermark (REL-56)", () => {
     expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-11-07T14:00:00.000Z"));
   });
 
-  // A bill that shows in the list while its window is read raises the count above what the scan listed. That is no
-  // page drift (no metric), but the window is read again once, for a bill that came long after its time; one that
+  // A bill that shows in the list while a slice is paged raises the count above what the paging listed. That is no
+  // page drift (no metric), but the slice is read again once, for a bill that came long after its time; one that
   // showed within 120 s of its time is in the next window's overlap too.
-  it("reads a window again without counting page drift when bills showed while it was read", async () => {
-    bills.push(...billsEvery(600, "2026-11-07T09:00:00.000Z", 30, 10000));
+  it("reads a paged slice again without counting page drift when bills showed while it was read", async () => {
+    bills.push(...burst(600));
     const showing = new Map([
-      ["225", ["7", "2026-11-07T13:59:30Z"]],
-      ["450", ["8", "2026-11-07T13:59:40Z"]],
+      ["225", "90007"],
+      ["450", "90008"],
     ]);
     mockFetch.mockImplementation(
       serveBillList(bills, {
         beforePage: (url) => {
-          // hr7 shows as the first reading asks for page 2, hr8 as it asks for page 3: at the top, above those pages.
+          // hr90007 shows in the burst's second as the first reading asks for page 2, hr90008 as it asks for page 3:
+          // first in that second's order, above those pages.
           const offset = url.searchParams.get("offset") ?? "";
           const next = showing.get(offset);
           showing.delete(offset);
-          if (next) touch(next[0], next[1]);
+          if (next) touch(next, burstAt);
         },
       }),
     );
 
     const guids = await runAt("2026-11-07T14:00:00.000Z");
 
-    expect(requestUrls().map((url) => url.searchParams.get("offset"))).toEqual(["0", "225", "450", "0", "225", "450"]);
+    expect(pagedOffsets()).toEqual(["0", "225", "450", "0", "225", "450"]);
     expect(new Set(guids)).toEqual(new Set(guidsOf(bills)));
     expect(logLinesWithMessage(console.warn, /^Rows showed in congress\.gov's list while the window was read/)).toEqual(
-      [expect.objectContaining({ billType: "hr", readFrom: 0, listedRows: 600, count: 602, risen: 2, reread: 1 })],
+      [expect.objectContaining({ billType: "hr", listedRows: 600, count: 602, risen: 2, reread: 1 })],
     );
     expect(logLinesWithMessage(console.warn, /^Rows still showed in congress\.gov's list/)).toEqual([]);
     expect(metricData("BillPollerPageDrift")).toEqual([]);
     expect(logLinesWithMessage(console.error, /^congress\.gov's list still counted more rows/)).toEqual([]);
   });
 
-  // Bills that still show while the window is read again cannot be told from bills that came more than 120 s after
-  // their time, which no later window lists: that counts BillPollerPageDrift, with a warning that names the window.
-  it("counts page drift and names the window when bills still show while it is read again", async () => {
-    bills.push(...billsEvery(300, "2026-11-07T09:00:00.000Z", 30, 10000));
-    const showing = [
-      ["7", "2026-11-07T13:59:30Z"],
-      ["8", "2026-11-07T13:59:40Z"],
-    ];
+  // Bills that still show while the slice is read again cannot be told from bills that came more than 120 s after
+  // their time, which no later window lists: that counts BillPollerPageDrift, with a warning that names the slice.
+  it("counts page drift and names the slice when bills still show while it is read again", async () => {
+    // In the next window's 120 s overlap, so that window lists what this one could not.
+    const at = "2026-11-07T13:59:00.000Z";
+    bills.push(...burst(300, at));
+    const showing = ["90007", "90008"];
     mockFetch.mockImplementation(
       serveBillList(bills, {
         beforePage: (url) => {
-          // hr7 shows only as the first reading asks for page 2, hr8 as the second reading does: above that page.
+          // hr90007 shows only as the first reading asks for page 2, hr90008 as the second reading does: first in
+          // that second's order, above that page.
           const next = url.searchParams.get("offset") === "225" ? showing.shift() : undefined;
-          if (next) touch(next[0], next[1]);
+          if (next) touch(next, at);
         },
       }),
     );
 
     const first = await runAt("2026-11-07T14:00:00.000Z");
 
-    expect(requestUrls().map((url) => url.searchParams.get("offset"))).toEqual(["0", "225", "0", "225"]);
-    expect(new Set(first)).toEqual(new Set([...guidsOf(bills.filter((bill) => bill.number !== "8"))]));
+    expect(pagedOffsets()).toEqual(["0", "225", "0", "225"]);
+    expect(new Set(first)).toEqual(new Set([...guidsOf(bills.filter((bill) => bill.number !== "90008"))]));
     expect(logLinesWithMessage(console.warn, /^Rows showed in congress\.gov's list while the window was read/)).toEqual(
-      [expect.objectContaining({ billType: "hr", readFrom: 0, listedRows: 300, count: 301, risen: 1, reread: 1 })],
+      [expect.objectContaining({ billType: "hr", listedRows: 300, count: 301, risen: 1, reread: 1 })],
     );
     // Only the rise while it was read again counts then: hr7 was listed by that reading.
+    const [paged] = pagingWarnings();
     expect(
       logLinesWithMessage(
         console.warn,
@@ -2939,9 +3415,8 @@ describe("billsApiPoller same-day updates and the watermark (REL-56)", () => {
     ).toEqual([
       expect.objectContaining({
         billType: "hr",
-        from: "2026-11-07T08:58:00.000Z",
-        to: "2026-11-07T14:00:00.000Z",
-        readFrom: 0,
+        from: paged.from,
+        to: paged.to,
         listedRows: 301,
         count: 302,
         risen: 1,
@@ -2950,101 +3425,54 @@ describe("billsApiPoller same-day updates and the watermark (REL-56)", () => {
     expect(metricData("BillPollerPageDrift")).toHaveLength(1);
     expect(logLinesWithMessage(console.error, /^congress\.gov's list still counted more rows/)).toEqual([]);
 
-    expect(await runAt("2026-11-07T14:05:00.000Z")).toEqual(hr("8", "7"));
+    // The next window starts at 13:58:00 and lists the burst again, hr90008 with it.
+    expect(await runAt("2026-11-07T14:05:00.000Z")).toContain("BILLS-119hr90008");
   });
 
-  // A backlog's window has a top in the past, an earlier run's start: a bill that shows in it now came late, so what
-  // the scan lacks there is drift, whatever the count rose by.
-  it("counts page drift and logs the error for a backlog's window when bills showed while it was read", async () => {
-    bills.push(...billsEvery(600, "2026-11-07T09:00:00.000Z", 30, 10000));
-    const top = "2026-11-07T14:00:00.000Z";
-    persistedState.cursors.hr = cursorAtWatermark("2026-11-07T08:00:00.000Z", true, {
-      to: top,
-      offset: 225,
-      count: 600,
-    });
-    const showing = [
-      ["9001", "2026-11-07T13:59:40Z"],
-      ["9002", "2026-11-07T13:59:50Z"],
-    ];
-    mockFetch.mockImplementation(
-      serveBillList(bills, {
-        beforePage: (url) => {
-          // hr9001 shows as the first reading asks for its second page, hr9002 as the second reading does.
-          const next = url.searchParams.get("offset") === "450" ? showing.shift() : undefined;
-          if (next) touch(next[0], next[1]);
-        },
-      }),
-    );
-
-    await runAt("2026-11-07T14:05:00.000Z");
-
-    expect(requestUrls().map((url) => url.searchParams.get("offset"))).toEqual(["225", "450", "225", "450"]);
-    expect(logLinesWithMessage(console.warn, /^Rows (still )?showed in congress\.gov's list/)).toEqual([]);
-    expect(logLinesWithMessage(console.warn, /^congress\.gov's list counted more rows than the scan listed/)).toEqual([
-      expect.objectContaining({ readFrom: 225, listedRows: 375, count: 601, risen: 0, reread: 1 }),
-    ]);
-    expect(logLinesWithMessage(console.error, /^congress\.gov's list still counted more rows/)).toEqual([
-      expect.objectContaining({
-        from: "2026-11-07T07:58:00.000Z",
-        to: top,
-        readFrom: 225,
-        listedRows: 376,
-        count: 602,
-        risen: 0,
-      }),
-    ]);
-    expect(metricData("BillPollerPageDrift")).toHaveLength(2);
-    expect(persistedState.cursors.hr).toEqual(cursorAtWatermark(top));
-  });
-
-  // REL-56: 300 bills updated in the same second (a congress.gov batch), and 20 before them. Among rows with the same
-  // time congress.gov may answer in another order from one request to the next. Here the second page comes in an order
+  // REL-56: 300 bills updated in the same second (a congress.gov batch), and 20 after them. The batch's slice is paged.
+  // congress.gov may answer in another order from one request to the next. Here the second page comes in an order
   // with the 50 lowest numbers moved to the top: it still holds the 25 rows of its overlap with page 1, so no drift
-  // shows, but those 50 are on neither page. The window counts 320 rows; the scan listed 270.
-  describe("a window that lists fewer rows than congress.gov counts", () => {
-    const batchAt = "2026-11-07T13:30:00.000Z";
+  // shows, but those 50 are on neither page. The slice counts 300 rows; its paging listed 250.
+  describe("a paged slice that lists fewer rows than congress.gov counts", () => {
     const lowestFirst = (rows: ListedBill[]) => {
-      const batch = rows.filter((row) => row.at === batchAt);
-      return [...batch.slice(250), ...batch.slice(0, 250), ...rows.filter((row) => row.at !== batchAt)];
+      const batch = rows.filter((row) => row.at === burstAt);
+      return [...batch.slice(250), ...batch.slice(0, 250), ...rows.filter((row) => row.at !== burstAt)];
     };
     const countWarnings = () =>
       logLinesWithMessage(console.warn, /^congress\.gov's list counted more rows than the scan listed/);
     const countErrors = () => logLinesWithMessage(console.error, /^congress\.gov's list still counted more rows/);
 
     beforeEach(() => {
-      bills.push(
-        ...Array.from({ length: 300 }, (_, index) => ({ number: String(1001 + index), at: batchAt })),
-        ...billsEvery(20, "2026-11-07T12:00:00.000Z", 1, 1),
-      );
+      bills.push(...burst(300), ...billsEvery(20, "2026-11-07T13:57:00.000Z", 1, 1));
     });
 
-    it("reads the window again, and enqueues the bills the changing order hid", async () => {
-      let requests = 0;
+    it("reads the slice again, and enqueues the bills the changing order hid", async () => {
+      let secondPages = 0;
       mockFetch.mockImplementation(
         serveBillList(bills, {
-          reorder: (rows) => {
-            requests += 1;
-            return requests === 1 ? rows : lowestFirst(rows);
+          reorder: (rows, url) => {
+            if (url.searchParams.get("offset") !== "225") return rows;
+            secondPages += 1;
+            return secondPages === 1 ? lowestFirst(rows) : rows;
           },
         }),
       );
 
       const guids = await runAt("2026-11-07T14:00:00.000Z");
 
-      expect(requestUrls().map((url) => url.searchParams.get("offset"))).toEqual(["0", "225", "0", "225"]);
+      expect(pagedOffsets()).toEqual(["0", "225", "0", "225"]);
       expect(new Set(guids)).toEqual(new Set(guidsOf(bills)));
       expect(countWarnings()).toEqual([
-        expect.objectContaining({ billType: "hr", readFrom: 0, listedRows: 270, count: 320, reread: 1 }),
+        expect.objectContaining({ billType: "hr", listedRows: 250, count: 300, reread: 1 }),
       ]);
       expect(countErrors()).toEqual([]);
       expect(metricData("BillPollerPageDrift")).toHaveLength(1);
       expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-11-07T14:00:00.000Z"));
     });
 
-    // An order that depends on the offset asked for answers the same pages again: the error says which window to
+    // An order that depends on the offset asked for answers the same pages again: the error says which slice to
     // refetch, and the watermark moves on rather than stop the bill type.
-    it("logs an error naming the window when reading it again does not help, and moves on", async () => {
+    it("logs an error naming the slice when reading it again does not help, and moves on", async () => {
       mockFetch.mockImplementation(
         serveBillList(bills, {
           reorder: (rows, url) => (url.searchParams.get("offset") === "0" ? rows : lowestFirst(rows)),
@@ -3053,44 +3481,39 @@ describe("billsApiPoller same-day updates and the watermark (REL-56)", () => {
 
       const guids = await runAt("2026-11-07T14:00:00.000Z");
 
-      expect(requestUrls().map((url) => url.searchParams.get("offset"))).toEqual(["0", "225", "0", "225"]);
+      expect(pagedOffsets()).toEqual(["0", "225", "0", "225"]);
       expect(new Set(guids).size).toBe(270);
-      expect(guids).not.toContain("BILLS-119hr1001");
+      expect(guids).not.toContain("BILLS-119hr10000");
+      const [paged] = pagingWarnings();
       expect(countErrors()).toEqual([
-        expect.objectContaining({
-          billType: "hr",
-          from: "2026-11-07T08:58:00.000Z",
-          to: "2026-11-07T14:00:00.000Z",
-          listedRows: 270,
-          count: 320,
-        }),
+        expect.objectContaining({ billType: "hr", from: paged.from, to: paged.to, listedRows: 250, count: 300 }),
       ]);
       expect(metricData("BillPollerPageDrift")).toHaveLength(2);
       expect(persistedState.cursors.hr).toEqual(cursorAtWatermark("2026-11-07T14:00:00.000Z"));
     });
 
-    // Bills that showed while the window was read are listed when it is read again, so they cannot account for what
+    // Bills that showed while the slice was read are listed when it is read again, so they cannot account for what
     // that reading lacks: here a row the changing order steps over both times.
     it("logs the error for a row stepped over in both readings when bills showed during the first", async () => {
       let shown = false;
-      // Pages after the first come with hr1200 and hr1040 (the same time) swapped: hr1040 moves up into the part of
-      // the list only the first page reads.
+      // Pages after the first come with hr10200 and hr10040 (the same time) swapped: hr10040 moves up into the part
+      // of the list only the first page reads.
       const swapped = (rows: ListedBill[]) =>
         rows.map((row) =>
-          row.number === "1200"
-            ? rows.find((other) => other.number === "1040")!
-            : row.number === "1040"
-              ? rows.find((other) => other.number === "1200")!
+          row.number === "10200"
+            ? rows.find((other) => other.number === "10040")!
+            : row.number === "10040"
+              ? rows.find((other) => other.number === "10200")!
               : row,
         );
       mockFetch.mockImplementation(
         serveBillList(bills, {
           beforePage: (url) => {
-            // Two bills show at the top as the first reading asks for page 2, above that page.
+            // Two bills show in the batch's second as the first reading asks for page 2, first in its order.
             if (shown || url.searchParams.get("offset") !== "225") return;
             shown = true;
-            touch("9001", "2026-11-07T13:59:30Z");
-            touch("9002", "2026-11-07T13:59:40Z");
+            touch("90001", burstAt);
+            touch("90002", burstAt);
           },
           reorder: (rows, url) => (url.searchParams.get("offset") === "0" ? rows : swapped(rows)),
         }),
@@ -3098,11 +3521,11 @@ describe("billsApiPoller same-day updates and the watermark (REL-56)", () => {
 
       const guids = await runAt("2026-11-07T14:00:00.000Z");
 
-      expect(requestUrls().map((url) => url.searchParams.get("offset"))).toEqual(["0", "225", "0", "225"]);
-      expect(new Set(guids)).toEqual(new Set(guidsOf(bills.filter((bill) => bill.number !== "1040"))));
-      expect(countWarnings()).toEqual([expect.objectContaining({ listedRows: 319, count: 322, risen: 2, reread: 1 })]);
+      expect(pagedOffsets()).toEqual(["0", "225", "0", "225"]);
+      expect(new Set(guids)).toEqual(new Set(guidsOf(bills.filter((bill) => bill.number !== "10040"))));
+      expect(countWarnings()).toEqual([expect.objectContaining({ listedRows: 299, count: 302, risen: 2, reread: 1 })]);
       expect(logLinesWithMessage(console.warn, /^Rows (still )?showed in congress\.gov's list/)).toEqual([]);
-      expect(countErrors()).toEqual([expect.objectContaining({ readFrom: 0, listedRows: 321, count: 322, risen: 0 })]);
+      expect(countErrors()).toEqual([expect.objectContaining({ listedRows: 301, count: 302, risen: 0 })]);
       expect(metricData("BillPollerPageDrift")).toHaveLength(2);
     });
   });
