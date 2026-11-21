@@ -10,6 +10,7 @@ import {
   DEFAULT_CUTOFF,
   DEMO_KEY,
   JOURNAL_TITLE,
+  MAX_LIST_PASSES,
   MAX_TYPE_LIST_REQUESTS,
   MIN_SPLIT_SECONDS,
   POLLER_RELISTED_FROM,
@@ -326,8 +327,13 @@ interface TimedGov {
   ghosts: number[];
   /** Answers without pagination. */
   noCount: boolean;
-  /** Called before each request is answered, with its number (1-based): rows move between requests here. */
-  before: (request: number) => void;
+  /**
+   * The time an answer holds a row at, by the request's number and window (ms), or null when it holds none: answers
+   * that disagree about a row, as congress.gov's do about a bill it keeps updating. By default, the row's `ms`.
+   */
+  timeOf: (entry: TimedRow, request: number, window: { from: number; to: number }) => number | null;
+  /** Called before each request is answered, with its number (1-based) and URL: rows move between requests here. */
+  before: (request: number, url: URL) => void;
   /** Changes the rows of an answer before it is sent. */
   edit: (bills: Row[], request: number, count: number) => Row[];
   calls: URL[];
@@ -367,6 +373,7 @@ const timedGov = (rows: TimedRow[], settings: Partial<Omit<TimedGov, "rows" | "c
     order: "shuffled",
     ghosts: [],
     noCount: false,
+    timeOf: (entry) => entry.ms,
     before: () => undefined,
     edit: (bills) => bills,
     calls: [],
@@ -376,10 +383,13 @@ const timedGov = (rows: TimedRow[], settings: Partial<Omit<TimedGov, "rows" | "c
     const parsed = new URL(url);
     gov.calls.push(parsed);
     const request = gov.calls.length;
-    gov.before(request);
+    gov.before(request, parsed);
     const from = Date.parse(parsed.searchParams.get("fromDateTime")!);
     const to = Date.parse(parsed.searchParams.get("toDateTime")!);
-    const matching = gov.rows.filter((entry) => inWindow(gov.rule, from, to, entry.ms));
+    const matching = gov.rows.filter((entry) => {
+      const ms = gov.timeOf(entry, request, { from, to });
+      return ms !== null && inWindow(gov.rule, from, to, ms);
+    });
     const ordered = gov.order === "shuffled" ? shuffle(matching, request) : matching;
     const offset = Number(parsed.searchParams.get("offset"));
     const limit = Number(parsed.searchParams.get("limit"));
@@ -422,6 +432,50 @@ const realisticRows = (): TimedRow[] =>
 const guidOf = (entry: TimedRow) => `BILLS-119hr${String(entry.row.number)}`;
 const guidsOf = (entries: readonly TimedRow[]) => entries.map(guidOf).sort();
 const listedGuids = (listed: ListedType | PagedListing) => [...listed.rows.keys()].sort();
+
+/** A request for the whole of WIDE: a type's first answer, or an end count. */
+const asksWhole = (url: URL) =>
+  url.searchParams.get("fromDateTime") === congressApiTime(WIDE.from) &&
+  url.searchParams.get("toDateTime") === congressApiTime(WIDE.to);
+/** The same, for the window timeOf is given (ms). */
+const isWhole = (window: { from: number; to: number }) =>
+  window.from === Date.parse(WIDE.from) && window.to === Date.parse(WIDE.to);
+
+/**
+ * Answers that disagree about rows congress.gov keeps updating, as if requests reached copies of its index that are
+ * not equally up to date: each row of `moved` is at its new time (the map's value) in some answers and at its old one
+ * (its `ms`) in others. While `hide()` holds, an answer whose window holds one of the two times alone holds the row at
+ * the other, so no slice that holds one time alone lists it, while a window that holds both (the whole one) counts
+ * it. Otherwise every answer holds it at its new time.
+ */
+const disagreeing =
+  (moved: ReadonlyMap<TimedRow, number>, hide: () => boolean): TimedGov["timeOf"] =>
+  (entry, _request, window) => {
+    const newMs = moved.get(entry);
+    if (newMs === undefined) return entry.ms;
+    if (!hide()) return newMs;
+    const holdsNew = inWindow("inclusive", window.from, window.to, newMs);
+    const holdsOld = inWindow("inclusive", window.from, window.to, entry.ms);
+    return holdsNew && !holdsOld ? entry.ms : newMs;
+  };
+
+/**
+ * The first run's case on the realistic rows: 14 rows of the dense day that congress.gov updates again and again, last
+ * at times within two minutes, about four minutes before top. The answers hide them from every slice until the first
+ * end count, or (`always`) throughout; the whole window always counts them.
+ */
+const measured = (always = false) => {
+  const rows = realisticRows();
+  const moved = new Map(rows.slice(100, 114).map((entry, index) => [entry, TOP_MS - 281_000 + index * 9_000]));
+  let endCounts = 0;
+  const mock = timedGov(rows, {
+    before: (request, url) => {
+      if (request > 1 && asksWhole(url)) endCounts += 1;
+    },
+    timeOf: disagreeing(moved, () => always || endCounts === 0),
+  });
+  return { rows, moved: [...moved.keys()], ...mock };
+};
 
 /** A reader run against a fake congress.gov: what it listed or its stop, and its log lines. */
 const attempt = async <T>(
@@ -1482,8 +1536,17 @@ describe("the sliced listing", () => {
     const { listed, stop, text } = await sliced(httpGet);
     expect(stop).toBeNull();
     expect(listedGuids(listed!)).toEqual(guidsOf(rows));
-    expect(listed).toMatchObject({ count: 3_000, unnamed: 0, paged: 0, left: 0, requests: gov.calls.length });
-    // One answer a slice: no page past the first, nothing asked again, nothing to log.
+    expect(listed).toMatchObject({
+      count: 3_000,
+      unnamed: 0,
+      paged: 0,
+      passes: 1,
+      left: 0,
+      more: 0,
+      finalCount: null,
+      requests: gov.calls.length,
+    });
+    // One answer a slice: no page past the first, nothing asked again, no end count, nothing to log.
     expect(gov.calls.every((call) => call.searchParams.get("offset") === "0")).toBe(true);
     expect(text).toBe("");
 
@@ -1542,7 +1605,7 @@ describe("the sliced listing", () => {
       expect(stop).toBeNull();
       const inside = rows.filter((entry) => inWindow(rule, at(0), at(4_096), entry.ms));
       expect(listedGuids(listed!)).toEqual(guidsOf(inside));
-      expect(listed).toMatchObject({ count: inside.length, left: 0, slices: 8, requests: 15 });
+      expect(listed).toMatchObject({ count: inside.length, left: 0, slices: 8, passes: 1, requests: 15 });
       // The 8 slices were asked for as the splits say, so the placed rows sat on their bounds.
       const asked = gov.calls.map((call) => [
         call.searchParams.get("fromDateTime"),
@@ -1590,39 +1653,392 @@ describe("the sliced listing", () => {
     );
   });
 
-  it("stops (count_short) when a row enters the window during the listing", async () => {
-    // No row should: a time is set when a bill is updated, and that is after top. More rows than the first count are
-    // the evidence that one did, and the slices may then have missed one.
+  it("lists a row the first answer did not count, without a stop, and the type's line reports it", async () => {
+    // A row that enters the window during the listing: the first answer did not count it, and a later slice lists it,
+    // as congress.gov's answers can disagree about a bill it keeps updating. The rows listed are more than the first
+    // count: reported, and, as they reach every count of the whole window taken, no end count is asked.
     const rows = realisticRows();
-    const { httpGet } = timedGov(rows, {
-      before: (request) => {
-        if (request === 2) rows.push(timedRow(9_999, TOP_MS - 20 * HOUR_MS));
-      },
+    const added = timedRow(9_999, TOP_MS - 20 * HOUR_MS);
+    const entering = () => {
+      const list = [...rows];
+      return timedGov(list, {
+        before: (request) => {
+          if (request === 2) list.push(added);
+        },
+      });
+    };
+    const { gov, httpGet } = entering();
+    const { listed, stop, lines } = await sliced(httpGet);
+    expect(stop).toBeNull();
+    expect(listedGuids(listed!)).toEqual(guidsOf([...rows, added]));
+    expect(listed).toMatchObject({
+      count: 3_000,
+      left: 0,
+      more: 1,
+      passes: 1,
+      finalCount: null,
+      requests: gov.calls.length,
     });
-    const { stop } = await sliced(httpGet);
-    expect(stop).toMatchObject({ reason: "count_short" });
-    expect(stop!.message).toBe(
-      "hr: listed 3001 distinct rows, more than the 3000 congress.gov counted at the start: a row entered the window " +
-        "during the listing, which the slices assume cannot happen, so they may have missed a row. Run again later.",
+    expect(listed!.requests).toBe(2 * listed!.slices - 1);
+    expect(lines).toEqual([]);
+
+    const { result, lines: runLines } = await run(
+      newWorld(),
+      { types: ["hr"], countOnly: true, cutoff: WIDE.from },
+      { httpGet: entering().httpGet },
+    );
+    expect(result).toMatchObject({ exitCode: 0, outcome: "done", stop: null });
+    expect(runLines).toContain(
+      `  hr: 3001 rows in ${listed!.slices} slices, ${listed!.requests} requests (pagination.count 3000 at the ` +
+        "start); 1 more than counted at the start: congress.gov's answers disagree",
     );
   });
 
-  it("stops (count_short) when a row that names no bill enters the window during the listing", async () => {
+  it("lists a row that names no bill and that the first answer did not count, without a stop", async () => {
     const rows = realisticRows();
     const { httpGet } = timedGov(rows, {
       before: (request) => {
         if (request === 2) rows.push(noBill("No number", TOP_MS - 20 * HOUR_MS));
       },
     });
-    const { stop } = await sliced(httpGet);
-    expect(stop).toMatchObject({ reason: "count_short" });
-    expect(stop!.message).toMatch(/^hr: listed 3001 distinct rows, more than the 3000 congress\.gov counted/);
+    const { listed, stop } = await sliced(httpGet);
+    expect(stop).toBeNull();
+    expect(listed).toMatchObject({ count: 3_000, unnamed: 1, left: 0, more: 1, passes: 1, finalCount: null });
+    expect(listed!.rows.size).toBe(3_000);
   });
 
-  it("counts the whole window again when rows are missing, and stops (count_short) when it still counts more", async () => {
+  it("goes on when a row only the first answer counts is not listed, and goes by counts when two rows even out", async () => {
+    // A row only the first answer holds (later ones place it outside the window): the rows listed are one short of the
+    // first count, and the end count, which does not hold it either, passes them, as for a row updated again since top.
+    const rows = realisticRows();
+    const [onlyFirst, notFirst] = [rows[700], rows[2_900]];
+    const firstOnly = timedGov(rows, {
+      timeOf: (entry, request) => (entry === onlyFirst && request > 1 ? null : entry.ms),
+    });
+    const short = await sliced(firstOnly.httpGet);
+    expect(short.stop).toBeNull();
+    expect(short.listed!.rows.has(guidOf(onlyFirst))).toBe(false);
+    expect(short.listed).toMatchObject({ count: 3_000, finalCount: 2_999, left: 1, more: 0, passes: 1 });
+    expect(short.listed!.requests).toBe(2 * short.listed!.slices);
+
+    // With a row the first answer does not hold as well, listed by a slice: the check goes by counts, so the one makes
+    // up for the other. Both whole-window counts are met, no end count is asked, and nothing is reported.
+    const both = timedGov(rows, {
+      timeOf: (entry, request) =>
+        (entry === onlyFirst && request > 1) || (entry === notFirst && request === 1) ? null : entry.ms,
+    });
+    const evened = await sliced(both.httpGet);
+    expect(evened.stop).toBeNull();
+    expect(evened.listed!.rows.has(guidOf(onlyFirst))).toBe(false);
+    expect(evened.listed!.rows.has(guidOf(notFirst))).toBe(true);
+    expect(evened.listed).toMatchObject({ count: 2_999, finalCount: null, left: 0, more: 0, passes: 1 });
+    expect(evened.listed!.requests).toBe(2 * evened.listed!.slices - 1);
+  });
+
+  it("reads the slices again when a pass missed rows congress.gov's answers disagree about, as in the first run", async () => {
+    // As measured: 14 House bills congress.gov updates every few minutes, held at their new time by some answers and
+    // at an older time by others. Each slice that holds one of their times was read while its answer held them at the
+    // other, so the first pass missed all 14, while both counts of the whole window held them. The second pass, once
+    // the answers agree, lists them; no end count follows, as the rows listed reach every count taken.
+    const { gov, httpGet, rows, moved } = measured();
+    const { listed, stop, lines } = await sliced(httpGet);
+    expect(stop).toBeNull();
+    expect(listedGuids(listed!)).toEqual(guidsOf(rows));
+    expect(listed).toMatchObject({
+      count: 3_000,
+      finalCount: 3_000,
+      passes: 2,
+      left: 0,
+      more: 0,
+      requests: gov.calls.length,
+    });
+    const slices = listed!.slices;
+    expect(lines).toEqual([
+      `  hr: pass 2 of ${MAX_LIST_PASSES}: 2986 of 3000 counted at the end; reading the ${slices} slices again`,
+    ]);
+    // The whole window was asked for twice: first, and after the first pass (2 x slices - 1 requests). The second
+    // pass asked for each slice once, at offset 0.
+    const whole = gov.calls.flatMap((call, index) => (asksWhole(call) ? [index] : []));
+    expect(whole).toEqual([0, 2 * slices - 1]);
+    const second = gov.calls.slice(2 * slices);
+    expect(second).toHaveLength(slices);
+    expect(second.every((call) => call.searchParams.get("offset") === "0")).toBe(true);
+    expect(new Set(second.map((call) => call.search)).size).toBe(slices);
+    expect(moved).toHaveLength(14);
+
+    // The run: done, and the type's line names the passes.
+    const { result, lines: runLines } = await run(
+      newWorld(),
+      { types: ["hr"], countOnly: true, cutoff: WIDE.from },
+      { httpGet: measured().httpGet },
+    );
+    expect(result).toMatchObject({ exitCode: 0, outcome: "done", stop: null });
+    expect(result.counts.missing).toBe(3_000);
+    expect(runLines).toContain(
+      `  hr: 3000 rows in ${slices} slices, ${listed!.requests} requests, 2 passes (pagination.count 3000 at the start)`,
+    );
+    expect(runLines).toContain(lines[0]);
+  });
+
+  it("reads the slices again while the rows listed are below an end count above the first answer's", async () => {
+    // Two rows congress.gov's answers disagree about. The first answer holds x at no time, so it counts 2,999, and
+    // the answers hide x from every slice until the first end count; they hide y until the second. The first pass
+    // lists 2,998, the end count holds both (3,000), and the second pass lists x but not y: 2,999 reach the first
+    // count, not the end count, so the whole window is counted again and a third pass lists y.
+    const rows = realisticRows();
+    const [x, y] = [rows[100], rows[101]];
+    let endCounts = 0;
+    const hideX = disagreeing(new Map([[x, TOP_MS - 281_000]]), () => endCounts === 0);
+    const hideY = disagreeing(new Map([[y, TOP_MS - 272_000]]), () => endCounts < 2);
+    const { gov, httpGet } = timedGov(rows, {
+      before: (request, url) => {
+        if (request > 1 && asksWhole(url)) endCounts += 1;
+      },
+      timeOf: (entry, request, window) => {
+        if (entry === x) return request === 1 ? null : hideX(entry, request, window);
+        return hideY(entry, request, window);
+      },
+    });
+    const { listed, stop, lines } = await sliced(httpGet);
+    expect(stop).toBeNull();
+    expect(listedGuids(listed!)).toEqual(guidsOf(rows));
+    expect(listed).toMatchObject({
+      count: 2_999,
+      finalCount: 3_000,
+      passes: 3,
+      left: 0,
+      more: 1,
+      requests: gov.calls.length,
+    });
+    const slices = listed!.slices;
+    expect(lines).toEqual([
+      `  hr: pass 2 of ${MAX_LIST_PASSES}: 2998 of 3000 counted at the end; reading the ${slices} slices again`,
+      `  hr: pass 3 of ${MAX_LIST_PASSES}: 2999 of 3000 counted at the end; reading the ${slices} slices again`,
+    ]);
+    // The whole window was asked for first and after the first two passes.
+    const whole = gov.calls.flatMap((call, index) => (asksWhole(call) ? [index] : []));
+    expect(whole).toEqual([0, 2 * slices - 1, 3 * slices]);
+    expect(gov.calls).toHaveLength(4 * slices + 1);
+  });
+
+  it("keeps the rows of every pass: a later pass that misses rows an earlier one listed loses none", async () => {
+    // 14 rows congress.gov's answers disagree about: the answers hide 7 from every slice until the first end count,
+    // and the other 7 from then on. Each pass misses 7, never the same 7, and the two passes together list every row.
+    const rows = realisticRows();
+    const moved = rows
+      .slice(100, 114)
+      .map((entry, index): [TimedRow, number] => [entry, TOP_MS - 281_000 + index * 9_000]);
+    let endCounts = 0;
+    const early = disagreeing(new Map(moved.slice(0, 7)), () => endCounts === 0);
+    const late = disagreeing(new Map(moved.slice(7)), () => endCounts > 0);
+    const lateRows = new Set(moved.slice(7).map(([entry]) => entry));
+    const { gov, httpGet } = timedGov(rows, {
+      before: (request, url) => {
+        if (request > 1 && asksWhole(url)) endCounts += 1;
+      },
+      timeOf: (entry, request, window) => (lateRows.has(entry) ? late : early)(entry, request, window),
+    });
+    const { listed, stop, lines } = await sliced(httpGet);
+    expect(stop).toBeNull();
+    expect(listedGuids(listed!)).toEqual(guidsOf(rows));
+    expect(listed).toMatchObject({ count: 3_000, finalCount: 3_000, passes: 2, left: 0, more: 0 });
+    const slices = listed!.slices;
+    expect(lines).toEqual([
+      `  hr: pass 2 of ${MAX_LIST_PASSES}: 2993 of 3000 counted at the end; reading the ${slices} slices again`,
+    ]);
+    expect(gov.calls.filter(asksWhole)).toHaveLength(2);
+    expect(gov.calls).toHaveLength(3 * slices);
+  });
+
+  it("splits a slice of the first pass that counts more than 250 in a later pass, and keeps the rows of its halves", async () => {
+    // 200 rows over the window, and 200 more in its later half that the answers hide from every slice until the first
+    // end count. The first pass lists the 200 in the whole window's two halves; the end count holds all 400, and in
+    // the second pass the later half counts about 300 and is split, its two halves listing the rest.
+    const rootFrom = Date.parse(WIDE.from) / 1000;
+    const rootTo = TOP_MS / 1000;
+    const middle = rootFrom + Math.floor((rootTo - rootFrom) / 2);
+    const rows = timedRows(
+      21,
+      { rows: 200, from: Date.parse(WIDE.from), to: TOP_MS },
+      { rows: 200, from: (middle + 2) * 1000, to: TOP_MS },
+    );
+    const extra = new Set(rows.slice(200));
+    let endCounts = 0;
+    const { gov, httpGet } = timedGov(rows, {
+      before: (request, url) => {
+        if (request > 1 && asksWhole(url)) endCounts += 1;
+      },
+      timeOf: (entry, _request, window) => (extra.has(entry) && !isWhole(window) && endCounts === 0 ? null : entry.ms),
+    });
+    const { listed, stop, lines } = await sliced(httpGet);
+    expect(stop).toBeNull();
+    expect(listedGuids(listed!)).toEqual(guidsOf(rows));
+    expect(listed).toMatchObject({
+      count: 400,
+      finalCount: 400,
+      passes: 2,
+      left: 0,
+      more: 0,
+      slices: 2,
+      paged: 0,
+      requests: gov.calls.length,
+    });
+    expect(lines).toEqual([
+      `  hr: pass 2 of ${MAX_LIST_PASSES}: 200 of 400 counted at the end; reading the 2 slices again`,
+    ]);
+    // The whole window, its two halves, the end count; then the second pass: the later half, its two halves (the
+    // later first), and the earlier half.
+    expect(gov.calls.flatMap((call, index) => (asksWhole(call) ? [index] : []))).toEqual([0, 3]);
+    const window = (from: number, to: number) => [congressApiTime(iso(from * 1000)), congressApiTime(iso(to * 1000))];
+    const quarter = middle + Math.floor((rootTo - middle) / 2);
+    expect(
+      gov.calls.slice(4).map((call) => [call.searchParams.get("fromDateTime"), call.searchParams.get("toDateTime")]),
+    ).toEqual([
+      window(middle, rootTo),
+      window(quarter, rootTo),
+      window(middle, quarter + 1),
+      window(rootFrom, middle + 1),
+    ]);
+  });
+
+  it("reads by pages a slice of a later pass that holds more than 250 rows within one second, and keeps its rows", async () => {
+    // 600 rows over the window, and a burst of 300 within one second that the answers hide from every slice until the
+    // first end count. The first pass lists the 600 and reads no slice by pages; in the second, the slice of the
+    // first pass that holds the burst is split down to slices under 3 seconds, which are read by pages.
+    const burst = Date.parse("2026-11-11T09:30:00.000Z");
+    const rows = timedRows(
+      5,
+      { rows: 600, from: Date.parse(WIDE.from), to: TOP_MS },
+      { rows: 300, from: burst + 200, to: burst + 800 },
+    );
+    const extra = new Set(rows.slice(600));
+    let endCounts = 0;
+    const { gov, httpGet } = timedGov(rows, {
+      order: "stable",
+      before: (request, url) => {
+        if (request > 1 && asksWhole(url)) endCounts += 1;
+      },
+      timeOf: (entry, _request, window) => (extra.has(entry) && !isWhole(window) && endCounts === 0 ? null : entry.ms),
+    });
+    const { listed, stop, lines } = await sliced(httpGet);
+    expect(stop).toBeNull();
+    expect(listedGuids(listed!)).toEqual(guidsOf(rows));
+    // `paged` counts the first pass's slices alone.
+    expect(listed).toMatchObject({
+      count: 900,
+      finalCount: 900,
+      passes: 2,
+      left: 0,
+      more: 0,
+      paged: 0,
+      requests: gov.calls.length,
+    });
+    expect(lines).toEqual([
+      `  hr: pass 2 of ${MAX_LIST_PASSES}: 600 of 900 counted at the end; reading the ${listed!.slices} slices again`,
+      ...[
+        ["2026-11-11T09:30:00Z", "2026-11-11T09:30:02Z"],
+        ["2026-11-11T09:29:59Z", "2026-11-11T09:30:01Z"],
+      ].map(
+        ([from, to]) =>
+          `  hr from ${from} to ${to}: congress.gov counts 300 rows in under ${MIN_SPLIT_SECONDS} seconds, more than ` +
+          "one answer holds; reading the slice by pages",
+      ),
+    ]);
+  });
+
+  it("stops (count_short) after MAX_LIST_PASSES when the answers hide the rows from every pass", async () => {
+    const { gov, httpGet } = measured(true);
+    const { stop, lines } = await sliced(httpGet);
+    expect(stop).toMatchObject({ reason: "count_short" });
+    expect(stop!.message).toBe(
+      `hr: 14 rows still short after ${MAX_LIST_PASSES} passes: congress.gov counts 3000 rows in the window, but only ` +
+        "2986 were listed. Rows congress.gov's answers disagree about may have been missed, or the slices did not " +
+        "cover the window. Run again later.",
+    );
+    const slices = Number(lines[0]?.match(/reading the (\d+) slices again$/)?.[1]);
+    expect(lines).toEqual(
+      Array.from(
+        { length: MAX_LIST_PASSES - 1 },
+        (_, index) =>
+          `  hr: pass ${index + 2} of ${MAX_LIST_PASSES}: 2986 of 3000 counted at the end; reading the ${slices} ` +
+          "slices again",
+      ),
+    );
+    // The first pass, an end count after each pass, and each later pass asking for every slice once.
+    expect(gov.calls.filter(asksWhole)).toHaveLength(1 + MAX_LIST_PASSES);
+    expect(gov.calls).toHaveLength(2 * slices - 1 + MAX_LIST_PASSES + (MAX_LIST_PASSES - 1) * slices);
+    expect(asksWhole(gov.calls[gov.calls.length - 1])).toBe(true);
+
+    // The run stops with exit 2.
+    const { result } = await run(
+      newWorld(),
+      { types: ["hr"], countOnly: true, cutoff: WIDE.from },
+      { httpGet: measured(true).httpGet },
+    );
+    expect(result).toMatchObject({ exitCode: 2, outcome: "stopped_count_short", file: null });
+    expect(result.stop!.detail).toBe(stop!.message);
+  });
+
+  it("stops (count_short) after MAX_LIST_PASSES when the slices leave a gap in the window, which no pass closes", async () => {
+    // A filter that drops the rows in the second the whole window's halves share from every narrower window: no
+    // boundary rule explains it (the rows lie inside both halves). The whole window counts them, no slice lists them,
+    // and every pass misses them alike.
+    const rootFrom = Date.parse(WIDE.from) / 1000;
+    const middle = rootFrom + Math.floor((TOP_MS / 1000 - rootFrom) / 2);
+    const gap = { from: middle * 1000, to: (middle + 1) * 1000 };
+    const rows = [...realisticRows(), ...[250, 500, 750].map((ms, index) => timedRow(70_001 + index, gap.from + ms))];
+    const inGap = (entry: TimedRow) => entry.ms >= gap.from && entry.ms < gap.to;
+    expect(rows.filter(inGap)).toHaveLength(3);
+    const { gov, httpGet } = timedGov(rows, {
+      timeOf: (entry, _request, window) => (inGap(entry) && !isWhole(window) ? null : entry.ms),
+    });
+    const { stop, lines } = await sliced(httpGet);
+    expect(stop).toMatchObject({ reason: "count_short" });
+    expect(stop!.message).toBe(
+      `hr: 3 rows still short after ${MAX_LIST_PASSES} passes: congress.gov counts 3003 rows in the window, but only ` +
+        "3000 were listed. Rows congress.gov's answers disagree about may have been missed, or the slices did not " +
+        "cover the window. Run again later.",
+    );
+    expect(lines).toHaveLength(MAX_LIST_PASSES - 1);
+    expect(gov.calls.filter(asksWhole)).toHaveLength(1 + MAX_LIST_PASSES);
+
+    // The same rows without the gap: one pass lists them all.
+    const plain = await sliced(timedGov(rows).httpGet);
+    expect(listedGuids(plain.listed!)).toEqual(guidsOf(rows));
+    expect(plain.listed).toMatchObject({ count: 3_003, passes: 1, finalCount: null });
+  });
+
+  it("counts the requests of every pass against MAX_TYPE_LIST_REQUESTS", async () => {
+    // 260 rows: the first pass lists them in 2 slices and 3 requests but misses one the slices' answers leave out.
+    // From its end count on, congress.gov no longer applies the time filter (each answer holds every row at its
+    // window's start): the second pass splits without end, and the cap, counted from the type's first request, stops
+    // the run.
+    const rows = timedRows(17, { rows: 260, from: Date.parse(WIDE.from), to: TOP_MS });
+    let endCounts = 0;
+    const { gov, httpGet } = timedGov(rows, {
+      order: "stable",
+      before: (request, url) => {
+        if (request > 1 && asksWhole(url)) endCounts += 1;
+      },
+      timeOf: (entry, _request, window) => {
+        if (endCounts > 0) return window.from;
+        return entry === rows[0] && !isWhole(window) ? null : entry.ms;
+      },
+    });
+    const { stop, lines } = await sliced(httpGet);
+    expect(stop).toMatchObject({ reason: "list_failed" });
+    expect(stop!.message).toMatch(/^hr: the listing needs more than MAX_TYPE_LIST_REQUESTS \(3000\) list requests/);
+    expect(lines[0]).toBe(
+      `  hr: pass 2 of ${MAX_LIST_PASSES}: 259 of 260 counted at the end; reading the 2 slices again`,
+    );
+    expect(gov.calls.filter(asksWhole)).toHaveLength(2);
+    expect(gov.calls).toHaveLength(MAX_TYPE_LIST_REQUESTS);
+  });
+
+  it("counts the whole window again when rows are missing, reads the slices again, and stops (count_short) after MAX_LIST_PASSES", async () => {
     // Every answer that counts at most 250 leaves one row out of both its bills and its count: each slice passes its
     // own check, and the rows listed are fewer than the first count, as when rows are updated again since top. Only
-    // the second count of the whole window, which still counts the row, tells the two apart.
+    // the end count of the whole window, which still counts the row, tells the two apart; every pass misses the row.
     const rows = realisticRows();
     const hidden = rows[1_234].row.number;
     const { gov, httpGet } = timedGov(rows);
@@ -1636,17 +2052,19 @@ describe("the sliced listing", () => {
         body: JSON.stringify({ bills, pagination: { count: body.pagination.count - 1 } }),
       };
     };
-    const { stop } = await sliced(hiding);
+    const { stop, lines } = await sliced(hiding);
     expect(stop).toMatchObject({ reason: "count_short" });
     expect(stop!.message).toBe(
-      "hr: congress.gov still counts 3000 rows in the window, but only 2999 were listed: an answer left out a row it " +
-        "should have counted, or the slices did not cover the window. Run again later.",
+      `hr: 1 row still short after ${MAX_LIST_PASSES} passes: congress.gov counts 3000 rows in the window, but only ` +
+        "2999 were listed. Rows congress.gov's answers disagree about may have been missed, or the slices did not " +
+        "cover the window. Run again later.",
     );
-    const whole = [congressApiTime(WIDE.from), congressApiTime(WIDE.to)];
-    const last = gov.calls[gov.calls.length - 1];
-    expect([last.searchParams.get("fromDateTime"), last.searchParams.get("toDateTime")]).toEqual(whole);
+    expect(lines).toHaveLength(MAX_LIST_PASSES - 1);
+    expect(gov.calls.filter(asksWhole)).toHaveLength(1 + MAX_LIST_PASSES);
+    expect(asksWhole(gov.calls[gov.calls.length - 1])).toBe(true);
 
-    // Rows updated again during the listing lower the second count with them: no stop, and they are counted as left.
+    // Rows updated again during the listing lower the end count with them: no stop, one pass, and they are counted
+    // as left.
     const moving = realisticRows();
     const left = timedGov(moving, {
       before: (request) => {
@@ -1655,14 +2073,19 @@ describe("the sliced listing", () => {
     });
     const passes = await sliced(left.httpGet);
     expect(passes.stop).toBeNull();
-    expect(passes.listed).toMatchObject({ count: 3_000, finalCount: 2_960, left: 40, requests: left.gov.calls.length });
+    expect(passes.listed).toMatchObject({
+      count: 3_000,
+      finalCount: 2_960,
+      left: 40,
+      passes: 1,
+      requests: left.gov.calls.length,
+    });
     expect(passes.listed!.rows.size).toBe(2_960);
-    const lastCall = left.gov.calls[left.gov.calls.length - 1];
-    expect([lastCall.searchParams.get("fromDateTime"), lastCall.searchParams.get("toDateTime")]).toEqual(whole);
+    expect(asksWhole(left.gov.calls[left.gov.calls.length - 1])).toBe(true);
 
-    // Nothing missing: no second count.
+    // Nothing missing: no end count.
     const complete = await sliced(timedGov(realisticRows()).httpGet);
-    expect(complete.listed).toMatchObject({ count: 3_000, finalCount: null, left: 0 });
+    expect(complete.listed).toMatchObject({ count: 3_000, finalCount: null, left: 0, passes: 1 });
   });
 
   it("reads a slice by pages when more than 250 rows lie within one second, and stops when their order changes", async () => {

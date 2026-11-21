@@ -44,14 +44,21 @@
 // count). So each slice is asked for once, at offset 0, 250 rows. One that counts at most 250 must list exactly the
 // rows it counts, else it is asked again once, then the run stops (count_short) and names the type and the slice. One
 // that counts more is split in two halves that overlap by a second; one under 3 seconds wide is read by pages, as the
-// poller pages (listPagedSlice). The rows listed may be fewer than the whole window counted at the start (rows updated
-// again since top left the window: the poller lists them), never more: more means a row entered the window during the
-// listing, and the run stops (count_short). When they are fewer, the whole window is counted again after the last
-// slice: fewer rows listed than that second count means an answer left out a row it counted, or the slices missed one,
-// and the run stops (count_short). The cost is about two requests per 180 rows, since a split slice's answer is not
-// kept: about 130 to 180 for hr's 11,141 rows, and about 220 to 330 for all eight types (9 to 13 minutes at 1,500 an
-// hour). Bursts of more than 250 rows within seconds, far apart, cost more (the figures are at MAX_TYPE_LIST_REQUESTS);
-// a type that needs more than MAX_TYPE_LIST_REQUESTS (3,000) stops the run (list_failed).
+// poller pages (listPagedSlice). congress.gov's answers are not one consistent view either: a bill it keeps updating
+// can sit at its new time in one answer and at an older time in another, and be counted by one answer and not by the
+// next. The first run's snapshot pass listed 11,127 of hr's 11,141 rows, short by exactly the 14 House bills
+// congress.gov updates every few minutes, though none was updated during the listing and both counts of the whole
+// window held them. So the slices are read in passes, and the rows listed by every pass together are checked against
+// counts of the whole window. Fewer than the count at the start are rows updated again since top (they left the
+// window: the poller lists them); more are rows the first answer did not count that a slice listed, which the type's
+// line reports. While the rows listed are below a count of the whole window taken, the whole window is counted again
+// after the pass, and fewer rows listed than that count mean another pass over the same slices, MAX_LIST_PASSES (4) at
+// most; then the run stops (count_short). The first pass costs about two requests per 180 rows, since a split slice's
+// answer is not kept: about 130 to 180 for hr's 11,141 rows. The first run's first pass took 350 for all eight types
+// (hr 169, s 145; 14 minutes at 1,500 an hour). A pass after it costs one request a slice and one count: about 86 for
+// hr's 85 slices and 74 for s's 73. Bursts of more than 250 rows within seconds, far apart, cost more (the figures are
+// at MAX_TYPE_LIST_REQUESTS); a type that needs more than MAX_TYPE_LIST_REQUESTS (3,000), every pass included, stops
+// the run (list_failed).
 //
 // The snapshot is built in <out>.partial, a journal of the rows listed and the details read: a rerun with the same
 // options resumes there, keeping the first run's top, listing only the types not listed yet and asking no detail
@@ -130,6 +137,11 @@ export const PAGE_STEP_ROWS = LIST_PAGE_SIZE - PAGE_OVERLAP_ROWS;
 export const MAX_PAGE_DRIFT_STEP_BACKS = 2;
 /** Answers of a slice, or readings of a slice read by pages, before the run stops (count_short). */
 export const LIST_READINGS = 2;
+/**
+ * Passes over a type's slices, the first included, while the rows listed stay below the whole window's count at the
+ * end; then the run stops (count_short).
+ */
+export const MAX_LIST_PASSES = 4;
 /** 200 pages of 225 is 45,000 rows: far more than a type lists since 2025. */
 const MAX_LIST_PAGES = 200;
 /** A slice at least this many seconds wide is split; the first half of a narrower one would be no narrower. */
@@ -140,8 +152,12 @@ export const MIN_SPLIT_SECONDS = 3;
  * more than 250 rows within a few seconds costs about 2 x log2(its distance from the next burst / its width) on its
  * own: hr's rows in 37 bursts of 300 within 5 seconds cost about 550 five minutes apart, 860 an hour apart and 1,150 a
  * day apart. No level of the slices splits more than count / 251 of them, and the window has about 23 levels above
- * 3 seconds, so hr needs at most about 2 x 23 x 11,141 / 251, some 2,050. A list that did not apply the time filter
- * would be split without end.
+ * 3 seconds, so hr's first pass needs at most about 2 x 23 x 11,141 / 251, some 2,050. The cap holds for every pass
+ * together: a pass after the first asks for the first pass's slices again, about half its requests, and the whole
+ * window's count once. hr's real list, 169 requests in 85 slices, costs 170 with the end count and 86 a pass more, 428
+ * at MAX_LIST_PASSES; the bursts a day apart about 1,150 and 577 a pass more, some 2,880. A list near the bound that
+ * needs every pass would pass the cap and stop the run (list_failed). A list that did not apply the time filter would
+ * be split without end.
  */
 export const MAX_TYPE_LIST_REQUESTS = 3_000;
 export const LIST_ATTEMPTS = 3;
@@ -281,7 +297,7 @@ export const USAGE = [
   "",
   "Usage:",
   `  read -rs ${KEY_ENV}; export ${KEY_ENV}   The key: paste it, then Enter (not shown, not kept in the history)`,
-  "  npm run list:skipped-bill-updates -- --count-only     Counts only, about 220 to 330 requests",
+  "  npm run list:skipped-bill-updates -- --count-only     Counts only, about 350 to 910 requests",
   `  npm run list:skipped-bill-updates                     The snapshot, ${DEFAULT_OUT}`,
   `  unset ${KEY_ENV}                                When done`,
   "  npm run list:skipped-bill-updates -- --demo-key --types sconres --count-only   Smoke test (5 requests at most)",
@@ -302,9 +318,10 @@ export const USAGE = [
   `The key is read from ${KEY_ENV}, sent only in the X-Api-Key header to api.congress.gov, and never printed or`,
   "written. Exit codes: 0 done; 1 a usage error, no key, or a raw bill that could not be read; 2 the preflight refused",
   "(the 119th not primary, the poller state, the poller rule not ENABLED) or the run stopped (429, 401, 403, a slice",
-  "short of its count, a type listing more rows than it first counted or fewer than it counts at the end, a list",
-  `request that kept failing or a type past ${MAX_TYPE_LIST_REQUESTS} list requests, --max-requests, a quiet window`,
-  "opened during the run or a rule check that failed). A stopped run keeps <out>.partial: the same command resumes it.",
+  `short of its count, a type listing fewer rows than it counts at the end after ${MAX_LIST_PASSES} passes over its`,
+  `slices, a list request that kept failing or a type past ${MAX_TYPE_LIST_REQUESTS} list requests, --max-requests, a`,
+  "quiet window opened during the run or a rule check that failed). A stopped run keeps <out>.partial: the same",
+  "command resumes it.",
   "",
   "Environment: AWS_PROFILE, AWS_REGION / AWS_DEFAULT_REGION, BILL_STORE_BUCKET (or BUCKET_NAME), RAW_BILLS_PREFIX.",
   "Needs the AWS CLI on PATH for the poller rule check.",
@@ -522,23 +539,39 @@ export const paginationCount = (payload: Record<string, unknown>): number | null
 
 export interface ListedType {
   type: string;
-  /** By guid, in the order first read: the rows of every slice (a row that left the window since is harmless). */
+  /**
+   * By guid, in the order first read: the rows of every slice, in every pass (a row that left the window since is
+   * harmless).
+   */
   rows: Map<string, Record<string, unknown>>;
   /** Rows that name no bill of this Congress and type (each once, by its JSON): counted, not kept. */
   unnamed: number;
   /** pagination.count of the type's first answer: the whole window at the start (null when it had none). */
   count: number | null;
-  /** The slices listed: each by one answer, or by pages when too narrow to split. */
+  /**
+   * The slices of the first pass, which every later pass reads again: each listed by one answer, or by pages when
+   * too narrow to split.
+   */
   slices: number;
   /** Of those, the slices read by pages (more than LIST_PAGE_SIZE rows in under MIN_SPLIT_SECONDS seconds). */
   paged: number;
-  /** List requests, tries again and pages included. */
+  /** List requests, tries again, pages and every pass included. */
   requests: number;
-  /** Rows the first answer counted that no slice listed: updated again since top (the poller lists them). */
+  /** Passes over the slices: 1, or more while the rows listed stayed below the end count (at most MAX_LIST_PASSES). */
+  passes: number;
+  /**
+   * Rows the first answer counted beyond the rows listed (count less the rows listed, at least 0): updated again since
+   * top (the poller lists them).
+   */
   left: number;
   /**
-   * pagination.count of the whole window asked again after the last slice, when fewer rows were listed than `count`
-   * (null otherwise): never more than the rows listed, else the run stops.
+   * Rows listed beyond the first answer's count (the rows listed less count, at least 0): rows the first answer did
+   * not count that a slice listed, as congress.gov's answers disagree about bills it keeps updating. Not a stop.
+   */
+  more: number;
+  /**
+   * The last end count: pagination.count of the whole window asked again after a pass (null when none was asked, or
+   * its answer had none). The rows listed are at least as many, else another pass follows, or the run stops.
    */
   finalCount: number | null;
 }
@@ -561,6 +594,7 @@ export interface PagedListing {
 type Log = (line: string) => void;
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+const passCount = (n: number): string => (n === 1 ? "1 pass" : `${n} passes`);
 
 interface ListDeps {
   log: Log;
@@ -692,9 +726,11 @@ export const listPagedSlice = async (
     }
     const distinct = seen.size + unnamed.size;
     const listed: PagedListing = { rows, unnamed, count: lastCount, pages, reads: read, stepBacks };
-    // Every row read was in the window when it was read, and no row enters it after top: as many distinct rows as the
-    // first page counted means every row of the window was read. Nothing less proves it, in either reading: against a
-    // later count, a row read before it left the window makes up for a row a changed order hid.
+    // Every row read was in the window of the answer that listed it: as many distinct rows as the first page counted
+    // means every row that page counted was read, unless a row read is one it did not count (congress.gov's answers
+    // can disagree about a bill it keeps updating). Such a row can make up for one missed: listType counts the whole
+    // window again and reads its slices again while rows are short. Nothing less proves it, in either reading: against
+    // a later count, a row read before it left the window makes up for a row a changed order hid.
     const complete = firstCount === null || distinct >= firstCount;
     if (!drifted && complete) return listed;
     const why = drifted
@@ -725,8 +761,8 @@ const sliceWindow = (slice: Slice): { from: string; to: string } => ({
 });
 
 /**
- * Every row of a type's list in the window, by time slices. It starts with the whole window; each slice [from, to]
- * (whole seconds) is asked for once, at offset 0, LIST_PAGE_SIZE rows:
+ * Every row of a type's list in the window, by time slices, in passes. The first pass starts with the whole window;
+ * each slice [from, to] (whole seconds) is asked for once, at offset 0, LIST_PAGE_SIZE rows:
  * - It counts at most LIST_PAGE_SIZE (pagination.count): its answer must list exactly that many rows, all distinct
  *   (rows that name no bill by their JSON), and its rows are kept. An answer that does not is asked for again
  *   (LIST_READINGS answers at most); then the run stops (count_short), naming the type and the slice.
@@ -740,20 +776,31 @@ const sliceWindow = (slice: Slice): { from: string; to: string } => ({
  *   are kept.
  * - Its answer has no pagination.count: a short answer (fewer than LIST_PAGE_SIZE rows) is complete; a full one is
  *   split, or read by pages when it is too narrow.
- * A row read by two slices (in the second they share) is kept once, by guid.
+ * A row read by two slices (in the second they share), or by two passes, is kept once, by guid.
  *
- * Why every row is listed: a row that stays in the window from the type's first request to its last has one time in
- * the window. The slices cover the window, so that time lies in a slice that was not split, and that slice's one
- * answer listed every row it counted (one read by pages: as many distinct rows as its first page counted), so the
- * row was listed. A row updated again during the listing leaves the window (its time is now after top) and may not
- * be listed: the poller lists it. The list's order is relied on nowhere: one answer needs no order. No row enters the
- * window after top, so the rows listed are never more than the first answer (the whole window) counted. More is the
- * evidence that one did, and the slices could then have missed a row: the run stops (count_short). Fewer is checked
- * against a second count of the whole window, asked after the last slice: every row still in the window then stayed
- * in it throughout and was listed, so fewer rows listed than that count means an answer left out a row it counted, or
- * the slices did not cover the window under congress.gov's real filter, and the run stops (count_short). The check
- * goes by counts, so a row listed before it left the window can make up for one missed. At most
- * MAX_TYPE_LIST_REQUESTS list requests, the second count included, else the run stops (list_failed).
+ * The slices whose rows were kept are the first pass's slices. After a pass, while the rows listed (every pass's
+ * together) are below a count of the whole window taken so far, the whole window is counted again (the end count).
+ * Rows listed at least as many as the end count: the type is done. Fewer: the next pass asks for each of the first
+ * pass's slices again in the same way (one that now counts more than LIST_PAGE_SIZE is split, or read by pages) and
+ * keeps its rows, and after MAX_LIST_PASSES passes the run stops (count_short).
+ *
+ * Why every row is listed: congress.gov's answers are not one consistent view, as if requests reached copies of its
+ * index that are not equally up to date. A bill it keeps updating can be at its new time in one answer and at an
+ * older time in another: missing from the slice that holds its new time when that slice is read, and from the slice
+ * that holds its old time when that one is read; and counted by one answer and not by another. One answer is still
+ * consistent with itself, so each slice's own check stands. A row at one fixed time in every answer from the type's
+ * first request to its last has that time in a slice of the first pass (the slices cover the window), and that slice's
+ * one answer listed every row it counted, so the first pass listed the row. A slice read by pages is checked by its
+ * count alone, as its pages are separate answers: a row its first page did not count can make up for one its pages
+ * missed, and the end count and the next pass recover that row as they recover a row whose time differs between
+ * answers. A row whose time differs between answers can be missed by a pass; while its times lie in the window, the end
+ * count holds it, the rows listed fall short of that count, and the next pass reads the slices again. A row updated
+ * again during the listing leaves the window (its time is now after top) and may not be listed: the poller lists it,
+ * and the end count no longer holds it. A row the first answer did not count can still be listed by a slice: the rows
+ * listed are then more than the first count, which `more` reports, and the listing goes on. The check goes by counts,
+ * so a row listed before it left the window, or one the counts do not hold, can make up for one missed. The list's
+ * order is relied on nowhere: one answer needs no order. At most MAX_TYPE_LIST_REQUESTS list requests, every pass and
+ * end count included, else the run stops (list_failed).
  */
 export const listType = async (
   client: CongressClient,
@@ -764,7 +811,8 @@ export const listType = async (
 ): Promise<ListedType> => {
   const ownGuid = new RegExp(`^BILLS-${congress}${type}\\d+$`);
   const rows = new Map<string, Record<string, unknown>>();
-  // Rows that name no bill, by their JSON: one in the second two halves share is read twice but counted once.
+  // Rows that name no bill, by their JSON: one in the second two halves share, or read again by a later pass, is
+  // counted once.
   const unnamed = new Set<string>();
   let requests = 0;
   const counted: ListDeps = {
@@ -784,20 +832,76 @@ export const listType = async (
   };
   let firstCount: number | null = null;
   let answered = false;
-  let slices = 0;
+  // The first pass's slices whose rows were kept: every later pass asks for them again.
+  const leaves: Slice[] = [];
   let paged = 0;
-  const keep = (named: Iterable<[string, Record<string, unknown>]>, unnamedRows: Iterable<string>) => {
+  let passes = 0;
+  const listedRows = () => rows.size + unnamed.size;
+  const keep = (
+    slice: Slice,
+    named: Iterable<[string, Record<string, unknown>]>,
+    unnamedRows: Iterable<string>,
+  ): void => {
     for (const [guid, row] of named) if (!rows.has(guid)) rows.set(guid, row);
     for (const json of unnamedRows) unnamed.add(json);
-    slices += 1;
-    const listed = rows.size + unnamed.size;
-    if (firstCount !== null && listed > firstCount) {
-      throw new StopError(
-        "count_short",
-        `${type}: listed ${listed} distinct rows, more than the ${firstCount} congress.gov counted at the start: a row ` +
-          "entered the window during the listing, which the slices assume cannot happen, so they may have missed a " +
-          "row. Run again later.",
-      );
+    if (passes === 1) leaves.push(slice);
+  };
+
+  /** One pass: each slice of `start`, in that order, and the slices it is split into. */
+  const pass = async (start: readonly Slice[]): Promise<void> => {
+    passes += 1;
+    // The stack is popped from its end.
+    const work: Slice[] = [...start].reverse();
+    while (work.length > 0) {
+      const slice = work.pop()!;
+      const range = sliceWindow(slice);
+      const where = `${type} from ${congressApiTime(range.from)} to ${congressApiTime(range.to)}`;
+      for (let reading = 1; ; reading += 1) {
+        const payload = await listPage(client, congress, type, 0, range, counted, where);
+        const count = paginationCount(payload);
+        if (!answered) {
+          answered = true;
+          firstCount = count;
+        }
+        const list = listRows(payload) ?? (count === 0 ? [] : null);
+        if (list === null) throw new StopError("list_failed", `congress.gov's answer for ${where} holds no bill list`);
+        if (count !== null ? count > LIST_PAGE_SIZE : list.length >= LIST_PAGE_SIZE) {
+          if (slice.to - slice.from >= MIN_SPLIT_SECONDS) {
+            const middle = slice.from + Math.floor((slice.to - slice.from) / 2);
+            // The later half is listed first.
+            work.push({ from: slice.from, to: middle + 1 }, { from: middle, to: slice.to });
+          } else {
+            deps.log(
+              `  ${where}: congress.gov counts ${count ?? `at least ${list.length}`} rows in under ` +
+                `${MIN_SPLIT_SECONDS} seconds, more than one answer holds; reading the slice by pages`,
+            );
+            const listing = await listPagedSlice(client, congress, type, range, counted, where);
+            if (passes === 1) paged += 1;
+            keep(slice, listing.rows, listing.unnamed);
+          }
+          break;
+        }
+        const named = new Map<string, Record<string, unknown>>();
+        const unnamedRows = new Set<string>();
+        for (const row of list) {
+          const guid = toBillMessage(row, type, congress)?.guid;
+          if (!guid || !ownGuid.test(guid)) unnamedRows.add(JSON.stringify(row));
+          else if (!named.has(guid)) named.set(guid, row);
+        }
+        const distinct = named.size + unnamedRows.size;
+        if (count === null || (list.length === count && distinct === count)) {
+          keep(slice, named, unnamedRows);
+          break;
+        }
+        const why = `congress.gov counts ${count} rows but listed ${list.length} (${distinct} distinct)`;
+        if (reading >= LIST_READINGS) {
+          throw new StopError(
+            "count_short",
+            `${where}: read twice, and ${why}; rows it counts may not have been listed. Run again later.`,
+          );
+        }
+        deps.log(`  ${where}: ${why}; reading it once more`);
+      }
     }
   };
 
@@ -805,78 +909,51 @@ export const listType = async (
     from: Math.floor(Date.parse(window.from) / 1000),
     to: Math.floor(Date.parse(window.to) / 1000),
   };
-  const work: Slice[] = [root];
-  while (work.length > 0) {
-    const slice = work.pop()!;
-    const range = sliceWindow(slice);
-    const where = `${type} from ${congressApiTime(range.from)} to ${congressApiTime(range.to)}`;
-    for (let reading = 1; ; reading += 1) {
-      const payload = await listPage(client, congress, type, 0, range, counted, where);
-      const count = paginationCount(payload);
-      if (!answered) {
-        answered = true;
-        firstCount = count;
-      }
-      const list = listRows(payload) ?? (count === 0 ? [] : null);
-      if (list === null) throw new StopError("list_failed", `congress.gov's answer for ${where} holds no bill list`);
-      if (count !== null ? count > LIST_PAGE_SIZE : list.length >= LIST_PAGE_SIZE) {
-        if (slice.to - slice.from >= MIN_SPLIT_SECONDS) {
-          const middle = slice.from + Math.floor((slice.to - slice.from) / 2);
-          // The later half is listed first.
-          work.push({ from: slice.from, to: middle + 1 }, { from: middle, to: slice.to });
-        } else {
-          deps.log(
-            `  ${where}: congress.gov counts ${count ?? `at least ${list.length}`} rows in under ` +
-              `${MIN_SPLIT_SECONDS} seconds, more than one answer holds; reading the slice by pages`,
-          );
-          const listing = await listPagedSlice(client, congress, type, range, counted, where);
-          paged += 1;
-          keep(listing.rows, listing.unnamed);
-        }
-        break;
-      }
-      const named = new Map<string, Record<string, unknown>>();
-      const unnamedRows = new Set<string>();
-      for (const row of list) {
-        const guid = toBillMessage(row, type, congress)?.guid;
-        if (!guid || !ownGuid.test(guid)) unnamedRows.add(JSON.stringify(row));
-        else if (!named.has(guid)) named.set(guid, row);
-      }
-      const distinct = named.size + unnamedRows.size;
-      if (count === null || (list.length === count && distinct === count)) {
-        keep(named, unnamedRows);
-        break;
-      }
-      const why = `congress.gov counts ${count} rows but listed ${list.length} (${distinct} distinct)`;
-      if (reading >= LIST_READINGS) {
-        throw new StopError(
-          "count_short",
-          `${where}: read twice, and ${why}; rows it counts may not have been listed. Run again later.`,
-        );
-      }
-      deps.log(`  ${where}: ${why}; reading it once more`);
-    }
-  }
-  // No row enters the window after top, so every row still in it now was in it throughout, kept one time, and was
-  // listed by the slice holding that time: the rows listed are at least as many as congress.gov counts now. Fewer
-  // means an answer left out a row it should have counted, or the slices did not cover the window under congress.gov's
-  // real filter, not only rows updated again since top.
+  const whole = sliceWindow(root);
+  const wholeWhere = `${type} from ${congressApiTime(whole.from)} to ${congressApiTime(whole.to)}`;
+  await pass([root]);
+  // The end count is asked only while the rows listed are below the highest count of the whole window taken so far
+  // (the first answer's, or an end count). A count is the only evidence of a missed row, and none taken shows one once
+  // the rows listed reach every one of them: so a first pass that listed the first answer's count, or a pass that
+  // brought the rows listed up to every count, costs no request more. Below it, the rows listed must reach the new end
+  // count, not the highest: rows updated again since top left the window and lowered it (the poller lists them).
+  let highest: number | null = firstCount;
   let finalCount: number | null = null;
-  if (firstCount !== null && rows.size + unnamed.size < firstCount) {
-    const whole = sliceWindow(root);
-    const where = `${type} from ${congressApiTime(whole.from)} to ${congressApiTime(whole.to)}`;
-    finalCount = paginationCount(await listPage(client, congress, type, 0, whole, counted, where));
-    const listed = rows.size + unnamed.size;
-    if (finalCount !== null && listed < finalCount) {
+  while (highest !== null && listedRows() < highest) {
+    finalCount = paginationCount(await listPage(client, congress, type, 0, whole, counted, wholeWhere));
+    const listed = listedRows();
+    if (finalCount === null || listed >= finalCount) break;
+    if (passes >= MAX_LIST_PASSES) {
       throw new StopError(
         "count_short",
-        `${type}: congress.gov still counts ${finalCount} rows in the window, but only ${listed} were listed: an ` +
-          "answer left out a row it should have counted, or the slices did not cover the window. Run again later.",
+        `${type}: ${plural(finalCount - listed, "row")} still short after ${passCount(passes)}: congress.gov counts ` +
+          `${finalCount} rows in the window, but only ${listed} were listed. Rows congress.gov's answers disagree ` +
+          "about may have been missed, or the slices did not cover the window. Run again later.",
       );
     }
+    highest = Math.max(highest, finalCount);
+    deps.log(
+      `  ${type}: pass ${passes + 1} of ${MAX_LIST_PASSES}: ${listed} of ${finalCount} counted at the end; reading ` +
+        `the ${plural(leaves.length, "slice")} again`,
+    );
+    await pass(leaves);
   }
-  const left = firstCount === null ? 0 : Math.max(0, firstCount - rows.size - unnamed.size);
-  return { type, rows, unnamed: unnamed.size, count: firstCount, slices, paged, requests, left, finalCount };
+  const listed = listedRows();
+  const left = firstCount === null ? 0 : Math.max(0, firstCount - listed);
+  const more = firstCount === null ? 0 : Math.max(0, listed - firstCount);
+  return {
+    type,
+    rows,
+    unnamed: unnamed.size,
+    count: firstCount,
+    slices: leaves.length,
+    paged,
+    requests,
+    passes,
+    left,
+    more,
+    finalCount,
+  };
 };
 
 // ─── Classification ──────────────────────────────────────────────────────────
@@ -1297,10 +1374,12 @@ export const runSnapshot = async ({
       rowsByType.set(type, listed.rows);
       log(
         `  ${type}: ${plural(listed.rows.size, "row")} in ${plural(listed.slices, "slice")}, ` +
-          `${plural(listed.requests, "request")} (pagination.count ${listed.count ?? "none"} at the start` +
+          `${plural(listed.requests, "request")}${listed.passes > 1 ? `, ${passCount(listed.passes)}` : ""} ` +
+          `(pagination.count ${listed.count ?? "none"} at the start` +
           `${listed.unnamed > 0 ? `, ${listed.unnamed} naming no ${type} bill` : ""}` +
           `${listed.paged > 0 ? `, ${listed.paged} read by pages` : ""})` +
-          `${listed.left > 0 ? `; ${listed.left} updated again since top (the poller lists them)` : ""}`,
+          `${listed.left > 0 ? `; ${listed.left} updated again since top (the poller lists them)` : ""}` +
+          `${listed.more > 0 ? `; ${listed.more} more than counted at the start: congress.gov's answers disagree` : ""}`,
       );
       journalAppend(
         [
