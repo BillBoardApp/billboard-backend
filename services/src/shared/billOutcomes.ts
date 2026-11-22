@@ -1,4 +1,5 @@
 import type { BillStatusValue } from "../models/bill";
+import { calendarDay } from "./calendarDay";
 import { actionTextWithoutCitations } from "./congressionalRecordCitations";
 
 // Passed and Failed (docs/RUNBOOK.md 4.11), and Finalized (4.13). A bill's status is Finalized once an action records
@@ -373,6 +374,35 @@ export const firstBillOutcomeDate = (actions: unknown[] | null | undefined): str
     if (first === null || date < first) first = date;
   }
   return first;
+};
+
+/** The Library of Congress codes of a passage in one chamber (REL-50), as the manifest row's chamber facts read them. */
+const HOUSE_PASSAGE_ACTION_CODE = "8000";
+const SENATE_PASSAGE_ACTION_CODE = "17000";
+
+/** The days a bill passed each chamber (chamberPassageDates); a chamber that has not passed it is absent. */
+export type ChamberPassageDates = { house?: string; senate?: string };
+
+/**
+ * The day (YYYY-MM-DD) of the earliest dated action coded 8000, "Passed/agreed to in House", and of the earliest coded
+ * 17000, "Passed/agreed to in Senate": the manifest row's passedHouseOn and passedSenateOn (UX-38). Like the status, it
+ * trusts codes only (REL-50): an amendment, motion or conference-report line has a code of its own, the Senate's own
+ * floor line for the vote has none, and a vote over a veto (32000, 34000) is not a passage. An action without a real
+ * calendar day is skipped. It never reads the status, so a bill that later failed, was vetoed or became law keeps both.
+ */
+export const chamberPassageDates = (actions: unknown[] | null | undefined): ChamberPassageDates => {
+  const passed: ChamberPassageDates = {};
+  for (const action of normalizeActions(actions)) {
+    const code = toTrimmedString(action.actionCode);
+    const chamber =
+      code === HOUSE_PASSAGE_ACTION_CODE ? "house" : code === SENATE_PASSAGE_ACTION_CODE ? "senate" : null;
+    if (!chamber) continue;
+    const day = calendarDay(action.actionDate);
+    if (day === null) continue;
+    const earliest = passed[chamber];
+    if (earliest === undefined || day < earliest) passed[chamber] = day;
+  }
+  return passed;
 };
 
 /** The status an outcome gives: Passed or Failed, or New without one. */
