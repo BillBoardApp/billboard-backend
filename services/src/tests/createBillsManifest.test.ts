@@ -12,6 +12,7 @@ import { billContentHash, formatDateBasis, manifestDateBasis } from "../shared/b
 import { extractS3ObjectRefsFromSQSEvent } from "../shared/s3EventExtract";
 import { asSqsEvent } from "./fixtures/awsEvents";
 import { HELD_FOR_REVIEW_CASES } from "./fixtures/heldForReview";
+import { manifestRowFacts } from "./fixtures/manifestRowFacts";
 import { CURATED_OVERRIDE_CASES } from "./fixtures/curatedCeremonialOverrides";
 import { jsonReadable } from "./fixtures/streams";
 import { applyTestEnv } from "./fixtures/env";
@@ -3096,10 +3097,12 @@ describe("createBillsManifest handler", () => {
 
           const res = await loaded(event(versionId));
 
-          // The served attributes as they were; the row gains what the document it now reflects stamps (never served).
+          // The served attributes as they were, plus the bill facts every write adds (UX-29, UX-38); the row gains
+          // what the document it now reflects stamps (never served).
           expect(rowKeys(ddbItems)).toEqual([ddbKey("BILL", rowSk), ddbKey("BILL_GUID", guid)].sort());
           expect(ddbItems[ddbKey("BILL", rowSk)]).toEqual({
             ...rowBefore,
+            ...manifestRowFacts(written.actions),
             voteCount: { N: "0" },
             contentHash: { S: billContentHash(written) },
             dateBasis: { S: basisOf(written, null) },
@@ -3441,6 +3444,208 @@ describe("createBillsManifest handler", () => {
         expect(ddbItems[ddbKey("BILL", vetoedSk)]).toMatchObject({
           billStatus: { S: "Passed" },
           vetoed: { BOOL: true },
+        });
+      });
+    });
+
+    describe("the bill facts: ceremonial flag, introduced day, chamber passages, latest action (UX-29, UX-38)", () => {
+      const HOUSE_PASSAGE = {
+        actionCode: "8000",
+        actionDate: "2026-03-04",
+        text: "Passed/agreed to in House: On passage Passed by recorded vote: 230 - 190 (Roll no. 71).",
+        type: "Floor",
+      };
+      const SENATE_PASSAGE = {
+        actionCode: "17000",
+        actionDate: "2026-03-12",
+        text: "Passed/agreed to in Senate: Passed Senate without amendment by Voice Vote.",
+        type: "Floor",
+      };
+      const PASSED_AT = "2026-03-12T21:00:00.000Z";
+      const passedSk = `${PASSED_AT}#${guid}`;
+      /** The bill once both chambers passed it, as billDiffer stores it. */
+      const passedDoc = (storedAt = PASSED_AT, changes: Record<string, unknown> = {}) => ({
+        ...base,
+        storedAt,
+        billStatus: "Passed",
+        actions: [SENATE_PASSAGE, HOUSE_PASSAGE, ...base.actions],
+        ...changes,
+      });
+      const FACT_ATTRIBUTES = ["isCommemorative", "introducedDate", "passedHouseOn", "passedSenateOn", "latestAction"];
+      const PASSED_FACTS = {
+        introducedDate: { S: "2026-02-10" },
+        passedHouseOn: { S: "2026-03-04" },
+        passedSenateOn: { S: "2026-03-12" },
+        latestAction: { M: { actionDate: { S: "2026-03-12" }, text: { S: SENATE_PASSAGE.text } } },
+      };
+      const factsOf = (row: Item) =>
+        Object.fromEntries(FACT_ATTRIBUTES.filter((name) => name in row).map((name) => [name, row[name]]));
+
+      it("writes each from the document's actions on a new row, and none on the lookup row", async () => {
+        const ddbItems: Items = {};
+        const { handler: loaded } = load(ddbItems);
+        s3.put(key, passedDoc(), TEXT);
+
+        await loaded(event());
+
+        expect(factsOf(ddbItems[ddbKey("BILL", passedSk)])).toEqual(PASSED_FACTS);
+        expect(factsOf(ddbItems[ddbKey("BILL_GUID", guid)])).toEqual({});
+      });
+
+      it("writes only the facts the document gives: an open bill has no passage, and no bill is ceremonial", async () => {
+        const ddbItems: Items = {};
+        const { handler: loaded } = load(ddbItems);
+        s3.put(key, base, TEXT);
+
+        await loaded(event());
+
+        expect(factsOf(ddbItems[ddbKey("BILL", baseSk)])).toEqual({
+          introducedDate: { S: "2026-02-10" },
+          latestAction: { M: { actionDate: { S: "2026-02-12" }, text: { S: "Reported by the Committee" } } },
+        });
+      });
+
+      it("takes the document's own introducedDate when it has one, and writes no latest action without a dated action", async () => {
+        const ddbItems: Items = {};
+        const { handler: loaded } = load(ddbItems);
+        s3.put(key, { ...base, introducedDate: "2026-02-03", actions: [{ text: "Introduced in House" }] }, TEXT);
+
+        await loaded(event());
+
+        expect(factsOf(ddbItems[ddbKey("BILL", baseSk)])).toEqual({ introducedDate: { S: "2026-02-03" } });
+      });
+
+      it("flags a ceremonial resolution only, beside its emptied topics and life areas", async () => {
+        const hresGuid = "BILLS-119hres1187";
+        const hresKey = `processed-bills/${hresGuid}.json`;
+        const ceremonial = {
+          kind: "processed",
+          storedAt: "2026-10-20T15:00:00.000Z",
+          identifier: { congress: "119", billType: "hres", billNumber: "1187" },
+          guid: hresGuid,
+          title: "Recognize Community Health Workers Week",
+          officialTitle: "Expressing support for the designation of Community Health Workers Week.",
+          soWhat: "No law changes.",
+          subCategories: ["Healthcare"],
+          lifeAreas: ["Medical Costs"],
+          sponsors: ["B001318"],
+          cosponsors: [],
+          actions: [{ actionDate: "2026-10-16", text: "Submitted in House" }],
+          billStatus: "New",
+        };
+        const notCeremonial = {
+          ...ceremonial,
+          title: "Condemn an attack",
+          officialTitle: "Condemning the attack on a federal courthouse.",
+        };
+        const rowFor = async (doc: typeof ceremonial) => {
+          s3 = new FakeVersionedS3("2026-10-20T15:00:00.000Z");
+          const ddbItems: Items = {};
+          const { handler: loaded } = load(ddbItems);
+          s3.put(hresKey, doc, TEXT);
+          await loaded(
+            asSqsEvent({
+              Records: [{ messageId: "m1", body: JSON.stringify({ Records: [{ s3: { object: { key: hresKey } } }] }) }],
+            }),
+          );
+          return ddbItems[ddbKey("BILL", `${doc.storedAt}#${hresGuid}`)];
+        };
+
+        const flagged = await rowFor(ceremonial);
+        expect(flagged).toMatchObject({
+          isCommemorative: { BOOL: true },
+          subCategories: { L: [] },
+          lifeAreas: { L: [] },
+          introducedDate: { S: "2026-10-16" },
+          latestAction: { M: { actionDate: { S: "2026-10-16" }, text: { S: "Submitted in House" } } },
+        });
+        const plain = await rowFor(notCeremonial);
+        expect(plain.isCommemorative).toBeUndefined();
+        expect(plain.lifeAreas).toEqual({ L: [{ S: "Medical Costs" }] });
+      });
+
+      it.each([
+        ["at its storedAt (an equal sort key: rewritten in place)", PASSED_AT],
+        ["dated before its storedAt (a REL-56 first publication dated by congress.gov)", "2026-03-12T09:00:00.000Z"],
+      ])(
+        "adds them to a row written before them, for the same document, at the row's own date: %s",
+        async (_label, rowUpdatedAt) => {
+          // A rows-only replay (backfill:bills-manifest without --forward) of the document the row reflects.
+          const doc = passedDoc();
+          const ddbItems = seedCurrentRow(doc, { updatedAt: rowUpdatedAt, voteCount: "4" });
+          const rowSk = `${rowUpdatedAt}#${guid}`;
+          const before = { ...ddbItems[ddbKey("BILL", rowSk)] };
+          const { handler: loaded } = load(ddbItems);
+          s3.put(key, doc, TEXT);
+
+          await loaded(event());
+
+          expect(rowKeys(ddbItems)).toEqual([ddbKey("BILL", rowSk), ddbKey("BILL_GUID", guid)].sort());
+          expect(ddbItems[ddbKey("BILL_GUID", guid)].manifestSk).toEqual({ S: rowSk });
+          const { [ddbKey("BILL", rowSk)]: after } = ddbItems;
+          // Everything else as it was: the date, the vote count, and the hash and basis of the document alone.
+          expect(after).toEqual({ ...before, ...PASSED_FACTS });
+          expect(after.updatedAt).toEqual({ S: rowUpdatedAt });
+          expect(after.contentHash).toEqual({ S: billContentHash(doc) });
+          expect(after.dateBasis).toEqual({ S: basisOf(doc) });
+        },
+      );
+
+      it("carries them on a kept rewrite, and never lets them change the hash, the basis or the date decision", async () => {
+        // A newer version without news (a cosponsor refill) over a row written before the facts: kept at its date.
+        const doc = passedDoc();
+        const refilled = passedDoc(BULK_STORED_AT, { cosponsors: cosponsors(177) });
+        const ddbItems = seedCurrentRow(doc);
+        const { handler: loaded } = load(ddbItems);
+        s3.put(key, doc, TEXT);
+        const versionId = s3.put(key, refilled, TEXT);
+
+        const res = await loaded(event(versionId));
+
+        expect(ddbItems[ddbKey("BILL_GUID", guid)].manifestSk).toEqual({ S: passedSk });
+        expect(ddbItems[ddbKey("BILL", passedSk)]).toMatchObject({
+          ...PASSED_FACTS,
+          updatedAt: { S: PASSED_AT },
+          contentHash: { S: billContentHash(refilled) },
+          dateBasis: { S: basisOf(refilled) },
+          documentStoredAt: { S: BULK_STORED_AT },
+        });
+        expect(JSON.parse(res.body).stats).toMatchObject({ upsertsKeptDate: 1 });
+        expect(dateLines(info)).toEqual([
+          expect.objectContaining({ decision: "kept", moves: [], decidedBy: "dateBasis" }),
+        ]);
+      });
+
+      it("drops a fact the document no longer gives (a relabel, a vacated passage)", async () => {
+        const doc = passedDoc(PASSED_AT, { actions: [HOUSE_PASSAGE, ...base.actions] });
+        const ddbItems = seedCurrentRow(doc);
+        Object.assign(ddbItems[ddbKey("BILL", passedSk)], {
+          isCommemorative: { BOOL: true },
+          passedSenateOn: { S: "2026-03-12" },
+        });
+        const { handler: loaded } = load(ddbItems);
+        s3.put(key, doc, TEXT);
+
+        await loaded(event());
+
+        expect(factsOf(ddbItems[ddbKey("BILL", passedSk)])).toEqual({
+          introducedDate: { S: "2026-02-10" },
+          passedHouseOn: { S: "2026-03-04" },
+          latestAction: { M: { actionDate: { S: "2026-03-04" }, text: { S: HOUSE_PASSAGE.text } } },
+        });
+      });
+
+      it("reads them from a document wrapped in content.rawSnapshot, with congress.gov's introducedDate", async () => {
+        const ddbItems: Items = {};
+        const { handler: loaded } = load(ddbItems);
+        const doc = { ...passedDoc(), content: { bill: { bill: { introducedDate: "2026-02-06" } } } };
+        s3.put(key, { kind: "processed", storedAt: doc.storedAt, actions: [], content: { rawSnapshot: doc } }, TEXT);
+
+        await loaded(event());
+
+        expect(factsOf(ddbItems[ddbKey("BILL", passedSk)])).toEqual({
+          ...PASSED_FACTS,
+          introducedDate: { S: "2026-02-06" },
         });
       });
     });

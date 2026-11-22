@@ -1,4 +1,6 @@
 import { DynamoDBClient, QueryCommand, type AttributeValue } from "@aws-sdk/client-dynamodb";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { BillsManifestItemV1 as BillManifestEntry } from "../contracts";
 import { BillPriorityDao } from "../adapters/billPriorityDao";
 import type { BillPriorityRecord } from "../models/billPriority";
@@ -592,6 +594,101 @@ describe("billsManifestBuilder", () => {
     // Through the builder, so inline and windowed loads and the snapshot carry it.
     const manifest = await buildBillsManifest(sourceFor(MANIFEST_ENV, { Items: [vetoed] }).source);
     expect(manifest.bills[0].vetoed).toBe(true);
+  });
+
+  describe("the bill facts (UX-29, UX-38)", () => {
+    const FACTS: Row = {
+      isCommemorative: { BOOL: true },
+      introducedDate: { S: "2026-02-10" },
+      passedHouseOn: { S: "2026-02-03" },
+      passedSenateOn: { S: "2026-02-19" },
+      latestAction: { M: { actionDate: { S: "2026-03-04" }, text: { S: "Passed/agreed to in Senate." } } },
+    };
+
+    it("serves each as CreateBillsManifest writes it, after vetoed and before civicProfile", async () => {
+      const row = manifestItem({
+        billStatus: { S: "Passed" },
+        vetoed: { BOOL: true },
+        ...FACTS,
+        civicProfile: { M: { localVsFederal: { N: "0.5" } } },
+      });
+      const entry = toManifestEntry(row)!;
+      expect(entry).toMatchObject({
+        isCommemorative: true,
+        introducedDate: "2026-02-10",
+        passedHouseOn: "2026-02-03",
+        passedSenateOn: "2026-02-19",
+        latestAction: { actionDate: "2026-03-04", text: "Passed/agreed to in Senate." },
+      });
+      expect(Object.keys(entry).slice(-8)).toEqual([
+        "billStatus",
+        "vetoed",
+        "isCommemorative",
+        "introducedDate",
+        "passedHouseOn",
+        "passedSenateOn",
+        "latestAction",
+        "civicProfile",
+      ]);
+
+      // Through the builder, so inline and windowed loads and the snapshot carry them.
+      const manifest = await buildBillsManifest(sourceFor(MANIFEST_ENV, { Items: [row] }).source);
+      expect(manifest.bills[0]).toEqual(entry);
+    });
+
+    it("leaves out a row's malformed facts rather than serving them against the contract", () => {
+      const plain = toManifestEntry(manifestItem());
+      for (const value of [{ BOOL: false }, { S: "true" }, { N: "1" }, { NULL: true } as AttributeValue]) {
+        expect(toManifestEntry(manifestItem({ isCommemorative: value }))).toEqual(plain);
+      }
+      for (const field of ["introducedDate", "passedHouseOn", "passedSenateOn"]) {
+        for (const value of [
+          { S: "2026-02-30" },
+          { S: "Feb 3, 2026" },
+          { S: "" },
+          { N: "20260203" },
+        ] as AttributeValue[]) {
+          expect(toManifestEntry(manifestItem({ [field]: value }))).toEqual(plain);
+        }
+      }
+      for (const value of [
+        { M: { text: { S: "Introduced in House" } } },
+        { M: { actionDate: { S: "2026-02-30" }, text: { S: "Introduced in House" } } },
+        { S: "Introduced in House" },
+        { L: [] },
+      ] as AttributeValue[]) {
+        expect(toManifestEntry(manifestItem({ latestAction: value }))).toEqual(plain);
+      }
+      // A stored timestamp keeps its day; an action without text keeps its date.
+      expect(toManifestEntry(manifestItem({ introducedDate: { S: "2026-02-10T00:00:00.000Z" } }))?.introducedDate).toBe(
+        "2026-02-10",
+      );
+      expect(
+        toManifestEntry(manifestItem({ latestAction: { M: { actionDate: { S: "2026-03-04" }, text: { S: " " } } } }))
+          ?.latestAction,
+      ).toEqual({ actionDate: "2026-03-04" });
+      expect(toManifestEntry(manifestItem())).toEqual(plain);
+    });
+
+    it("serves only fields of the contract's manifest item", () => {
+      const schema = JSON.parse(
+        readFileSync(join(__dirname, "../../../contracts/schemas/entities/bills-manifest.v1.schema.json"), "utf8"),
+      );
+      const item = schema.$defs.billManifestItem;
+      const entry = toManifestEntry(
+        manifestItem({
+          isPriority: { BOOL: true },
+          billStatus: { S: "Passed" },
+          vetoed: { BOOL: true },
+          ...FACTS,
+          civicProfile: { M: { localVsFederal: { N: "0.5" } } },
+        }),
+      )!;
+      expect(Object.keys(entry).filter((key) => !(key in item.properties))).toEqual([]);
+      expect(
+        Object.keys(entry.latestAction!).filter((key) => !(key in item.properties.latestAction.properties)),
+      ).toEqual([]);
+    });
   });
 
   it("drops items without a guid or billType", () => {

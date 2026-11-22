@@ -36,7 +36,8 @@ import {
   type ManifestDateMove,
   type SameDayActions,
 } from "../../shared/billVersionChange";
-import { deriveBillVetoedFromActions } from "../../shared/billOutcomes";
+import { billIntroducedDate, latestManifestAction } from "../../shared/billManifestFacts";
+import { chamberPassageDates, deriveBillVetoedFromActions } from "../../shared/billOutcomes";
 import { rawCongressUpdatedAt, readProcessedSource } from "../../shared/billSourceReconcile";
 import { isCommemorativeResolution, processedBillCommemorativeInput } from "../../shared/commemorativeResolutions";
 import { correlationIdFromMetadata, isRel56BackfillCorrelationId } from "../../shared/correlation";
@@ -382,6 +383,22 @@ const buildManifestItem = (
   // Only as true (project decision 2026-11-19): a row without it is not vetoed, and a whole-row Put drops it.
   if (entry.vetoed === true) {
     ddbItem.vetoed = { BOOL: true };
+  }
+  // The bill facts (UX-29, UX-38): each only when the document gives it, so a whole-row Put drops one it no longer
+  // gives (a resolution relabelled as not ceremonial loses the flag).
+  if (entry.isCommemorative === true) {
+    ddbItem.isCommemorative = { BOOL: true };
+  }
+  if (entry.introducedDate) ddbItem.introducedDate = { S: entry.introducedDate };
+  if (entry.passedHouseOn) ddbItem.passedHouseOn = { S: entry.passedHouseOn };
+  if (entry.passedSenateOn) ddbItem.passedSenateOn = { S: entry.passedSenateOn };
+  if (entry.latestAction) {
+    ddbItem.latestAction = {
+      M: {
+        actionDate: { S: entry.latestAction.actionDate },
+        ...(entry.latestAction.text ? { text: { S: entry.latestAction.text } } : {}),
+      },
+    };
   }
   if (entry.civicProfile && Object.keys(entry.civicProfile).length > 0) {
     ddbItem.civicProfile = {
@@ -1025,6 +1042,15 @@ const readManifestEntry = async (key: string, nowIso: string): Promise<ManifestR
     : Array.isArray(parsed?.actions)
       ? parsed.actions
       : [];
+  // The row's bill facts (UX-29, UX-38; shared/billManifestFacts.ts, billOutcomes.ts chamberPassageDates), from the
+  // same actions on every write, a kept one too. Like the veto flag, nothing of the date decision reads them, so a
+  // rows-only replay adds them to a row without moving it.
+  const introducedDate = billIntroducedDate(
+    contentBill?.introducedDate ?? rawSnapshot?.introducedDate ?? parsed?.introducedDate,
+    actions,
+  );
+  const passages = chamberPassageDates(actions);
+  const latestAction = latestManifestAction(actions);
 
   // Extract civicProfile scores (object with axis name keys and number values)
   const rawCivicProfile = rawSnapshot?.civicProfile ?? parsed?.civicProfile;
@@ -1054,6 +1080,11 @@ const readManifestEntry = async (key: string, nowIso: string): Promise<ManifestR
       ? { billStatus: billStatus as BillManifestEntry["billStatus"] }
       : {}),
     ...(deriveBillVetoedFromActions(actions) ? { vetoed: true as const } : {}),
+    ...(ceremonial ? { isCommemorative: true as const } : {}),
+    ...(introducedDate ? { introducedDate } : {}),
+    ...(passages.house ? { passedHouseOn: passages.house } : {}),
+    ...(passages.senate ? { passedSenateOn: passages.senate } : {}),
+    ...(latestAction ? { latestAction } : {}),
     ...(civicProfile && Object.keys(civicProfile).length > 0 ? { civicProfile } : {}),
   };
   const versionId = typeof getResp.VersionId === "string" && getResp.VersionId.length > 0 ? getResp.VersionId : null;

@@ -1,12 +1,14 @@
 import { DynamoDBClient, QueryCommand, type AttributeValue } from "@aws-sdk/client-dynamodb";
 import type {
   BillsManifestItemV1 as BillManifestEntry,
+  BillsManifestLatestActionV1,
   BillsManifestV1 as BillsManifest,
   CompanionGroupV1,
 } from "../contracts";
 import { BillPriorityDao } from "../adapters/billPriorityDao";
 import type { BillPriorityRecord } from "../models/billPriority";
 import { mergePriorityIntoManifestEntry, priorityFirstRankValue } from "./billPriority";
+import { calendarDay } from "./calendarDay";
 import { logger } from "./logger";
 
 /**
@@ -108,6 +110,18 @@ const toNumberMap = (value: AttributeValue | undefined): Record<string, number> 
   return Object.keys(result).length > 0 ? result : undefined;
 };
 
+/** A row attribute that holds a calendar day (YYYY-MM-DD), or undefined: not a string, or not a real day. */
+const toCalendarDay = (value: AttributeValue | undefined): string | undefined => calendarDay(value?.S) ?? undefined;
+
+/** The row's latestAction map as CreateBillsManifest writes it, or undefined without a calendar-day actionDate. */
+const toLatestAction = (value: AttributeValue | undefined): BillsManifestLatestActionV1 | undefined => {
+  const map = value?.M;
+  const actionDate = map && typeof map === "object" ? calendarDay(map.actionDate?.S) : null;
+  if (!actionDate) return undefined;
+  const text = typeof map?.text?.S === "string" ? map.text.S.trim() : "";
+  return { actionDate, ...(text ? { text } : {}) };
+};
+
 /**
  * Priority bills first (by rank), then newest updatedAt, then guid. Never by vote count (INT-11): even
  * the order would reveal which bills other users voted on most.
@@ -137,6 +151,10 @@ export const toManifestEntry = (item: ManifestItem | null | undefined): BillMani
 
   const billStatus = item.billStatus?.S ?? undefined;
   const civicProfile = toNumberMap(item.civicProfile);
+  const introducedDate = toCalendarDay(item.introducedDate);
+  const passedHouseOn = toCalendarDay(item.passedHouseOn);
+  const passedSenateOn = toCalendarDay(item.passedSenateOn);
+  const latestAction = toLatestAction(item.latestAction);
 
   return {
     guid,
@@ -154,6 +172,13 @@ export const toManifestEntry = (item: ManifestItem | null | undefined): BillMani
       : {}),
     // Only as true, as CreateBillsManifest writes it (project decision 2026-11-19); any other value is left out.
     ...(item.vetoed?.BOOL === true ? { vetoed: true as const } : {}),
+    // The bill facts (UX-29, UX-38) as CreateBillsManifest writes them: the flag only as true, the days only as real
+    // calendar days, so a malformed attribute is left out rather than served against the contract.
+    ...(item.isCommemorative?.BOOL === true ? { isCommemorative: true as const } : {}),
+    ...(introducedDate ? { introducedDate } : {}),
+    ...(passedHouseOn ? { passedHouseOn } : {}),
+    ...(passedSenateOn ? { passedSenateOn } : {}),
+    ...(latestAction ? { latestAction } : {}),
     ...(civicProfile ? { civicProfile } : {}),
   };
 };

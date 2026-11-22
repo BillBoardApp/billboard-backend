@@ -18,6 +18,7 @@ import { billContentHash, formatDateBasis, manifestDateBasis, textVersionDigest 
 import type { TextVersionEvidence } from "../shared/textVersionEvidence";
 import { asSqsEvent } from "./fixtures/awsEvents";
 import { evaluateCondition, type ConditionInput } from "./fixtures/dynamoCondition";
+import { manifestRowFacts } from "./fixtures/manifestRowFacts";
 import { RAW_COPY_STORED, rawCopy, type FixtureGuid } from "./fixtures/rel56TextVersions";
 import { jsonReadable } from "./fixtures/streams";
 import { FakeVersionedS3, type FakeS3Command } from "./fakeVersionedS3";
@@ -216,6 +217,7 @@ const manifestRow = (
       }
     : {}),
   billStatus: { S: doc.billStatus },
+  ...manifestRowFacts(doc.actions),
 });
 
 const lookup = (guid: FixtureGuid, updatedAt: string): Item => ({
