@@ -734,7 +734,7 @@ button:focus-visible {
   min-width: 0;
 }
 
-/* The app's icon, drawn from its AppIcon.icon layers. Decorative: the buttons say what it is. */
+/* The app's icon (assets/favicon.svg, the B from AppIcon.icon). Decorative: the buttons say what it is. */
 .app-icon {
   display: none;
   flex: none;
