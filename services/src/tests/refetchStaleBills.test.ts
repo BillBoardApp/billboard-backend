@@ -13,6 +13,7 @@ import {
   CHECK_INTERVAL_MS,
   CHECK_RETRY_WAIT_MS,
   DEFAULT_BATCH_LIMIT,
+  DLQ_CONFIRM_WAIT_MS,
   ENQUEUED_DIFFS_QUERY,
   LOGS_QUERY_MAX_POLLS,
   LOGS_QUERY_POLL_MS,
@@ -162,6 +163,8 @@ type SentBody = UpdatedBillMessage & { textRetryAttempt?: number };
 interface World {
   t: number;
   dlq: Record<string, number>;
+  /** A DLQ's readings, one per read, before `dlq` answers (SQS's approximate count: a message read once, then none). */
+  dlqReadings: Record<string, number[]>;
   /** UpdatedBillsQueue's visible messages, one value per read (the last one repeats). */
   backlog: number[];
   metrics: Partial<RunMetrics>;
@@ -208,6 +211,7 @@ interface World {
 const newWorld = (overrides: Partial<World> = {}): World => ({
   t: START,
   dlq: {},
+  dlqReadings: {},
   backlog: [0],
   metrics: {},
   metricsError: null,
@@ -262,9 +266,10 @@ const fakes = (world: World) => {
           summarizerReads += 1;
           return { Attributes: { ApproximateNumberOfMessages: String(value) } };
         }
+        const reading = world.dlqReadings[queue]?.shift();
         return {
           Attributes: {
-            ApproximateNumberOfMessages: String(world.dlq[queue] ?? 0),
+            ApproximateNumberOfMessages: String(reading ?? world.dlq[queue] ?? 0),
             ApproximateNumberOfMessagesNotVisible: "0",
             ApproximateNumberOfMessagesDelayed: "0",
           },
@@ -923,6 +928,21 @@ describe("--apply preconditions", () => {
   });
 });
 
+describe("--apply preconditions: a DLQ read twice", () => {
+  it("does not refuse on a DLQ message the reading 30 s later does not find", async () => {
+    seedStandard();
+    const world = newWorld({ dlqReadings: { BillSummarizerDLQ: [2, 0] } });
+    const { result, text } = await run(world, { apply: true });
+    expect(result).toMatchObject({ exitCode: 0, outcome: "done" });
+    expect(text).toContain(
+      `watched DLQs empty: ${WATCHED_DLQ_NAMES.length} empty (BillSummarizerDLQ=2 on one reading, and empty 30 s ` +
+        "later: an approximate count, not a dead letter)",
+    );
+    expect(world.sleeps.filter((ms) => ms === DLQ_CONFIRM_WAIT_MS)).toHaveLength(1);
+    expect(world.sends.length).toBeGreaterThan(0);
+  });
+});
+
 // ─── Stop conditions ──────────────────────────────────────────────────────────
 
 describe("stop conditions", () => {
@@ -1064,6 +1084,28 @@ describe("stop conditions", () => {
     expect(world.sends).toEqual([]);
     // The header still pins the cutoff for the next run.
     expect(parseProgress(world.files.get(PROGRESS)!).cutoff).toBe(CUTOFF);
+  });
+
+  it("reads a DLQ again 30 s later before it stops: a real dead letter, still there, stops the run", async () => {
+    expect(DLQ_CONFIRM_WAIT_MS).toBe(30_000);
+    seedMany(3);
+    const world = newWorld({ onSend: (sent) => sent === 2 && (world.dlq.BillDifferDLQ = 1) });
+    const { result } = await run(world, { apply: true });
+    expect(result).toMatchObject({ exitCode: 2, outcome: "stopped_dlq_message", stop: { detail: "BillDifferDLQ=1" } });
+    expect(world.sleeps.filter((ms) => ms === DLQ_CONFIRM_WAIT_MS)).toHaveLength(1);
+  });
+
+  // 2026-11-22: BillSummarizerDLQ read 1 with no message in it (no failed receive on BillSummarizerQueue, 0 in the
+  // DLQ's metrics), and the run stopped 185 bills into 631.
+  it("goes on when a DLQ reads a message once and none 30 s later, and says so", async () => {
+    seedMany(3);
+    const world = newWorld({ onSend: (sent) => sent === 1 && (world.dlqReadings.BillSummarizerDLQ = [1, 0]) });
+    const { result, text } = await run(world, { apply: true });
+    expect(result).toMatchObject({ exitCode: 0, outcome: "done", stop: null });
+    expect(world.sends).toHaveLength(3);
+    expect(text).toContain(
+      "BillSummarizerDLQ=1 on one reading, and empty 30 s later: an approximate count, not a dead letter; going on.",
+    );
   });
 
   it("looks once more after the last send", async () => {
@@ -1363,6 +1405,33 @@ describe("AWS reads", () => {
     // Queue URLs are resolved once.
     const lookups = sqs.send.mock.calls.filter(([command]) => command.constructor.name === "GetQueueUrlCommand");
     expect(lookups).toHaveLength(WATCHED_DLQ_NAMES.length);
+  });
+
+  it("counts a DLQ message only on two readings 30 s apart, and reads once when every DLQ is empty", async () => {
+    const world = newWorld({
+      dlqReadings: { BillDifferDLQ: [1, 3], BillSummarizerDLQ: [1, 0], UpdatedBillsDLQ: [0, 1] },
+    });
+    const sleeps: number[] = [];
+    const checks = new AwsChecks({
+      ...fakes(world),
+      config: configFromEnv({}),
+      now: () => new Date(world.t),
+      sleep: async (ms) => void sleeps.push(ms),
+    });
+    const reads = () => world.sqsCommands.filter((name) => name === "GetQueueAttributesCommand").length;
+    // A queue that fills between the two readings waits for the next check.
+    expect(await checks.dlqMessages()).toEqual({
+      full: [{ name: "BillDifferDLQ", messages: 3 }],
+      cleared: [{ name: "BillSummarizerDLQ", messages: 1 }],
+    });
+    expect(sleeps).toEqual([DLQ_CONFIRM_WAIT_MS]);
+    expect(reads()).toBe(2 * WATCHED_DLQ_NAMES.length);
+    world.dlq.UpdatedBillsDLQ = 1;
+    expect(await checks.dlqMessages()).toEqual({ full: [{ name: "UpdatedBillsDLQ", messages: 1 }], cleared: [] });
+    world.dlq = {};
+    expect(await checks.dlqMessages()).toEqual({ full: [], cleared: [] });
+    expect(sleeps).toHaveLength(2);
+    expect(reads()).toBe(5 * WATCHED_DLQ_NAMES.length);
   });
 
   it("runs the AWS CLI with the region and JSON output, and reports its stderr", async () => {
@@ -2818,6 +2887,20 @@ describe("--snapshot-file (REL-56 backfill)", () => {
       expect(progressGuids(world)).toEqual(world.sends.map((send) => send.body.guid));
       expect(errors.join("\n")).toContain(`Stopped: ${reason}`);
       expect(text).toMatch(/\nResume: /);
+    });
+
+    it("goes on when a DLQ reads a message once and none 30 s later, as a window's run does", async () => {
+      const world = newWorld({
+        ...OUTSIDE_WINDOW,
+        onSend: (sent) => sent === 1 && (world.dlqReadings.UpdatedBillsDLQ = [1, 0]),
+      });
+      seedMissing(world, 3);
+      const { result, text } = await run(world, unattendedOptions({ apply: true }));
+      expect(result).toMatchObject({ exitCode: 0, outcome: "done" });
+      expect(world.sends).toHaveLength(3);
+      expect(text).toContain(
+        "UpdatedBillsDLQ=1 on one reading, and empty 30 s later: an approximate count, not a dead letter; going on.",
+      );
     });
 
     // REL-58's rule, as in a window's run: a record failure stops the run only when it is not congress.gov's, or at

@@ -36,6 +36,10 @@
 //
 // Every mode also stops on BillTextUnavailable above 0 since the start (REL-45: a refetch must not strip bill text).
 //
+// A watched DLQ counts, in the refusal and every stop check, only when a second reading DLQ_CONFIRM_WAIT_MS later
+// still finds a message: SQS's approximate count can read one in an empty queue. A count the second reading does not
+// find is logged, and the run goes on.
+//
 // --text-recovery (REL-45): needs --guid or --guids-file (at most 100 bills) and selects, instead of the fetchedAt
 // cutoff, the listed raw bills whose newest text version has a Formatted XML URL and that have no billXML. It waives
 // the X7 precondition (MEMBER_VOTE_CARRY_MODE=on) with a printed line: a listed bill with member votes keeps them only
@@ -164,6 +168,13 @@ export const D5_MARGIN = 5;
 /** --unattended: a check that cannot run is tried this many times, CHECK_RETRY_WAIT_MS apart, before the run stops. */
 export const UNATTENDED_CHECK_ATTEMPTS = 3;
 export const CHECK_RETRY_WAIT_MS = 30_000;
+/**
+ * A watched DLQ stops a run, or refuses one, only when it reads a message on two readings this far apart. A DLQ has no
+ * consumer, so a real dead letter is still there on the second. One reading of SQS's approximate counts can show a
+ * message no queue held: BillSummarizerDLQ=1 on 2026-11-22, with no failed receive on its source queue and 0 in the
+ * DLQ's own metrics, stopped a refetch 185 bills in.
+ */
+export const DLQ_CONFIRM_WAIT_MS = 30_000;
 /** The Logs Insights query that counts the summary cap's bills is polled this often, at most this many times. */
 export const LOGS_QUERY_POLL_MS = 1_000;
 export const LOGS_QUERY_MAX_POLLS = 60;
@@ -1171,6 +1182,20 @@ export type StopReason =
   | "carry_mode_changed"
   | "window_opened";
 
+/** A watched DLQ's messages: visible, in flight and delayed. */
+export interface DlqDepth {
+  name: string;
+  messages: number;
+}
+
+const depthsText = (depths: readonly DlqDepth[]): string =>
+  depths.map((depth) => `${depth.name}=${depth.messages}`).join(" ");
+
+/** DLQs that read a message once and none DLQ_CONFIRM_WAIT_MS later. */
+export const clearedDlqNote = (cleared: readonly DlqDepth[]): string =>
+  `${depthsText(cleared)} on one reading, and empty ${DLQ_CONFIRM_WAIT_MS / 1000} s later: ` +
+  "an approximate count, not a dead letter";
+
 export interface CheckResult {
   stop: { reason: StopReason; detail: string } | null;
   backlog: number;
@@ -1369,8 +1394,10 @@ export class AwsChecks {
       awsCli: AwsCli;
       config: RefetchConfig;
       now: () => Date;
-      /** Between Logs Insights polls; defaults to a timer. */
+      /** Between Logs Insights polls and the two DLQ readings; defaults to a timer. */
       sleep?: (ms: number) => Promise<void>;
+      /** Where a DLQ reading the second one found empty is noted. */
+      log?: (line: string) => void;
     },
   ) {}
 
@@ -1393,8 +1420,8 @@ export class AwsChecks {
   }
 
   /** Messages in each watched DLQ (visible, in flight and delayed). */
-  async dlqDepths(): Promise<Array<{ name: string; messages: number }>> {
-    const depths: Array<{ name: string; messages: number }> = [];
+  async dlqDepths(): Promise<DlqDepth[]> {
+    const depths: DlqDepth[] = [];
     for (const name of this.deps.config.dlqNames) {
       const attributes = await this.queueAttributes(name, [
         "ApproximateNumberOfMessages",
@@ -1405,6 +1432,31 @@ export class AwsChecks {
       depths.push({ name, messages });
     }
     return depths;
+  }
+
+  /**
+   * The watched DLQs that held a message on two readings DLQ_CONFIRM_WAIT_MS apart (`full`, with the second reading's
+   * count), and those the second reading found empty (`cleared`, with the first's). One reading when all are empty.
+   */
+  async dlqMessages(): Promise<{ full: DlqDepth[]; cleared: DlqDepth[] }> {
+    const first = (await this.dlqDepths()).filter((depth) => depth.messages > 0);
+    if (first.length === 0) return { full: [], cleared: [] };
+    await (this.deps.sleep ?? defaultSleep)(DLQ_CONFIRM_WAIT_MS);
+    const second = new Map((await this.dlqDepths()).map((depth) => [depth.name, depth.messages]));
+    return {
+      full: first.flatMap(({ name }) => {
+        const messages = second.get(name) ?? 0;
+        return messages > 0 ? [{ name, messages }] : [];
+      }),
+      cleared: first.filter(({ name }) => (second.get(name) ?? 0) === 0),
+    };
+  }
+
+  /** The run checks' DLQ stop: the confirmed DLQs' detail, or null; a reading the second one cleared is logged. */
+  private async dlqStopDetail(): Promise<string | null> {
+    const { full, cleared } = await this.dlqMessages();
+    if (cleared.length > 0) this.deps.log?.(`${clearedDlqNote(cleared)}; going on.`);
+    return full.length > 0 ? depthsText(full) : null;
   }
 
   /** Visible messages waiting on UpdatedBillsQueue. */
@@ -1679,14 +1731,13 @@ export class AwsChecks {
       );
     }
     await check("watched DLQs empty", async () => {
-      const depths = await this.dlqDepths();
-      const full = depths.filter((depth) => depth.messages > 0);
+      const { full, cleared } = await this.dlqMessages();
       return {
         ok: full.length === 0,
         detail:
-          full.length === 0
-            ? `${depths.length} empty`
-            : full.map((depth) => `${depth.name}=${depth.messages}`).join(" "),
+          full.length > 0
+            ? depthsText(full)
+            : `${this.deps.config.dlqNames.length} empty${cleared.length > 0 ? ` (${clearedDlqNote(cleared)})` : ""}`,
       };
     });
     await check("poller state known (REL-39)", async () => {
@@ -1723,11 +1774,8 @@ export class AwsChecks {
    */
   async run(since: Date, maxSummaries: number, sentKeys?: ReadonlySet<string>): Promise<CheckResult> {
     try {
-      const full = (await this.dlqDepths()).filter((depth) => depth.messages > 0);
-      if (full.length > 0) {
-        const detail = full.map((depth) => `${depth.name}=${depth.messages}`).join(" ");
-        return { stop: { reason: "dlq_message", detail }, backlog: 0 };
-      }
+      const dlqDetail = await this.dlqStopDetail();
+      if (dlqDetail) return { stop: { reason: "dlq_message", detail: dlqDetail }, backlog: 0 };
       const metrics = await this.metricsSince(since);
       const metricStop = stopOnMetrics(metrics, this.deps.config.fetchRawBillFunction);
       if (metricStop) return { stop: metricStop, backlog: 0 };
@@ -1793,10 +1841,8 @@ export class AwsChecks {
           `${pushed} UserMatcher log lines with a rel56: correlation id since the start: a backfill change reached the push path`,
         );
       }
-      const full = (await this.dlqDepths()).filter((depth) => depth.messages > 0);
-      if (full.length > 0) {
-        return stop("dlq_message", full.map((depth) => `${depth.name}=${depth.messages}`).join(" "));
-      }
+      const dlqDetail = await this.dlqStopDetail();
+      if (dlqDetail) return stop("dlq_message", dlqDetail);
       const metrics = await this.metricsSince(since);
       const metricStop = stopOnMetrics(metrics, config.fetchRawBillFunction);
       if (metricStop) return { stop: metricStop, backlog: 0 };
@@ -2323,7 +2369,7 @@ export const runRefetch = async ({
           `perHour=${options.perHour} progress=${progressPath}${progressExists ? "" : " (new)"}`,
   );
 
-  const checks = new AwsChecks({ sqs, cloudwatch, ssm, awsCli, config, now, sleep });
+  const checks = new AwsChecks({ sqs, cloudwatch, ssm, awsCli, config, now, sleep, log });
   const result: RunResult = {
     exitCode: 0,
     outcome: options.apply ? "done" : "dry_run",
