@@ -1,6 +1,6 @@
 {
   "generatedAt": "2026-03-06T20:00:00.000Z",
-  "count": 5,
+  "count": 6,
   "bills": [
     {
       "guid": "BILLS-119hr1234ih",
@@ -18,6 +18,11 @@
       "priorityReason": "Major national coverage around federal grid funding negotiations.",
       "priorityExpiresAt": "2026-03-07T08:00:00.000Z",
       "billStatus": "Updated",
+      "introducedDate": "2026-02-10",
+      "latestAction": {
+        "actionDate": "2026-03-05",
+        "text": "Ordered to be Reported by Voice Vote."
+      },
       "civicProfile": {
         "individualVsCommunity": 0.2,
         "localVsFederal": -0.1
@@ -74,7 +79,33 @@
       "sponsors": ["W000001"],
       "cosponsors": ["S000001"],
       "billStatus": "Failed",
-      "vetoed": true
+      "vetoed": true,
+      "introducedDate": "2026-01-12",
+      "passedHouseOn": "2026-02-03",
+      "passedSenateOn": "2026-02-19",
+      "latestAction": {
+        "actionDate": "2026-03-02",
+        "text": "Failed of passage in House over veto by the Yeas and Nays: 250 - 180 (Roll no. 61)."
+      }
+    },
+    {
+      "guid": "BILLS-119hres826",
+      "billType": "hres",
+      "congress": "119",
+      "billNumber": "826",
+      "updatedAt": "2026-03-01T15:00:00.000Z",
+      "title": "Supports designating a week in March as National Apprenticeship Week",
+      "subCategories": [],
+      "lifeAreas": [],
+      "sponsors": ["W000001"],
+      "cosponsors": [],
+      "billStatus": "New",
+      "isCommemorative": true,
+      "introducedDate": "2026-02-27",
+      "latestAction": {
+        "actionDate": "2026-02-27",
+        "text": "Referred to the House Committee on Education and Workforce."
+      }
     }
   ],
   "companionGroups": [

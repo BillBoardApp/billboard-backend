@@ -290,6 +290,56 @@ const RECENT_ACTIONS_MUST_REJECT = [
   [RECENT_ACTIONS, "51 items", (list) => ({ ...list, items: Array.from({ length: 51 }, () => list.items[0]) })],
 ];
 
+// ── Manifest row facts (UX-29, UX-38) ──
+// `isCommemorative` is sent only as true, like `vetoed`; `introducedDate`, `passedHouseOn` and `passedSenateOn` are
+// calendar days (YYYY-MM-DD); `latestAction` has a calendar-day `actionDate` and, when the action has any, a non-empty
+// `text`. A row written before them has none of them, so an item without any must validate. The fixture carries each
+// (its H.Res. 826 is the ceremonial one), so check:swift decodes them.
+const MANIFEST_DAY_FIELDS = ["introducedDate", "passedHouseOn", "passedSenateOn"];
+const NOT_CALENDAR_DAYS = ["2026-02-30", "2026-3-5", "2026-03-05T00:00:00.000Z", "March 5, 2026", ""];
+const withoutRowFacts = ({ isCommemorative, introducedDate, passedHouseOn, passedSenateOn, latestAction, ...rest }) =>
+  rest;
+const withFirstManifestBill = (edit) => (manifest) => ({
+  ...manifest,
+  bills: [edit(manifest.bills[0]), ...manifest.bills.slice(1)],
+});
+const withLatestAction = (latestAction) => withFirstManifestBill((bill) => ({ ...bill, latestAction }));
+const ROW_FACTS_MUST_ACCEPT = [
+  [
+    BILLS_MANIFEST,
+    "a manifest item without isCommemorative, introducedDate, passedHouseOn, passedSenateOn or latestAction",
+    withManifestBills(withoutRowFacts),
+  ],
+  [BILLS_MANIFEST, "a latestAction without text", withLatestAction({ actionDate: "2026-03-05" })],
+];
+const ROW_FACTS_MUST_REJECT = [
+  ...[false, "true", 1, null].map((value) => [
+    BILLS_MANIFEST,
+    `isCommemorative ${JSON.stringify(value)} on a manifest item`,
+    withManifestBills((bill) => ({ ...bill, isCommemorative: value })),
+  ]),
+  ...MANIFEST_DAY_FIELDS.flatMap((field) =>
+    [...NOT_CALENDAR_DAYS, null].map((value) => [
+      BILLS_MANIFEST,
+      `${field} ${JSON.stringify(value)} on a manifest item`,
+      withFirstManifestBill((bill) => ({ ...bill, [field]: value })),
+    ]),
+  ),
+  ...NOT_CALENDAR_DAYS.map((actionDate) => [
+    BILLS_MANIFEST,
+    `a latestAction dated ${JSON.stringify(actionDate)}`,
+    withLatestAction({ actionDate, text: "Introduced in House" }),
+  ]),
+  [BILLS_MANIFEST, "a latestAction without actionDate", withLatestAction({ text: "Introduced in House" })],
+  [BILLS_MANIFEST, "a latestAction with empty text", withLatestAction({ actionDate: "2026-03-05", text: "" })],
+  [
+    BILLS_MANIFEST,
+    "a latestAction with an undeclared field",
+    withLatestAction({ actionDate: "2026-03-05", text: "Introduced in House", actionCode: "1000" }),
+  ],
+  [BILLS_MANIFEST, "a latestAction given as text", withLatestAction("Introduced in House")],
+];
+
 // ── Member facts (REL-52, REL-46) ──
 // A member with no 119th counts (REL-46) or whose stats could not be read has none of the three 119th counts (no 0 for
 // a member with no 119th counts or for an unknown count; a row with zeros keeps them), and a senator's per-Congress
@@ -966,6 +1016,7 @@ const MUST_REJECT = [
   ...RECORD_MUST_REJECT,
   ...YOUR_BILLS_MUST_REJECT,
   ...RECENT_ACTIONS_MUST_REJECT,
+  ...ROW_FACTS_MUST_REJECT,
   ...LABEL_MUST_REJECT,
   ...STATS_MUST_REJECT,
   ...VERIFICATION_MUST_REJECT,
@@ -1065,6 +1116,7 @@ const MUST_ACCEPT = [
   ...VETOED_MUST_ACCEPT,
   ...YOUR_BILLS_MUST_ACCEPT,
   ...RECENT_ACTIONS_MUST_ACCEPT,
+  ...ROW_FACTS_MUST_ACCEPT,
   ...MEMBER_MUST_ACCEPT,
   ...SPONSOR_MUST_ACCEPT,
   ...RECORD_MUST_ACCEPT,

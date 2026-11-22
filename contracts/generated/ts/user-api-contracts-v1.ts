@@ -262,6 +262,18 @@ export interface ProcessedBillV1 {
   vetoed?: true;
 }
 
+/**
+ * The bill's latest action: of the processed bill's actions with a date, those of the greatest actionDate and then
+ * actionTime (a missing time sorts first), the first listed that has text (congress.gov lists the newest first). Absent
+ * when no action has a date.
+ */
+export interface BillsManifestLatestActionV1 {
+  /** YYYY-MM-DD. */
+  actionDate: string;
+  /** Congress.gov's text, trimmed, citations included. Absent when no action of that date and time has text. */
+  text?: string;
+}
+
 export interface BillsManifestItemV1 {
   guid: string;
   billType: string;
@@ -309,6 +321,36 @@ export interface BillsManifestItemV1 {
    * deriveBillVetoedFromActions); absent otherwise. billStatus keeps its value. Clients that predate it ignore it.
    */
   vetoed?: true;
+  /**
+   * Only as true, when the bill is a ceremonial resolution (one that designates a day or week, or recognizes, honors or
+   * congratulates someone; commemorativeResolutions.ts isCommemorativeResolution, the rule that also leaves its
+   * subCategories and lifeAreas empty); absent otherwise. Clients that predate it ignore it.
+   */
+  isCommemorative?: true;
+  /**
+   * YYYY-MM-DD: the day the bill was introduced, from the processed bill's introducedDate when it has one, else its
+   * earliest dated action (later than the introduction for a bill with more than the newest 250 actions a fetch
+   * stores). Absent when neither gives a date.
+   */
+  introducedDate?: string;
+  /**
+   * YYYY-MM-DD: the earliest action coded 8000, Passed/agreed to in House (billOutcomes.ts chamberPassageDates); absent
+   * when no stored action records it (a fetch stores the newest 250 actions). A vote over a veto (32000), on an
+   * amendment or on a motion is not one. Set whatever billStatus says: a bill that later failed or became law keeps it.
+   */
+  passedHouseOn?: string;
+  /**
+   * YYYY-MM-DD: the earliest action coded 17000, Passed/agreed to in Senate (billOutcomes.ts chamberPassageDates);
+   * absent when no stored action records it (a fetch stores the newest 250 actions). A vote over a veto (34000), on an
+   * amendment or on a motion is not one. Set whatever billStatus says.
+   */
+  passedSenateOn?: string;
+  /**
+   * The bill's latest action: of the processed bill's actions with a date, those of the greatest actionDate and then
+   * actionTime (a missing time sorts first), the first listed that has text (congress.gov lists the newest first).
+   * Absent when no action has a date.
+   */
+  latestAction?: BillsManifestLatestActionV1;
   civicProfile?: CivicProfileScoresV1;
 }
 

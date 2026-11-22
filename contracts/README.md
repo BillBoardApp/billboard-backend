@@ -228,6 +228,30 @@ and `cursor`) it serves only the member's votes on those bills. New and additive
   `CongressMemberRecordVote`, `CongressMemberRecordBill` and `CongressMemberRecordCongressCount` in Swift (`position` and
   `chamber` are `String`).
 
+## Bill facts on manifest rows (UX-29, UX-38)
+
+Facts the apps rank and label a bill by before they open it, on `BillsManifest.bills[]` (inline, windowed and
+snapshot alike), optional and additive; clients that predate them ignore them. CreateBillsManifest derives each from
+the processed bill on every row write and writes it only when the document gives it. None of them is part of what
+dates a row, so a rows-only replay adds them without moving a row.
+
+- `isCommemorative`: `{"type": "boolean", "const": true}`, like `vetoed`, for a ceremonial resolution
+  (`services/src/shared/commemorativeResolutions.ts`, the rule that also empties its topics and life areas).
+- `introducedDate` (`format: date`): the document's introducedDate when it has one, else its earliest dated action
+  (`services/src/shared/billManifestFacts.ts`). A fetch stores the newest 250 actions, so a longer history gives a later
+  day.
+- `passedHouseOn`, `passedSenateOn` (`format: date`): the earliest action coded 8000 or 17000
+  (`services/src/shared/billOutcomes.ts` `chamberPassageDates`), whatever the status says.
+- `latestAction` (title `BillsManifestLatestActionV1`): `actionDate` (`format: date`, required) and `text` (congress.gov's,
+  trimmed, at least one character, absent when that action has none) of the action of the greatest day and time, the
+  first listed (congress.gov lists the newest first).
+- `check-contracts.mjs` accepts an item without any of them and a `latestAction` without `text`, and rejects an
+  `isCommemorative` other than `true`, a day that is not a calendar day (`2026-02-30`, `2026-3-5`, a timestamp, `""`),
+  a `latestAction` without `actionDate`, with empty `text` or an undeclared field (`ROW_FACTS_*`). The fixture's
+  H.R. 2207 and H.Res. 826 carry them, so `check:swift` decodes them.
+- Generated: optional fields in both languages (`isCommemorative?: true` and `Bool?`, the days as `string` and
+  `String?`, `BillsManifestLatestActionV1` and `UserAPIContractsV1.BillsManifestLatestAction`).
+
 ## Stats, verification limits and labels (C2)
 
 All additive; builds 1.0 and R1 keep decoding every response.
