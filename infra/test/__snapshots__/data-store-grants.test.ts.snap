@@ -2512,6 +2512,37 @@ exports[`data store grants (CQ-15) every role keeps the same normalized permissi
       "sqs:ReceiveMessage",
     ],
   },
+  "fn:WeeklyBriefPush": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "*": [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserDevices": [
+      "dynamodb:Query",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserPII": [
+      "dynamodb:Scan",
+    ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/UserWeeklyDigests": [
+      "dynamodb:GetItem",
+      "dynamodb:UpdateItem",
+    ],
+    "arn:aws:sns:\${Region}:\${Account}:endpoint/APNS/BillboardApnsProduction/*": [
+      "sns:Publish",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:ScheduledJobFailures": [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:SendMessage",
+    ],
+  },
   "fn:WeeklyDigestWorker": {
     "(managed policies)": [
       ""arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"",
@@ -3130,6 +3161,25 @@ exports[`data store grants (CQ-15) every role keeps the same normalized permissi
     ],
     "(trust policy)": [
       "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/WeeklyBriefPushDeploymentGroupServiceRole1577C052": {
+    "(managed policies)": [
+      ""arn:aws:iam::aws:policy/service-role/AWSCodeDeployRoleForLambdaLimited"",
+    ],
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"codedeploy.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+  },
+  "role:UserAPIServiceStack/WeeklyBriefPushSchedulerRole2FFBC0C0": {
+    "(trust policy)": [
+      "{"Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"Service":"scheduler.amazonaws.com"}}],"Version":"2012-10-17"}",
+    ],
+    "arn:aws:lambda:\${Region}:\${Account}:function:WeeklyBriefPush:prod": [
+      "lambda:InvokeFunction",
+    ],
+    "arn:aws:sqs:\${Region}:\${Account}:ScheduledJobFailures": [
+      "sqs:SendMessage",
     ],
   },
   "role:UserAPIServiceStack/WeeklyDigestSchedulerRole5C7C9E2A": {

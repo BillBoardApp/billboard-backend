@@ -81,7 +81,7 @@ deployment group in its stack.
 | `AnalyticsServiceStack` | `CongressMemberStats`, `BillStatsAggregator` and its `UserFeedback` stream mapping |
 | `CongressStoreStack` | The bill and member buckets, `BillsManifest` and `CongressMembersManifest` and the functions that build them |
 | `AggregateDataStoreStack` | The member stats and profile tables |
-| `MonitoringStack` | The alarm and page topics, the Slack channel configurations (AWS Chatbot), the `BillboardOps` dashboard, the operational alarms (144 metric alarms and 3 composites) and a monthly cost budget |
+| `MonitoringStack` | The alarm and page topics, the Slack channel configurations (AWS Chatbot), the `BillboardOps` dashboard, the operational alarms (146 metric alarms and 3 composites) and a monthly cost budget |
 | `GitHubOidcStack` | Two roles `.github/workflows/deploy.yml` assumes through the account's existing GitHub OIDC provider, trusted only from this repository's `main`: one that publishes Lambda releases to the artifacts bucket, one that deploys through the CDK bootstrap roles |
 | `SecurityBaselineStack` | A multi-region CloudTrail trail and its bucket, and cost-allocation tags on every stack |
 
@@ -123,7 +123,7 @@ CloudWatch composite-alarm notifications ("Event received is not supported"): th
 that a composite's notification reached `BillboardPageTopic` but never the channel, while metric-alarm
 notifications post.
 
-The alarms: 144 metric alarms and 3 composites in `MonitoringStack`, and 198 in the app with the 51 of the service
+The alarms: 146 metric alarms and 3 composites in `MonitoringStack`, and 201 in the app with the 52 of the service
 stacks (each Lambda alias's error alarm, which its CodeDeploy deployment group watches, the API deployment groups' own
 5XX and canary alarms, and the WAF sign-up alarm). `test/monitoring.test.ts` pins these totals: a pull request that
 adds an alarm changes both places in this file.

@@ -184,6 +184,8 @@ export const MONITORED_LAMBDA_NAMES: readonly string[] = [
   'FetchBillsManifest',
   'PublishBillsManifest',
   'WeeklyDigestWorker',
+  // UX-28: the Sunday Weekly Brief push.
+  'WeeklyBriefPush',
   // The account-integrity functions: INT-05's pre-sign-up trigger, INT-03's vote re-stamp worker and INT-04's App
   // Attest routes.
   'PreSignUpCheck',
@@ -785,6 +787,23 @@ export class MonitoringStack extends cdk.Stack {
       metric: new cloudwatch.Metric({
         namespace: WEEKLY_DIGEST_METRIC_NAMESPACE,
         metricName: 'WeeklyDigestUsersFailed',
+        statistic: 'Sum',
+        period: cdk.Duration.minutes(15),
+      }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      datapointsToAlarm: 1,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    }));
+
+    // UX-28: WeeklyBriefPush emits WeeklyBriefPushFailed on every Sunday run (zero included): failed publishes, and users
+    // whose snapshot read, device read or claim failed. No datapoint means no run, not a failure.
+    notify('service', new cloudwatch.Alarm(this, 'WeeklyBriefPushFailedAlarm', {
+      alarmName: 'Billboard-WeeklyDigest-BriefPushFailed',
+      alarmDescription: 'The Sunday Weekly Brief push failed for at least one device or user (WeeklyBriefPushFailed). Check the "weeklyBriefPush summary" line in /aws/lambda/WeeklyBriefPush: errorNames counts the SNS and DynamoDB errors by name (never an ARN or a user id). A failed publish is not retried (the user\'s push was already claimed, so nobody gets it twice); a user whose reads or claim failed is tried again by the async retries and the next hourly run, and a run that still fails lands in ScheduledJobFailures. WEEKLY_BRIEF_PUSH=off (WEEKLY_BRIEF_PUSH_ENABLED in infra/lib/config/weekly-digest-constants.ts) stops every send.',
+      metric: new cloudwatch.Metric({
+        namespace: WEEKLY_DIGEST_METRIC_NAMESPACE,
+        metricName: 'WeeklyBriefPushFailed',
         statistic: 'Sum',
         period: cdk.Duration.minutes(15),
       }),

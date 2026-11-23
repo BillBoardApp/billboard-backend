@@ -162,11 +162,11 @@ describe('Lambda prod aliases', () => {
   });
 
   // The account-integrity work added PreSignUpCheck, RestampUserVotes and AppAttest to the 26 before it; CB-07
-  // SignUpFilterCheck.
-  it('UserAPIServiceStack has prod alias for all 30 Lambdas', () => {
+  // SignUpFilterCheck; UX-28 WeeklyBriefPush.
+  it('UserAPIServiceStack has prod alias for all 31 Lambdas', () => {
     const t = userApiTemplate();
-    // 30 Lambdas → 30 aliases
-    t.resourceCountIs('AWS::Lambda::Alias', 30);
+    // 31 Lambdas → 31 aliases
+    t.resourceCountIs('AWS::Lambda::Alias', 31);
     t.allResourcesProperties('AWS::Lambda::Alias', {
       Name: 'prod',
     });
@@ -245,8 +245,8 @@ describe('CodeDeploy deployment groups', () => {
     priorityTemplate().resourceCountIs('AWS::CodeDeploy::DeploymentGroup', 1);
   });
 
-  it('UserAPIServiceStack has 30 deployment groups', () => {
-    userApiTemplate().resourceCountIs('AWS::CodeDeploy::DeploymentGroup', 30);
+  it('UserAPIServiceStack has 31 deployment groups', () => {
+    userApiTemplate().resourceCountIs('AWS::CodeDeploy::DeploymentGroup', 31);
   });
 
   it('NotificationServiceStack has 5 deployment groups', () => {
@@ -307,17 +307,17 @@ describe('CodeDeploy deployment config', () => {
     }
   });
 
-  // CON-08: the 23 API handlers shift 10% for 10 minutes; the 7 workers shift at once. The account-integrity
+  // CON-08: the 23 API handlers shift 10% for 10 minutes; the 8 workers shift at once. The account-integrity
   // work added two canaried functions (PreSignUpCheck, a synchronous Cognito trigger, and AppAttest) and one worker
-  // (RestampUserVotes); CB-07 one worker (SignUpFilterCheck).
+  // (RestampUserVotes); CB-07 one worker (SignUpFilterCheck); UX-28 one worker (WeeklyBriefPush).
   it('UserAPIServiceStack API groups use the built-in 10% / 10-minute canary and create no config resource', () => {
     const t = userApiTemplate();
     t.resourceCountIs('AWS::CodeDeploy::DeploymentConfig', 0);
     const configs = Object.values(t.findResources('AWS::CodeDeploy::DeploymentGroup'))
       .map((group) => group.Properties?.DeploymentConfigName as string);
     expect(configs.filter((name) => name === API_CANARY_CONFIG_NAME)).toHaveLength(23);
-    expect(configs.filter((name) => name === ALL_AT_ONCE_CONFIG_NAME)).toHaveLength(7);
-    expect(configs).toHaveLength(30);
+    expect(configs.filter((name) => name === ALL_AT_ONCE_CONFIG_NAME)).toHaveLength(8);
+    expect(configs).toHaveLength(31);
   });
 
   it('the helper returns the built-in config and creates nothing', () => {
@@ -531,7 +531,7 @@ describe('Per-alias error alarms', () => {
 
     const workers = groups.filter(([, group]) => isWorker(group));
     const apis = groups.filter(([, group]) => !isWorker(group));
-    expect(groups).toHaveLength(30);
+    expect(groups).toHaveLength(31);
     expect(workers.map(([logicalId]) => logicalId.replace(/DeploymentGroup.*$/, '')).sort()).toEqual([
       'CleanupOrphanedUsers',
       'ExportCognitoUsers',
@@ -539,6 +539,7 @@ describe('Per-alias error alarms', () => {
       'PublishBillsManifest',
       'RestampUserVotes',
       'SignUpFilterCheck',
+      'WeeklyBriefPush',
       'WeeklyDigestWorker',
     ]);
     expect(apis).toHaveLength(23);
@@ -643,10 +644,10 @@ describe('EventBridge Scheduler targets use prod alias', () => {
     }
   });
 
-  it('UserAPIServiceStack CfnSchedules (GenerateWeeklyDigests, PublishBillsManifest) target ARNs contain :prod', () => {
+  it('UserAPIServiceStack CfnSchedules (GenerateWeeklyDigests, WeeklyBriefPush, PublishBillsManifest) target ARNs contain :prod', () => {
     const t = userApiTemplate();
     const schedules = t.findResources('AWS::Scheduler::Schedule');
-    expect(Object.keys(schedules)).toHaveLength(2);
+    expect(Object.keys(schedules)).toHaveLength(3);
     for (const [, schedule] of Object.entries(schedules)) {
       const arn: unknown = schedule.Properties?.Target?.Arn;
       expect(JSON.stringify(arn)).toMatch(/prod/i);

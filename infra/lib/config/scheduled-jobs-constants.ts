@@ -25,4 +25,6 @@ export const SCHEDULED_JOB_FAILURES_RETENTION_DAYS = 14;
  */
 export const FETCH_CONGRESS_MEMBERS_LIST_ASYNC_RETRY_ATTEMPTS = 2;
 export const GENERATE_WEEKLY_DIGESTS_ASYNC_RETRY_ATTEMPTS = 2;
+/** UX-28: a rerun is safe (each user's push is claimed once), and the next hourly run tries again anyway. */
+export const WEEKLY_BRIEF_PUSH_ASYNC_RETRY_ATTEMPTS = 2;
 export const CLEANUP_ORPHANED_USERS_ASYNC_RETRY_ATTEMPTS = 0;

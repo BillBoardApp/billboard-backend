@@ -73,6 +73,8 @@ const STANDALONE_ALARM_NAMES = [
   "Billboard-Notifications-ApnsDeliveryFailures",
   "Billboard-Notifications-ApnsCertificateExpiry",
   "Billboard-WeeklyDigest-UsersFailed",
+  // UX-28: routine.
+  "Billboard-WeeklyDigest-BriefPushFailed",
   // REL-45: replaced Billboard-Ingestion-BillXmlFetchFailure (routine).
   "Billboard-Ingestion-BillTextUnavailable",
   // REL-52: routine.
@@ -207,9 +209,9 @@ describe("MonitoringStack", () => {
     // Integrity-GeocoderVintageFallback, Ingestion-BillPollerLag119 and Ingestion-BillPollerStateMismatch.
     // The poller's heartbeat (Billboard-Heartbeat-BillsApiPoller) adds 1. REL-56 adds 4: Ingestion-BillPollerFilterImprecise,
     // Ingestion-BillPollerPageDrift, Ingestion-BillPollerFallback and Ingestion-BillPollerLateRows. REL-58 adds 1:
-    // Ingestion-FetchRawBillFailing.
-    test("MonitoringStack has 144 metric alarms and 3 composites", () => {
-      expect(Object.keys(metricAlarms())).toHaveLength(144);
+    // Ingestion-FetchRawBillFailing. UX-28 adds 2: WeeklyDigest-BriefPushFailed and WeeklyBriefPush's Errors.
+    test("MonitoringStack has 146 metric alarms and 3 composites", () => {
+      expect(Object.keys(metricAlarms())).toHaveLength(146);
       expect(Object.values(compositeAlarms()).map((resource) => resource.Properties.AlarmName).sort()).toEqual([
         "Billboard-Ingest-Unhealthy",
         "Billboard-Page-AppBroken",
@@ -326,12 +328,13 @@ describe("MonitoringStack", () => {
         MONITORED_DLQ_NAMES,
       ].forEach((list) => expect(new Set(list).size).toBe(list.length));
 
-      expect(MONITORED_LAMBDA_NAMES).toHaveLength(48);
+      expect(MONITORED_LAMBDA_NAMES).toHaveLength(49);
       expect(MONITORED_LAMBDA_NAMES).toEqual(expect.arrayContaining([
         "ExportCognitoUsers",
         "PublishBillsManifest",
         "NotificationFanout",
         "WeeklyDigestWorker",
+        "WeeklyBriefPush",
       ]));
       expect(MONITORED_WORK_QUEUE_NAMES).toContain("notificationFanoutQueue");
       // The burst queue joined the other work queues once no queue had a backlog alarm (C1.4).
@@ -608,6 +611,23 @@ describe("MonitoringStack", () => {
         ComparisonOperator: "GreaterThanOrEqualToThreshold",
         TreatMissingData: "notBreaching",
         AlarmDescription: Match.stringLikeRegexp("/aws/lambda/WeeklyDigestWorker.*WeeklyDigestDLQ"),
+        AlarmActions: [alarmTopicRef],
+      });
+    });
+
+    // UX-28: WeeklyBriefPush emits WeeklyBriefPushFailed on every run, zero included.
+    test("alarms when the Sunday Weekly Brief push fails for any device or user", () => {
+      templates.monitoringTemplate.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: "Billboard-WeeklyDigest-BriefPushFailed",
+        Namespace: "BillBoard/WeeklyDigest",
+        MetricName: "WeeklyBriefPushFailed",
+        Dimensions: Match.absent(),
+        Statistic: "Sum",
+        Period: 900,
+        Threshold: 1,
+        ComparisonOperator: "GreaterThanOrEqualToThreshold",
+        TreatMissingData: "notBreaching",
+        AlarmDescription: Match.stringLikeRegexp("/aws/lambda/WeeklyBriefPush.*errorNames.*ScheduledJobFailures"),
         AlarmActions: [alarmTopicRef],
       });
     });
@@ -2536,12 +2556,13 @@ describe("MonitoringStack", () => {
     // Billboard-Heartbeat-BillsApiPoller makes it 142 and 193. REL-56: Billboard-Ingestion-BillPollerFilterImprecise,
     // Billboard-Ingestion-BillPollerPageDrift, Billboard-Ingestion-BillPollerFallback and
     // Billboard-Ingestion-BillPollerLateRows make it 146 and 197. REL-58: Billboard-Ingestion-FetchRawBillFailing
-    // makes it 147 and 198.
-    test("the app has 198 alarms: 147 in MonitoringStack and 51 in the service stacks", () => {
+    // makes it 147 and 198. UX-28: Billboard-WeeklyDigest-BriefPushFailed and WeeklyBriefPush's Errors alarm make
+    // MonitoringStack 149, and its alias error alarm the service stacks 52: 201.
+    test("the app has 201 alarms: 149 in MonitoringStack and 52 in the service stacks", () => {
       const alarms = resources.filter((resource) =>
         resource.Type === "AWS::CloudWatch::Alarm" || resource.Type === "AWS::CloudWatch::CompositeAlarm");
-      expect(alarms).toHaveLength(198);
-      expect(Object.keys({ ...metricAlarms(), ...compositeAlarms() })).toHaveLength(147);
+      expect(alarms).toHaveLength(201);
+      expect(Object.keys({ ...metricAlarms(), ...compositeAlarms() })).toHaveLength(149);
     });
 
     // infra/README.md gives the totals twice (the stack table and the alarm list); a PR that adds an alarm must move

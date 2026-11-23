@@ -6,11 +6,11 @@
  *
  * - SharedInfraStack owns one queue, ScheduledJobFailures: SQS-managed encryption, 14 days, no consumer.
  *   Its queue policy has exactly one statement, letting EventBridge rules of this account write to it.
- * - All 10 schedules (7 EventBridge rules, 3 Scheduler schedules) send the deliveries they cannot make there.
+ * - All 11 schedules (7 EventBridge rules, 4 Scheduler schedules) send the deliveries they cannot make there.
  *   Their targets, expressions and retry policies are otherwise unchanged.
- * - FetchCongressMembersList, GenerateWeeklyDigests and CleanupOrphanedUsers record a failed run there
- *   (Lambda async OnFailure on the prod alias), with their retries unchanged: 2, 2 and 0.
- * - Only those three function roles and the three Scheduler roles may send to it.
+ * - FetchCongressMembersList, GenerateWeeklyDigests, WeeklyBriefPush (UX-28) and CleanupOrphanedUsers record a failed
+ *   run there (Lambda async OnFailure on the prod alias), with their retries: 2, 2, 2 and 0.
+ * - Only those four function roles and the four Scheduler roles may send to it.
  */
 import { SCHEDULED_JOB_FAILURES_QUEUE_NAME } from '../lib/config/scheduled-jobs-constants';
 import { type Json, type SynthesizedAppStack, synthesizeApp } from './helpers/synth-app';
@@ -138,7 +138,7 @@ describe('every schedule has a dead-letter queue (C1.1)', () => {
   const schedules = resourcesOfType('AWS::Scheduler::Schedule');
 
   // CB-07 added SignUpFilterCheckSchedule (always ENABLED; its switch decides whether a run does anything).
-  test('the app has exactly 7 EventBridge rules and 3 Scheduler schedules', () => {
+  test('the app has exactly 7 EventBridge rules and 4 Scheduler schedules', () => {
     expect(rules.map(({ stack, logicalId }) => `${stack}/${logicalId.replace(/[0-9A-F]{8}$/, '')}`).sort()).toEqual([
       'CongressIntegrationServiceStack/BillsApiPollerSchedule',
       'CongressIntegrationServiceStack/CongressMembersChangeoverSchedule',
@@ -151,6 +151,7 @@ describe('every schedule has a dead-letter queue (C1.1)', () => {
     expect(schedules.map(({ stack, logicalId }) => `${stack}/${logicalId}`).sort()).toEqual([
       'PriorityServiceStack/BillPriorityResolverSchedule',
       'UserAPIServiceStack/PublishBillsManifestSchedule',
+      'UserAPIServiceStack/WeeklyBriefPushSchedule',
       'UserAPIServiceStack/WeeklyDigestGenerationSchedule',
     ]);
   });
@@ -211,6 +212,7 @@ describe('every schedule has a dead-letter queue (C1.1)', () => {
       schedules.find(({ logicalId }) => logicalId === name)?.resource.Properties.Target.RetryPolicy;
     expect(retryOf('BillPriorityResolverSchedule')).toBeUndefined();
     expect(retryOf('WeeklyDigestGenerationSchedule')).toBeUndefined();
+    expect(retryOf('WeeklyBriefPushSchedule')).toBeUndefined();
     expect(retryOf('PublishBillsManifestSchedule')).toEqual({ MaximumEventAgeInSeconds: 540, MaximumRetryAttempts: 2 });
   });
 
@@ -243,6 +245,7 @@ describe('failure destinations on the prod alias (C1.1)', () => {
   test.each([
     ['FetchCongressMembersList', 2],
     ['GenerateWeeklyDigests', 2],
+    ['WeeklyBriefPush', 2],
     ['CleanupOrphanedUsers', 0],
   ])('%s records a failed run after %d retries', (functionName, retries) => {
     const config = configOf(functionName);
@@ -279,10 +282,11 @@ describe('failure destinations on the prod alias (C1.1)', () => {
       'GenerateWeeklyDigests',
       'PublishBillsManifest',
       'SignUpFilterCheck',
+      'WeeklyBriefPush',
     ]);
   });
 
-  test('only the three destination functions and the three Scheduler roles may send to the queue', () => {
+  test('only the four destination functions and the four Scheduler roles may send to the queue', () => {
     const senders = [
       ...new Set(identityStatements().filter(({ statement }) => sendsToFailureQueue(statement)).flatMap(({ owners }) => owners)),
     ].sort();
@@ -290,8 +294,10 @@ describe('failure destinations on the prod alias (C1.1)', () => {
       'fn:CleanupOrphanedUsers',
       'fn:FetchCongressMembersList',
       'fn:GenerateWeeklyDigests',
+      'fn:WeeklyBriefPush',
       'role:PriorityServiceStack/BillPriorityResolverSchedulerRole',
       'role:UserAPIServiceStack/PublishBillsManifestSchedulerRole',
+      'role:UserAPIServiceStack/WeeklyBriefPushSchedulerRole',
       'role:UserAPIServiceStack/WeeklyDigestSchedulerRole',
     ]);
   });
