@@ -82,20 +82,26 @@ nonisolated enum UserAPIContractsV1 {
         /// chamberPassageDates); absent when no stored action records it (a fetch stores the newest 250 actions). A
         /// vote over a veto (34000), on an amendment or on a motion is not one. Set whatever billStatus says.
         let passedSenateOn: String?
-        /// The bill's latest action: of the processed bill's actions with a date, those of the greatest actionDate and
-        /// then actionTime (a missing time sorts first), the first listed that has text (congress.gov lists the newest
-        /// first). Absent when no action has a date.
+        /// The bill's latest action, the one the app's bill page and the website show as Latest action (UX-43;
+        /// billManifestFacts.ts latestManifestAction): of the processed bill's actions, those of the greatest
+        /// actionDate, then the first listed (congress.gov lists the newest first; actionTime is not read, as many
+        /// Library of Congress lines have none). An action without text counts only when no action of its date has text
+        /// and its type or veto code has a label in the apps. Absent when there is no such action or its date is not a
+        /// calendar day.
         let latestAction: BillsManifestLatestAction?
         let civicProfile: CivicProfileScores?
     }
 
-    /// The bill's latest action: of the processed bill's actions with a date, those of the greatest actionDate and then
-    /// actionTime (a missing time sorts first), the first listed that has text (congress.gov lists the newest first).
-    /// Absent when no action has a date.
+    /// The bill's latest action, the one the app's bill page and the website show as Latest action (UX-43;
+    /// billManifestFacts.ts latestManifestAction): of the processed bill's actions, those of the greatest actionDate,
+    /// then the first listed (congress.gov lists the newest first; actionTime is not read, as many Library of Congress
+    /// lines have none). An action without text counts only when no action of its date has text and its type or veto
+    /// code has a label in the apps. Absent when there is no such action or its date is not a calendar day.
     nonisolated struct BillsManifestLatestAction: Decodable {
         /// YYYY-MM-DD.
         let actionDate: String
-        /// Congress.gov's text, trimmed, citations included. Absent when no action of that date and time has text.
+        /// Congress.gov's text, trimmed, citations included. Absent when that action has none (the apps then show its
+        /// type).
         let text: String?
     }
 

@@ -54,7 +54,7 @@ describe("billIntroducedDate (UX-29)", () => {
   });
 });
 
-describe("latestManifestAction (UX-29)", () => {
+describe("latestManifestAction (UX-29, UX-43): the app's and the website's Latest action", () => {
   const referred = {
     actionCode: "H11100",
     actionDate: "2026-02-10",
@@ -67,6 +67,37 @@ describe("latestManifestAction (UX-29)", () => {
     text: "Introduced in House",
     type: "IntroReferral",
   };
+  // H.R. 5371's enactment day as congress.gov lists it, newest first (billboard-ios ProcessedBillDecodingTests
+  // testTimelineKeepsTheStoredOrderOfOneDay): the Library of Congress and President lines have no time, the House's
+  // floor lines do.
+  const lawDay = [
+    { actionCode: "36000", actionDate: "2025-11-12", text: "Became Public Law No: 119-37.", type: "President" },
+    { actionCode: "36000", actionDate: "2025-11-12", text: "Became Public Law No: 119-37.", type: "BecameLaw" },
+    { actionCode: "36000", actionDate: "2025-11-12", text: "Signed by President.", type: "President" },
+    { actionCode: "E30000", actionDate: "2025-11-12", text: "Signed by President.", type: "BecameLaw" },
+    { actionCode: "E20000", actionDate: "2025-11-12", text: "Presented to President.", type: "Floor" },
+    { actionCode: "28000", actionDate: "2025-11-12", text: "Presented to President.", type: "President" },
+    {
+      actionCode: "H38310",
+      actionDate: "2025-11-12",
+      actionTime: "22:15:38",
+      text: "Motion to reconsider laid on the table Agreed to without objection.",
+      type: "ResolvingDifferences",
+    },
+    {
+      actionCode: "H36210",
+      actionDate: "2025-11-12",
+      actionTime: "21:39:20",
+      text: "The previous question was ordered pursuant to the rule.",
+      type: "ResolvingDifferences",
+    },
+    {
+      actionCode: "17000",
+      actionDate: "2025-11-10",
+      text: "Passed Senate with an amendment by Yea-Nay Vote. 60 - 40.",
+      type: "Floor",
+    },
+  ];
 
   it("gives the day and text of the latest action, citations kept, text trimmed", () => {
     const passed = {
@@ -83,36 +114,55 @@ describe("latestManifestAction (UX-29)", () => {
     expect(latestManifestAction([introduced, passed, referred])?.actionDate).toBe("2026-03-04");
   });
 
-  it("of one day, takes the greatest actionTime, then the first listed (congress.gov lists the newest first)", () => {
-    const timed = {
-      actionCode: "H30000",
-      actionDate: "2026-03-04",
-      actionTime: "14:32:10",
-      text: "Considered as unfinished business.",
-    };
-    const earlier = {
-      actionCode: "H30000",
-      actionDate: "2026-03-04",
-      actionTime: "09:01:00",
-      text: "Rule provides for consideration.",
-    };
-    const untimed = { actionCode: "8000", actionDate: "2026-03-04", text: "Passed/agreed to in House." };
-    expect(latestManifestAction([untimed, earlier, timed])?.text).toBe("Considered as unfinished business.");
-    expect(latestManifestAction([referred, introduced])?.text).toBe(referred.text);
-    expect(latestManifestAction([introduced, referred])?.text).toBe(introduced.text);
+  it("names the law on the day a bill became law, though the House's lines of that day have a time", () => {
+    expect(latestManifestAction(lawDay)).toEqual({ actionDate: "2025-11-12", text: "Became Public Law No: 119-37." });
   });
 
-  it("names the action by the first listed with text at that moment, and leaves text out when none has any", () => {
-    const textless = { actionCode: "10000", actionDate: "2026-02-10", type: "IntroReferral" };
+  it("of one day, takes the first listed and never reads actionTime (congress.gov lists the newest first)", () => {
+    const timed = { ...lawDay[6], actionTime: "23:59:59" };
+    expect(latestManifestAction([lawDay[2], timed, lawDay[0]])?.text).toBe("Signed by President.");
+    expect(latestManifestAction([referred, introduced])?.text).toBe(referred.text);
+    expect(latestManifestAction([introduced, referred])?.text).toBe(introduced.text);
+    // A greater day wins wherever it is listed.
+    expect(latestManifestAction([lawDay[8], ...lawDay.slice(0, 8)])?.text).toBe("Became Public Law No: 119-37.");
+  });
+
+  it("takes the veto's line in place of the House's line of the same day and text, as the app does", () => {
+    const house = { actionCode: "E30000", actionDate: "2026-06-02", text: "Vetoed by President.", type: "President" };
+    const veto = { actionCode: "31000", actionDate: "2026-06-02", text: "Vetoed by president.", type: "Veto" };
+    expect(latestManifestAction([house, veto, referred])).toEqual({
+      actionDate: "2026-06-02",
+      text: "Vetoed by president.",
+    });
+    expect(latestManifestAction([house, { ...veto, text: "Vetoed." }])?.text).toBe("Vetoed by President.");
+  });
+
+  it("skips a line without text beside one with text, and leaves text out when the app shows a type", () => {
+    // congress.gov gives an Intro-S IntroReferral action no text beside the chamber's own introduction line.
+    const textless = { actionCode: "Intro-S", actionDate: "2026-02-10", type: "IntroReferral" };
     expect(latestManifestAction([textless, { ...introduced, text: "  " }, referred])).toEqual({
       actionDate: "2026-02-10",
       text: referred.text,
     });
+    // No action of its day has text: the app lists it by its type, so it is the latest, without text.
     expect(latestManifestAction([textless, { ...introduced, text: "" }])).toEqual({ actionDate: "2026-02-10" });
+    // A veto without text is listed by its code, whatever its type.
+    expect(latestManifestAction([{ actionCode: "31000", actionDate: "2026-06-02" }, referred])).toEqual({
+      actionDate: "2026-06-02",
+    });
   });
 
-  it("skips actions without a calendar day, and is null when none has one", () => {
-    expect(latestManifestAction([{ actionDate: "2026-02-30", text: "Typo" }, referred])).toEqual({
+  it("passes over a line the app leaves out: no text, and a type without a label", () => {
+    const unlabelled = { actionCode: "H12345", actionDate: "2026-02-12", type: "NotAType" };
+    expect(latestManifestAction([unlabelled, referred])).toEqual({ actionDate: "2026-02-10", text: referred.text });
+    expect(latestManifestAction([{ ...unlabelled, type: undefined }])).toBeNull();
+  });
+
+  it("is null when the action the app shows last has no calendar day, or there is none", () => {
+    // The app shows this line as the latest, so the row names no other in its place.
+    expect(latestManifestAction([{ actionDate: "2026-02-30", text: "Typo" }, referred])).toBeNull();
+    // An undated action sorts after every dated one, as in the app.
+    expect(latestManifestAction([{ text: "Introduced in House" }, referred])).toEqual({
       actionDate: "2026-02-10",
       text: referred.text,
     });

@@ -3492,6 +3492,38 @@ describe("createBillsManifest handler", () => {
         expect(factsOf(ddbItems[ddbKey("BILL_GUID", guid)])).toEqual({});
       });
 
+      it("names the law as the latest action on the day the bill became law, as the app's bill page does (UX-43)", async () => {
+        // The Library of Congress lines have no time, the House's line of the same day has one: of one day, the first
+        // listed (congress.gov's newest first) is the latest, whatever the times.
+        const ddbItems: Items = {};
+        const { handler: loaded } = load(ddbItems);
+        const lawDay = [
+          { actionCode: "36000", actionDate: "2026-03-12", text: "Became Public Law No: 119-90.", type: "President" },
+          { actionCode: "36000", actionDate: "2026-03-12", text: "Signed by President.", type: "President" },
+          {
+            actionCode: "H38310",
+            actionDate: "2026-03-12",
+            actionTime: "22:15:38",
+            text: "Motion to reconsider laid on the table Agreed to without objection.",
+            type: "ResolvingDifferences",
+          },
+        ];
+        s3.put(
+          key,
+          passedDoc(PASSED_AT, {
+            billStatus: "Finalized",
+            actions: [...lawDay, SENATE_PASSAGE, HOUSE_PASSAGE, ...base.actions],
+          }),
+          TEXT,
+        );
+
+        await loaded(event());
+
+        expect(ddbItems[ddbKey("BILL", passedSk)].latestAction).toEqual({
+          M: { actionDate: { S: "2026-03-12" }, text: { S: "Became Public Law No: 119-90." } },
+        });
+      });
+
       it("writes only the facts the document gives: an open bill has no passage, and no bill is ceremonial", async () => {
         const ddbItems: Items = {};
         const { handler: loaded } = load(ddbItems);

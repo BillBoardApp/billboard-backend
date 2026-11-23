@@ -243,8 +243,10 @@ dates a row, so a rows-only replay adds them without moving a row.
 - `passedHouseOn`, `passedSenateOn` (`format: date`): the earliest action coded 8000 or 17000
   (`services/src/shared/billOutcomes.ts` `chamberPassageDates`), whatever the status says.
 - `latestAction` (title `BillsManifestLatestActionV1`): `actionDate` (`format: date`, required) and `text` (congress.gov's,
-  trimmed, at least one character, absent when that action has none) of the action of the greatest day and time, the
-  first listed (congress.gov lists the newest first).
+  trimmed, at least one character, absent when that action has none) of the action the app's bill page and the website
+  show as Latest action (UX-43; `billManifestFacts.ts` `latestManifestAction`, the rule of `timelineActions` in both):
+  of the greatest day, the first listed (congress.gov lists the newest first). `actionTime` is not read: the Library of
+  Congress's lines have none, and by time the day a bill became law named a House procedural step.
 - `check-contracts.mjs` accepts an item without any of them and a `latestAction` without `text`, and rejects an
   `isCommemorative` other than `true`, a day that is not a calendar day (`2026-02-30`, `2026-3-5`, a timestamp, `""`),
   a `latestAction` without `actionDate`, with empty `text` or an undeclared field (`ROW_FACTS_*`). The fixture's

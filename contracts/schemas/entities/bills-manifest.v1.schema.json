@@ -115,13 +115,13 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["actionDate"],
-          "description": "The bill's latest action: of the processed bill's actions with a date, those of the greatest actionDate and then actionTime (a missing time sorts first), the first listed that has text (congress.gov lists the newest first). Absent when no action has a date.",
+          "description": "The bill's latest action, the one the app's bill page and the website show as Latest action (UX-43; billManifestFacts.ts latestManifestAction): of the processed bill's actions, those of the greatest actionDate, then the first listed (congress.gov lists the newest first; actionTime is not read, as many Library of Congress lines have none). An action without text counts only when no action of its date has text and its type or veto code has a label in the apps. Absent when there is no such action or its date is not a calendar day.",
           "properties": {
             "actionDate": { "type": "string", "format": "date", "description": "YYYY-MM-DD." },
             "text": {
               "type": "string",
               "minLength": 1,
-              "description": "Congress.gov's text, trimmed, citations included. Absent when no action of that date and time has text."
+              "description": "Congress.gov's text, trimmed, citations included. Absent when that action has none (the apps then show its type)."
             }
           }
         },
