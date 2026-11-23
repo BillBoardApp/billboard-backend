@@ -38,6 +38,11 @@ import {
   CONGRESS_MEMBER_LEGISLATIVE_PROFILE_BILL_GUID_INDEX_NAME,
   CONGRESS_MEMBER_LEGISLATIVE_PROFILE_BILL_GUID_INDEX_PRIMARY_KEY,
   CONGRESS_MEMBER_LEGISLATIVE_PROFILE_BILL_GUID_INDEX_SORT_KEY,
+  CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_NAME,
+  CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_PRIMARY_KEY,
+  CONGRESS_MEMBER_VOTE_RECORD_TABLE_NAME,
+  CONGRESS_MEMBER_VOTE_RECORD_TABLE_PRIMARY_KEY,
+  CONGRESS_MEMBER_VOTE_RECORD_TABLE_SORT_KEY,
 } from '../config/aggregate-data-store-constants';
 import {
   USER_BILL_STATS_PARTITION_KEY,
@@ -115,6 +120,13 @@ export class AnalyticsServiceStack extends cdk.Stack {
         LEGISLATIVE_PROFILE_BILL_GUID_INDEX_NAME: CONGRESS_MEMBER_LEGISLATIVE_PROFILE_BILL_GUID_INDEX_NAME,
         LEGISLATIVE_PROFILE_BILL_GUID_INDEX_PK: CONGRESS_MEMBER_LEGISLATIVE_PROFILE_BILL_GUID_INDEX_PRIMARY_KEY,
         LEGISLATIVE_PROFILE_BILL_GUID_INDEX_SK: CONGRESS_MEMBER_LEGISLATIVE_PROFILE_BILL_GUID_INDEX_SORT_KEY,
+        // UX-39d: every member's latest roll-call position on the bill, all four positions, civic profile or not.
+        // Without the table name the handler writes no record.
+        VOTE_RECORD_TABLE_NAME: CONGRESS_MEMBER_VOTE_RECORD_TABLE_NAME,
+        VOTE_RECORD_PRIMARY_KEY: CONGRESS_MEMBER_VOTE_RECORD_TABLE_PRIMARY_KEY,
+        VOTE_RECORD_SORT_KEY: CONGRESS_MEMBER_VOTE_RECORD_TABLE_SORT_KEY,
+        VOTE_RECORD_BILL_GUID_INDEX_NAME: CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_NAME,
+        VOTE_RECORD_BILL_GUID_INDEX_PK: CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_PRIMARY_KEY,
       },
       timeout: cdk.Duration.seconds(30),
     });
@@ -139,6 +151,8 @@ export class AnalyticsServiceStack extends cdk.Stack {
     storeTable(this, 'congressMemberStats').grantReadWriteData(congressMemberStatsFn);
     storeTable(this, 'congressMemberVoteProfiles').grantReadWriteData(congressMemberStatsFn);
     storeTable(this, 'congressMemberLegislativeProfiles').grantReadWriteData(congressMemberStatsFn);
+    // UX-39d: puts and deletes a bill's record rows (BatchWriteItem), found through the bill guid index (Query).
+    storeTable(this, 'congressMemberVoteRecord').grantReadWriteData(congressMemberStatsFn);
 
     // ── BillStatsAggregator ───────────────────────────────────────────────────
 

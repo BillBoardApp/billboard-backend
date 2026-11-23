@@ -335,6 +335,65 @@ nonisolated enum UserAPIContractsV1 {
         let civicProfile: CivicProfileScores
     }
 
+    /// A member of Congress's public record in BillBoard (UX-39d), from GET /congress-member-record: their latest
+    /// roll-call vote on each bill in BillBoard, newest first, a page at a time, and the bills they sponsored. Facts
+    /// only, as Congress records them: no score, no ranking, no judging words, and no BillBoard user's vote.
+    nonisolated struct CongressMemberRecord: Decodable {
+        /// A Congress.gov bioguide ID: one capital letter and six digits, such as D000001.
+        let bioguideId: String
+        /// The member's latest roll-call vote on each bill in BillBoard that has one, newest first (by votedAt, then
+        /// bill guid), at most the request's limit. A member in both chambers' latest roll calls of a bill (who moved
+        /// chambers) has one entry for each. Empty for a member with no recorded vote, or past the last page.
+        let votes: [CongressMemberRecordVote]
+        /// Present when more votes follow: send it as cursor to read the next page. Absent on the last page.
+        let nextCursor: String?
+        /// The bills in BillBoard the member sponsored (not cosponsored), from BillBoard's member stats: the 119th
+        /// Congress and each later Congress counted apart (REL-46), newest Congress first, then by updatedAt, newest
+        /// first. At most 250 (sponsoredBillCount is the whole number). Sent on the first page only (no cursor).
+        let sponsoredBills: [CongressMemberRecordBill]?
+        /// How many bills in BillBoard the member sponsored, sponsoredBills or more. Sent with sponsoredBills.
+        let sponsoredBillCount: Int?
+    }
+
+    nonisolated struct CongressMemberRecordVote: Decodable {
+        /// The bill's plain guid, such as BILLS-119hr1234.
+        let billGuid: String
+        /// From the guid, such as 119.
+        let congress: String
+        /// From the guid, such as hr or s.
+        let billType: String
+        /// From the guid, such as 1234.
+        let billNumber: String
+        /// The bill's title as the bills manifest has it; absent when the bill has no manifest row yet.
+        let title: String?
+        /// The chamber whose roll call this is.
+        let chamber: String
+        let position: String
+        /// The roll call's day (midnight UTC), or when the vote was synced when Congress gave no day.
+        let votedAt: String
+        /// What the roll call was on, as Congress words it (a passage, a cloture vote, a motion), at most 500
+        /// characters; absent when Congress gave none.
+        let actionText: String?
+    }
+
+    nonisolated struct CongressMemberRecordBill: Decodable {
+        /// The bill's plain guid, such as BILLS-119hr1234.
+        let billGuid: String
+        /// From the guid, such as 119.
+        let congress: String
+        /// From the guid, such as hr or s.
+        let billType: String
+        /// From the guid, such as 1234.
+        let billNumber: String
+        /// The bill's title as the bills manifest has it; absent when the bill has no manifest row yet.
+        let title: String?
+        let billStatus: String?
+        /// Only as true, when the bill's veto stands, as the bills manifest has it; absent otherwise.
+        let vetoed: Bool?
+        /// The bill's date in the bills manifest (its latest news); absent without a manifest row.
+        let updatedAt: String?
+    }
+
     nonisolated struct WeeklyDigest: Decodable {
         let id: String
         let title: String

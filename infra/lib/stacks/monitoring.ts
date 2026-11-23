@@ -170,6 +170,7 @@ export const MONITORED_LAMBDA_NAMES: readonly string[] = [
   'FetchCivicScore',
   'FetchCivicProfile',
   'FetchCongressMemberCivicProfile',
+  'FetchCongressMemberRecord',
   'DistrictVerification',
   'AdultAttestation',
   'FetchMe',

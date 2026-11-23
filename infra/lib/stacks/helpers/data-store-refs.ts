@@ -7,6 +7,7 @@ import {
   CONGRESS_MEMBER_LEGISLATIVE_PROFILE_TABLE_NAME,
   CONGRESS_MEMBER_STATS_TABLE_NAME,
   CONGRESS_MEMBER_VOTE_PROFILE_TABLE_NAME,
+  CONGRESS_MEMBER_VOTE_RECORD_TABLE_NAME,
 } from '../../config/aggregate-data-store-constants';
 import { APP_ATTEST_TABLE_NAME } from '../../config/app-attest-constants';
 import {
@@ -60,6 +61,7 @@ export const STORE_TABLES = {
   congressMemberStats: { tableName: CONGRESS_MEMBER_STATS_TABLE_NAME, hasIndexes: false },
   congressMemberVoteProfiles: { tableName: CONGRESS_MEMBER_VOTE_PROFILE_TABLE_NAME, hasIndexes: true },
   congressMemberLegislativeProfiles: { tableName: CONGRESS_MEMBER_LEGISLATIVE_PROFILE_TABLE_NAME, hasIndexes: true },
+  congressMemberVoteRecord: { tableName: CONGRESS_MEMBER_VOTE_RECORD_TABLE_NAME, hasIndexes: true },
 } as const satisfies Record<string, StoreTable>;
 
 export const STORE_BUCKETS = {

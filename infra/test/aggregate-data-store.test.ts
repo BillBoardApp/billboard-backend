@@ -34,8 +34,30 @@ describe("AggregateDataStoreStack", () => {
     });
   });
 
+  // UX-39d: the members' roll-call record, read newest first per member, a bill's rows found through its guid.
+  test("creates the member vote record table, keyed newest first, with a keys-only bill guid index", () => {
+    templates.aggregateTemplate.hasResourceProperties("AWS::DynamoDB::Table", {
+      TableName: "CongressMemberVoteRecord",
+      BillingMode: "PAY_PER_REQUEST",
+      KeySchema: [
+        { AttributeName: "bioguideId", KeyType: "HASH" },
+        { AttributeName: "recordKey", KeyType: "RANGE" },
+      ],
+      GlobalSecondaryIndexes: [
+        {
+          IndexName: "BillGuidIndex",
+          KeySchema: [
+            { AttributeName: "billGuid", KeyType: "HASH" },
+            { AttributeName: "bioguideId", KeyType: "RANGE" },
+          ],
+          Projection: { ProjectionType: "KEYS_ONLY" },
+        },
+      ],
+    });
+  });
+
   test("protects every aggregate table with deletion protection, PITR and RETAIN", () => {
-    templates.aggregateTemplate.resourceCountIs("AWS::DynamoDB::Table", 3);
+    templates.aggregateTemplate.resourceCountIs("AWS::DynamoDB::Table", 4);
     templates.aggregateTemplate.allResourcesProperties("AWS::DynamoDB::Table", {
       DeletionProtectionEnabled: true,
       PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },

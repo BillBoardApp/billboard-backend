@@ -166,6 +166,8 @@ describe("AnalyticsServiceStack", () => {
       "table/CongressMemberLegislativeProfiles/index/*",
       "table/CongressMemberVoteProfiles",
       "table/CongressMemberVoteProfiles/index/*",
+      "table/CongressMemberVoteRecord",
+      "table/CongressMemberVoteRecord/index/*",
       "table/CongressMembersManifest",
       "table/CongressMembersStats",
     ]);
@@ -177,6 +179,8 @@ describe("AnalyticsServiceStack", () => {
       "table/CongressMemberLegislativeProfiles/index/*",
       "table/CongressMemberVoteProfiles",
       "table/CongressMemberVoteProfiles/index/*",
+      "table/CongressMemberVoteRecord",
+      "table/CongressMemberVoteRecord/index/*",
       "table/CongressMembersStats",
     ]);
 

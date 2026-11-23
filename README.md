@@ -14,7 +14,7 @@ maintainers deploy it ([docs/DEPLOYING.md](docs/DEPLOYING.md)). The iOS app live
 | Directory | What it is | Details |
 |---|---|---|
 | `contracts/` | JSON schemas, the OpenAPI description of the user API, fixtures, and the TypeScript and Swift types generated from them | [contracts/README.md](contracts/README.md) |
-| `services/` | 48 Lambda handlers in TypeScript (esbuild, Jest), one per directory under `src/handlers/`, plus operator scripts | [services/README.md](services/README.md) |
+| `services/` | 49 Lambda handlers in TypeScript (esbuild, Jest), one per directory under `src/handlers/`, plus operator scripts | [services/README.md](services/README.md) |
 | `infra/` | The CDK app: 15 stacks in one AWS account and region | [infra/README.md](infra/README.md) |
 | `website/` | The static public site: landing page, Help, How Billboard works, privacy policy, roadmap and the `/b/<guid>` share page | [website/README.md](website/README.md) |
 | `scripts/ci/` | `build-release.sh` (deterministic Lambda zips and a release manifest), `publish-release.sh` (its upload), the layout guard `check-layout.sh`, the website checks (`check-website-chrome.mjs`, `check-security-txt.mjs` and `test-website-app.mjs`), and the commit-safety check's two scripts | |

@@ -189,6 +189,30 @@ A bill keeps naming its sponsor after the sponsor leaves the members manifest (t
 - Generated: `BillSponsorDetailV1` and `ProcessedBillV1.sponsorDetails?` in TypeScript;
   `UserAPIContractsV1.BillSponsorDetail` and `ProcessedBill.sponsorDetails` in Swift.
 
+## A member's votes and bills (UX-39d)
+
+`GET /congress-member-record?bioguideId=&limit=&cursor=` (Cognito) serves `congress-member-record.v1` (title
+`CongressMemberRecordV1`), the member page's "How they voted" and "Their bills". New and additive: no older build reads
+it.
+
+- `votes` (`CongressMemberRecordVoteV1`): the member's latest roll-call vote on each bill in BillBoard, newest first, at
+  most `limit` (1 to 100, default 25): `billGuid` (plain), `congress`, `billType` and `billNumber` (from the guid, as the
+  bills manifest writes them), `title` (absent without a manifest row), `chamber` (`House` or `Senate`), `position`
+  (`CongressMemberRecordPositionV1`: `Yea`, `Nay`, `Present` or `Not Voting`, as Congress records it; never a judging
+  word, and never `Abstain`, which only BillBoard users cast), `votedAt` and `actionText` (what the roll call was on, a
+  passage or a procedural vote). `nextCursor` is present while more follow; send it back as `cursor`.
+- `sponsoredBills` (`CongressMemberRecordBillV1`) and `sponsoredBillCount`, on the first page only: the bills the member
+  sponsored (not cosponsored), each Congress counted apart (REL-46), newest Congress first, then by `updatedAt`; at most
+  250. Each has the guid parts, and `title`, `billStatus`, `vetoed` (only as `true`) and `updatedAt` from the manifest.
+- Public facts only: no score, no ranking and no BillBoard user's vote. Clients add "You voted ..." from the caller's own
+  votes. An unknown member gets empty lists; 400s are `ApiError` with `INVALID_BIOGUIDE_ID`, `INVALID_LIMIT` and
+  `INVALID_CURSOR`.
+- `check-contracts.mjs` accepts a last page, a later page, a member with no record and a Senate vote, and rejects a
+  judging word or `Abstain` as a position, a lower-case chamber, a suffixed guid, an extra key on a vote, a vote without
+  `votedAt`, `vetoed: false`, a negative `sponsoredBillCount` and a record without `votes`.
+- Generated: the four types above in TypeScript; `UserAPIContractsV1.CongressMemberRecord`,
+  `CongressMemberRecordVote` and `CongressMemberRecordBill` in Swift (`position` and `chamber` are `String`).
+
 ## Stats, verification limits and labels (C2)
 
 All additive; builds 1.0 and R1 keep decoding every response.

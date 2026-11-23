@@ -306,6 +306,42 @@ const SPONSOR_MUST_REJECT = [
   [PROCESSED_BILL, "a sponsor with an extra key", withSponsorDetails([{ ...SPONSOR, fullName: "Rep. Doe, Jane" }])],
 ];
 
+// ── A member's votes and bills (UX-39d) ──
+// Positions only as Congress records them (no judging word, no Abstain, which only BillBoard users cast), plain guids,
+// and the paging shapes clients must decode: a last page without nextCursor, a later page without sponsoredBills, and a
+// member with no record.
+const MEMBER_RECORD = "schemas/entities/congress-member-record.v1.schema.json";
+const withRecordVote = (edit) => (record) => ({ ...record, votes: [edit(record.votes[0]), ...record.votes.slice(1)] });
+const withRecordBill = (edit) => (record) => ({
+  ...record,
+  sponsoredBills: [edit(record.sponsoredBills[0]), ...record.sponsoredBills.slice(1)],
+});
+const RECORD_MUST_ACCEPT = [
+  [MEMBER_RECORD, "a last page (no nextCursor)", ({ nextCursor, ...record }) => record],
+  [MEMBER_RECORD, "a later page (no sponsoredBills)", ({ sponsoredBills, sponsoredBillCount, ...record }) => record],
+  [
+    MEMBER_RECORD,
+    "a member with no record",
+    (record) => ({ bioguideId: record.bioguideId, votes: [], sponsoredBills: [], sponsoredBillCount: 0 }),
+  ],
+  [MEMBER_RECORD, "a Senate vote", withRecordVote((vote) => ({ ...vote, chamber: "Senate" }))],
+];
+const RECORD_MUST_REJECT = [
+  [MEMBER_RECORD, "a judging word for a position", withRecordVote((vote) => ({ ...vote, position: "Missed" }))],
+  [
+    MEMBER_RECORD,
+    "Abstain, which is not a Congress position",
+    withRecordVote((vote) => ({ ...vote, position: "Abstain" })),
+  ],
+  [MEMBER_RECORD, "a lower-case chamber", withRecordVote((vote) => ({ ...vote, chamber: "house" }))],
+  [MEMBER_RECORD, "a suffixed bill guid", withRecordVote((vote) => ({ ...vote, billGuid: "BILLS-119hr1285ih" }))],
+  [MEMBER_RECORD, "a vote with an extra key", withRecordVote((vote) => ({ ...vote, userVote: "Yea" }))],
+  [MEMBER_RECORD, "a vote without votedAt", withRecordVote(({ votedAt, ...vote }) => vote)],
+  [MEMBER_RECORD, "vetoed false on a sponsored bill", withRecordBill((bill) => ({ ...bill, vetoed: false }))],
+  [MEMBER_RECORD, "a negative sponsoredBillCount", (record) => ({ ...record, sponsoredBillCount: -1 })],
+  [MEMBER_RECORD, "a record without votes", ({ votes, ...record }) => record],
+];
+
 // ── Stats, verification limit, label and App Attest cases (C2 4.2 and C3 4.4) ──
 // Sub-category label rename (LLM-10, decision 1B; names from question Q1): each legacy name and its new name. Both
 // spellings must validate in processed bills and manifest items until the legacy-name cleanup, which removes the legacy
@@ -754,6 +790,7 @@ const MUST_REJECT = [
   ...VETOED_MUST_REJECT,
   ...MEMBER_MUST_REJECT,
   ...SPONSOR_MUST_REJECT,
+  ...RECORD_MUST_REJECT,
   ...LABEL_MUST_REJECT,
   ...STATS_MUST_REJECT,
   ...VERIFICATION_MUST_REJECT,
@@ -852,6 +889,7 @@ const MUST_ACCEPT = [
   ...VETOED_MUST_ACCEPT,
   ...MEMBER_MUST_ACCEPT,
   ...SPONSOR_MUST_ACCEPT,
+  ...RECORD_MUST_ACCEPT,
   ...LABEL_MUST_ACCEPT,
   ...STATS_MUST_ACCEPT,
   ...VERIFICATION_MUST_ACCEPT,
