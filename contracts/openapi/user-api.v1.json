@@ -681,7 +681,7 @@
       "get": {
         "operationId": "getProcessedCongressMember",
         "summary": "Fetch a processed Congress member",
-        "description": "Returns the stored object, which is the {member} envelope (older objects may be the bare member), with currentCongressBillsSupportedCount, trackedSponsoredCount and trackedSupportedCount added from BillBoard's member stats; all three are left out when the member has no stats row (REL-46) or the stats could not be read (REL-52). terms has one entry per term: Senate service is merged into six-year terms (REL-52).",
+        "description": "Returns the stored object, which is the {member} envelope (older objects may be the bare member), with currentCongressBillsSupportedCount, trackedSponsoredCount and trackedSupportedCount (the 119th Congress's) and currentCongressCounts (the newest Congress the member has counts in) added from BillBoard's member stats; the three 119th counts are left out when the member has no 119th counts (REL-46) and all four when the stats could not be read (REL-52). terms has one entry per term: Senate service is merged into six-year terms (REL-52).",
         "tags": ["Congress members"],
         "parameters": [{ "$ref": "#/components/parameters/bioguideIdQuery" }],
         "responses": {
@@ -714,7 +714,7 @@
         "parameters": [{ "$ref": "#/components/parameters/updatedAfter" }],
         "responses": {
           "200": {
-            "description": "Current members, sorted by bioguide ID. currentCongressBillsSupportedCount, trackedSponsoredCount and trackedSupportedCount are left out of a member with no stats row (REL-46) or whose stats could not be read (REL-52).",
+            "description": "Current members, sorted by bioguide ID. currentCongressBillsSupportedCount, trackedSponsoredCount and trackedSupportedCount (the 119th Congress's) are left out of a member with no 119th counts (REL-46); those three and currentCongressCounts (the newest Congress the member has counts in) are left out of a member whose stats could not be read (REL-52).",
             "content": {
               "application/json": {
                 "schema": { "$ref": "../schemas/entities/congress-member-manifest.v1.schema.json" }
