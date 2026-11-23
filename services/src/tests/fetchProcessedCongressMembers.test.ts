@@ -112,6 +112,7 @@ describe("fetchProcessedCongressMembers handler", () => {
         currentCongressBillsSupportedCount: 5,
         trackedSponsoredCount: 2,
         trackedSupportedCount: 5,
+        currentCongressCounts: { congress: 119, sponsored: 2, supported: 5 },
       },
     });
 
@@ -130,7 +131,8 @@ describe("fetchProcessedCongressMembers handler", () => {
           Key: {
             bioguideId: { S: "A000001" },
           },
-          ProjectionExpression: "billsSponsored, billsSupported",
+          ProjectionExpression: "#pk, #c0, #c1",
+          ExpressionAttributeNames: { "#pk": "bioguideId", "#c0": "billsSponsored", "#c1": "billsSupported" },
         }),
       }),
     );
@@ -140,7 +142,12 @@ describe("fetchProcessedCongressMembers handler", () => {
   // 1.1 and 1.2 hide "Tracked by Billboard" when the member and its manifest entry have none of the three counts.
   it("omits all three counts, and drops any the stored object carries, when the member has no stats row", async () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
-    const stale = { currentCongressBillsSupportedCount: 0, trackedSponsoredCount: 0, trackedSupportedCount: 0 };
+    const stale = {
+      currentCongressBillsSupportedCount: 0,
+      trackedSponsoredCount: 0,
+      trackedSupportedCount: 0,
+      currentCongressCounts: { congress: 119, sponsored: 0, supported: 0 },
+    };
     mockSend
       .mockResolvedValueOnce({ Body: jsonReadable({ member: { bioguideId: "A000001", name: "Test" } }) })
       .mockResolvedValueOnce({ Body: jsonReadable({ member: { bioguideId: "A000001", name: "Test", ...stale } }) })
@@ -177,6 +184,7 @@ describe("fetchProcessedCongressMembers handler", () => {
         currentCongressBillsSupportedCount: supported,
         trackedSponsoredCount: sponsored,
         trackedSupportedCount: supported,
+        currentCongressCounts: { congress: 119, sponsored, supported },
       },
     });
   });
@@ -193,6 +201,59 @@ describe("fetchProcessedCongressMembers handler", () => {
       currentCongressBillsSupportedCount: 8,
       trackedSponsoredCount: 3,
       trackedSupportedCount: 8,
+      currentCongressCounts: { congress: 119, sponsored: 3, supported: 8 },
+    });
+  });
+
+  describe("each Congress counted apart (REL-46)", () => {
+    const IN_THE_120TH = Date.parse("2027-01-05T12:00:00.000Z");
+    afterEach(() => jest.restoreAllMocks());
+
+    it("serves the 120th's counts beside a returning member's 119th counts", async () => {
+      jest.spyOn(Date, "now").mockReturnValue(IN_THE_120TH);
+      mockSend.mockResolvedValueOnce({ Body: jsonReadable({ member: { bioguideId: "A000001", name: "Test" } }) });
+      mockDdbSend.mockResolvedValueOnce({
+        Item: {
+          billsSponsored: { N: "3" },
+          billsSupported: { N: "8" },
+          billsSponsored120: { N: "1" },
+          billsSupported120: { N: "2" },
+        },
+      });
+
+      const result = await handler(asApiGatewayEvent({ queryStringParameters: { bioguideId: "A000001" } }));
+
+      expect(JSON.parse(result.body).member).toEqual({
+        bioguideId: "A000001",
+        name: "Test",
+        currentCongressBillsSupportedCount: 8,
+        trackedSponsoredCount: 3,
+        trackedSupportedCount: 8,
+        currentCongressCounts: { congress: 120, sponsored: 1, supported: 2 },
+      });
+      expect(Object.values(mockDdbSend.mock.calls[0][0].input.ExpressionAttributeNames)).toEqual([
+        "bioguideId",
+        "billsSponsored",
+        "billsSupported",
+        "billsSponsored120",
+        "billsSupported120",
+      ]);
+    });
+
+    it("sends no 119th counts for a member new in the 120th, whose row holds 120th counts only (D8)", async () => {
+      jest.spyOn(Date, "now").mockReturnValue(IN_THE_120TH);
+      mockSend.mockResolvedValueOnce({
+        Body: jsonReadable({ member: { bioguideId: "N000001", name: "New", trackedSponsoredCount: 0 } }),
+      });
+      mockDdbSend.mockResolvedValueOnce({ Item: { billsSponsored120: { N: "1" } } });
+
+      const result = await handler(asApiGatewayEvent({ queryStringParameters: { bioguideId: "N000001" } }));
+
+      expect(JSON.parse(result.body).member).toEqual({
+        bioguideId: "N000001",
+        name: "New",
+        currentCongressCounts: { congress: 120, sponsored: 1, supported: 0 },
+      });
     });
   });
 
@@ -215,7 +276,12 @@ describe("fetchProcessedCongressMembers handler", () => {
 
   it("drops counts a stored object carries when the stats read fails, from the envelope and from a bare member", async () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
-    const stale = { currentCongressBillsSupportedCount: 0, trackedSponsoredCount: 4, trackedSupportedCount: 0 };
+    const stale = {
+      currentCongressBillsSupportedCount: 0,
+      trackedSponsoredCount: 4,
+      trackedSupportedCount: 0,
+      currentCongressCounts: { congress: 120, sponsored: 4, supported: 0 },
+    };
     mockSend
       .mockResolvedValueOnce({ Body: jsonReadable({ member: { bioguideId: "A000001", name: "Test", ...stale } }) })
       .mockResolvedValueOnce({ Body: jsonReadable({ bioguideId: "A000001", name: "Test", ...stale }) });

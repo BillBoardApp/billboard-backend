@@ -82,8 +82,14 @@ describe("fetchCongressMembersManifest handler", () => {
     expect(body.members[0].currentCongressBillsSupportedCount).toBe(4);
     expect(body.members[0].trackedSponsoredCount).toBe(2);
     expect(body.members[0].trackedSupportedCount).toBe(4);
+    expect(body.members[0].currentCongressCounts).toEqual({ congress: 119, sponsored: 2, supported: 4 });
     const statsRead = mockSend.mock.calls[1][0].input.RequestItems["congress-member-stats-table"];
-    expect(statsRead.ProjectionExpression).toBe("#pk, billsSponsored, billsSupported");
+    expect(statsRead.ProjectionExpression).toBe("#pk, #c0, #c1");
+    expect(statsRead.ExpressionAttributeNames).toEqual({
+      "#pk": "bioguideId",
+      "#c0": "billsSponsored",
+      "#c1": "billsSupported",
+    });
   });
 
   it("returns empty manifest when no items exist", async () => {
@@ -133,6 +139,7 @@ describe("fetchCongressMembersManifest handler", () => {
     expect(body.members[0]).not.toHaveProperty("currentCongressBillsSupportedCount");
     expect(body.members[0]).not.toHaveProperty("trackedSponsoredCount");
     expect(body.members[0]).not.toHaveProperty("trackedSupportedCount");
+    expect(body.members[0]).not.toHaveProperty("currentCongressCounts");
   });
 
   const manifestItem = (bioguideId: string) => ({
@@ -187,6 +194,69 @@ describe("fetchCongressMembersManifest handler", () => {
     // A missing row is not a failed read.
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  describe("each Congress counted apart (REL-46)", () => {
+    const IN_THE_120TH = Date.parse("2027-01-05T12:00:00.000Z");
+    afterEach(() => jest.restoreAllMocks());
+
+    it("reads the 120th's counters once it has started, and serves the newest Congress the member has counts in", async () => {
+      jest.spyOn(Date, "now").mockReturnValue(IN_THE_120TH);
+      mockSend
+        .mockResolvedValueOnce({ Items: [manifestItem("A1"), manifestItem("B2"), manifestItem("C3")] })
+        .mockResolvedValueOnce({
+          Responses: {
+            "congress-member-stats-table": [
+              // A returning member with counts in both Congresses.
+              { ...statsItem("A1", "4", "9"), billsSponsored120: { N: "1" }, billsSupported120: { N: "3" } },
+              // A returning member with no 120th bill yet.
+              statsItem("B2", "2", "6"),
+              // A member new in the 120th: a row, but no 119th counter.
+              { bioguideId: { S: "C3" }, billsSupported120: { N: "2" } },
+            ],
+          },
+        });
+
+      const res = await handler();
+
+      const members = JSON.parse(res.body).members;
+      const statsRead = mockSend.mock.calls[1][0].input.RequestItems["congress-member-stats-table"];
+      expect(Object.values(statsRead.ExpressionAttributeNames)).toEqual([
+        "bioguideId",
+        "billsSponsored",
+        "billsSupported",
+        "billsSponsored120",
+        "billsSupported120",
+      ]);
+      expect(members[0]).toMatchObject({
+        bioguideId: "A1",
+        trackedSponsoredCount: 4,
+        trackedSupportedCount: 9,
+        currentCongressBillsSupportedCount: 9,
+        currentCongressCounts: { congress: 120, sponsored: 1, supported: 3 },
+      });
+      expect(members[1]).toMatchObject({
+        bioguideId: "B2",
+        trackedSponsoredCount: 2,
+        currentCongressCounts: { congress: 119, sponsored: 2, supported: 6 },
+      });
+      // D8 holds for a member new in the 120th: no 119th counts, though the member has a row.
+      expect(members[2].bioguideId).toBe("C3");
+      for (const field of COUNT_FIELDS) expect(members[2]).not.toHaveProperty(field);
+      expect(members[2].currentCongressCounts).toEqual({ congress: 120, sponsored: 0, supported: 2 });
+    });
+
+    it("leaves currentCongressCounts out when the stats read fails", async () => {
+      jest.spyOn(Date, "now").mockReturnValue(IN_THE_120TH);
+      jest.spyOn(console, "warn").mockImplementation(() => undefined);
+      mockSend
+        .mockResolvedValueOnce({ Items: [manifestItem("A1")] })
+        .mockRejectedValueOnce(new Error("AccessDeniedException"));
+
+      const res = await handler();
+
+      expect(JSON.parse(res.body).members[0]).not.toHaveProperty("currentCongressCounts");
+    });
   });
 
   it("retries stats keys DynamoDB returns as unprocessed", async () => {
