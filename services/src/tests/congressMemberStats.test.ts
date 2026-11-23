@@ -1854,6 +1854,202 @@ describe("Senate member lookup refresh (REL-46)", () => {
   });
 });
 
+describe("the members' roll-call record (UX-39d)", () => {
+  const key = "processed-bills/BILLS-119hr2312.json";
+  type WriteRequestItem = { PutRequest?: { Item: Record<string, AttributeValue> }; DeleteRequest?: unknown };
+  const bill = (overrides: Record<string, unknown> = {}) => ({
+    schemaVersion: 1,
+    kind: "processed",
+    storedAt: "2026-02-03T00:00:00.000Z",
+    guid: "BILLS-119hr2312ih",
+    sponsors: [],
+    cosponsors: [],
+    officialVotes: {
+      lastSyncedAt: "2026-02-02T12:00:00.000Z",
+      source: "congress_api",
+      completeness: "complete",
+      house: {
+        actionDate: "2026-02-01",
+        actionCode: "8000",
+        resultText: "On passage Passed by the Yeas and Nays: 220 - 210 (Roll no. 61).",
+        members: [
+          { bioguideId: "A000001", displayName: "One", votePosition: "Yea" },
+          { bioguideId: "B000002", displayName: "Two", votePosition: "Nay" },
+          { bioguideId: "C000003", displayName: "Three", votePosition: "Present" },
+          { bioguideId: "D000004", displayName: "Four", votePosition: "Not Voting" },
+          { bioguideId: "E000005", displayName: "Five", votePosition: "Unknown" },
+          { bioguideId: "A000001", displayName: "One", votePosition: "Yea" },
+        ],
+      },
+      senate: {
+        actionDate: "2026-03-05",
+        members: [{ bioguideId: "S123", displayName: "Smith", state: "NY", votePosition: "Nay" }],
+      },
+    },
+    ...overrides,
+  });
+
+  let existingRecordRows: Array<Record<string, AttributeValue>>;
+  const recordWrites = () =>
+    mockDdbSend.mock.calls.flatMap(
+      (call: unknown[]) =>
+        ((call[0] as FakeDdbCommand).input.RequestItems?.CongressMemberVoteRecord ?? []) as WriteRequestItem[],
+    );
+  const puts = () => recordWrites().flatMap((request) => (request.PutRequest ? [request.PutRequest.Item] : []));
+  const deletes = () => recordWrites().flatMap((request) => (request.DeleteRequest ? [request.DeleteRequest] : []));
+
+  beforeEach(() => {
+    restoreEnv?.();
+    restoreEnv = applyTestEnv(
+      {
+        BUCKET_NAME: "test-bucket",
+        TABLE_NAME: "congress-member-stats-table",
+        PRIMARY_KEY: "bioguideId",
+        VOTE_PROFILE_TABLE_NAME: "CongressMemberVoteProfiles",
+        LEGISLATIVE_PROFILE_TABLE_NAME: "CongressMemberLegislativeProfiles",
+        CONGRESS_MEMBERS_MANIFEST_TABLE_NAME: "CongressMembersManifest",
+        VOTE_RECORD_TABLE_NAME: "CongressMemberVoteRecord",
+        VOTE_RECORD_PRIMARY_KEY: "bioguideId",
+        VOTE_RECORD_SORT_KEY: "recordKey",
+        VOTE_RECORD_BILL_GUID_INDEX_NAME: "BillGuidIndex",
+        VOTE_RECORD_BILL_GUID_INDEX_PK: "billGuid",
+      },
+      { replace: true, base: originalEnv },
+    );
+    jest.resetModules();
+    handler = require("../handlers/congressMemberStats").handler;
+    existingRecordRows = [];
+    mockDdbSend.mockImplementation(async (cmd: FakeDdbCommand) => {
+      const input = cmd.input ?? {};
+      if (input.IndexName && input.TableName === "CongressMemberVoteRecord") return { Items: existingRecordRows };
+      if (input.IndexName) return { Items: [] };
+      if (input.TableName === "CongressMembersManifest") {
+        return {
+          Items: [
+            { bioguideId: { S: "S000148" }, name: { S: "Sam Smith" }, chamber: { S: "Senate" }, state: { S: "NY" } },
+          ],
+        };
+      }
+      return {};
+    });
+  });
+
+  const apply = async (payload: unknown) => {
+    mockRawBills({ [key]: payload });
+    return handler(sqsWrappedS3Keys([key]) as unknown as SQSEvent);
+  };
+
+  it("writes every position Congress recorded, under the plain guid, newest-first keys, and the action text", async () => {
+    const res = await apply(bill());
+
+    expect(res).toEqual({ batchItemFailures: [] });
+    const house = "2026-02-01T00:00:00.000Z#BILLS-119hr2312";
+    const houseRow = (bioguideId: string, position: string) => ({
+      bioguideId: { S: bioguideId },
+      recordKey: { S: house },
+      billGuid: { S: "BILLS-119hr2312" },
+      chamber: { S: "House" },
+      position: { S: position },
+      votedAt: { S: "2026-02-01T00:00:00.000Z" },
+      actionText: { S: "On passage Passed by the Yeas and Nays: 220 - 210 (Roll no. 61)." },
+      actionCode: { S: "8000" },
+      updatedAt: { S: expect.any(String) },
+    });
+    expect(puts()).toEqual([
+      houseRow("A000001", "Yea"),
+      houseRow("B000002", "Nay"),
+      houseRow("C000003", "Present"),
+      houseRow("D000004", "Not Voting"),
+      // The Senate's lis id, resolved to the bioguide id through the members manifest.
+      {
+        bioguideId: { S: "S000148" },
+        recordKey: { S: "2026-03-05T00:00:00.000Z#BILLS-119hr2312" },
+        billGuid: { S: "BILLS-119hr2312" },
+        chamber: { S: "Senate" },
+        position: { S: "Nay" },
+        votedAt: { S: "2026-03-05T00:00:00.000Z" },
+        updatedAt: { S: expect.any(String) },
+      },
+    ]);
+    expect(deletes()).toEqual([]);
+  });
+
+  it("writes the record for a bill without a civic profile, whose profile rows stay unwritten (REL-43)", async () => {
+    await apply(bill());
+
+    expect(puts()).toHaveLength(5);
+    const profileTables = mockDdbSend.mock.calls.flatMap((call: unknown[]) =>
+      Object.keys((call[0] as FakeDdbCommand).input.RequestItems ?? {}),
+    );
+    expect(profileTables).not.toContain("CongressMemberVoteProfiles");
+  });
+
+  it("deletes the rows of an older roll call and of members the bill no longer lists, and keeps the rest", async () => {
+    existingRecordRows = [
+      { bioguideId: { S: "A000001" }, recordKey: { S: "2026-02-01T00:00:00.000Z#BILLS-119hr2312" } },
+      { bioguideId: { S: "A000001" }, recordKey: { S: "2025-12-01T00:00:00.000Z#BILLS-119hr2312" } },
+      { bioguideId: { S: "Z000009" }, recordKey: { S: "2026-02-01T00:00:00.000Z#BILLS-119hr2312" } },
+    ];
+
+    await apply(bill());
+
+    expect(deletes()).toEqual([
+      { Key: { bioguideId: { S: "A000001" }, recordKey: { S: "2025-12-01T00:00:00.000Z#BILLS-119hr2312" } } },
+      { Key: { bioguideId: { S: "Z000009" }, recordKey: { S: "2026-02-01T00:00:00.000Z#BILLS-119hr2312" } } },
+    ]);
+    const queried = mockDdbSend.mock.calls
+      .map((call: unknown[]) => (call[0] as FakeDdbCommand).input)
+      .find((input: FakeDdbInput) => input.TableName === "CongressMemberVoteRecord" && input.IndexName);
+    expect(queried).toMatchObject({
+      IndexName: "BillGuidIndex",
+      ExpressionAttributeValues: { ":billGuid": { S: "BILLS-119hr2312" } },
+    });
+  });
+
+  it("deletes every row of a bill whose official votes are gone", async () => {
+    existingRecordRows = [
+      { bioguideId: { S: "A000001" }, recordKey: { S: "2026-02-01T00:00:00.000Z#BILLS-119hr2312" } },
+    ];
+
+    await apply(bill({ officialVotes: undefined }));
+
+    expect(puts()).toEqual([]);
+    expect(deletes()).toEqual([
+      { Key: { bioguideId: { S: "A000001" }, recordKey: { S: "2026-02-01T00:00:00.000Z#BILLS-119hr2312" } } },
+    ]);
+  });
+
+  it("writes the same rows again on a redelivery, and deletes nothing", async () => {
+    await apply(bill());
+    const first = puts().map((item) => [item.bioguideId.S, item.recordKey.S]);
+    existingRecordRows = puts().map((item) => ({ bioguideId: item.bioguideId, recordKey: item.recordKey }));
+    mockDdbSend.mockClear();
+
+    await apply(bill());
+
+    expect(puts().map((item) => [item.bioguideId.S, item.recordKey.S])).toEqual(first);
+    expect(deletes()).toEqual([]);
+  });
+
+  it("dates a chamber vote without a day by the sync time, and skips a chamber with no usable date", async () => {
+    const undated = bill({
+      storedAt: "not a date",
+      officialVotes: {
+        lastSyncedAt: "2026-02-02T12:00:00.000Z",
+        house: { members: [{ bioguideId: "A000001", votePosition: "Yea" }] },
+      },
+    });
+    await apply(undated);
+    expect(puts().map((item) => item.recordKey.S)).toEqual(["2026-02-02T12:00:00.000Z#BILLS-119hr2312"]);
+
+    mockDdbSend.mockClear();
+    await apply(
+      bill({ storedAt: "", officialVotes: { house: { members: [{ bioguideId: "A000001", vote: "aye" }] } } }),
+    );
+    expect(puts()).toEqual([]);
+  });
+});
+
 describe("each Congress counted apart (REL-46)", () => {
   const IN_THE_120TH = Date.parse("2027-01-05T12:00:00.000Z");
   const BEFORE_THE_120TH = Date.parse("2026-11-23T12:00:00.000Z");
