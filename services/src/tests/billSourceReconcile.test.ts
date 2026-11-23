@@ -6,7 +6,13 @@ jest.mock("@aws-sdk/client-s3", () => require("./fakeVersionedS3").mockS3Module(
 import { S3Client } from "@aws-sdk/client-s3";
 import { BillStorage } from "../adapters/billStorage";
 import { ProcessedBillDao, type ProcessedBillRevision } from "../adapters/processedBillDao";
-import type { OfficialChamberVote, OfficialVotesBreakdown, ProcessedBillDocument, RawBill } from "../models/bill";
+import type {
+  BillSponsorDetail,
+  OfficialChamberVote,
+  OfficialVotesBreakdown,
+  ProcessedBillDocument,
+  RawBill,
+} from "../models/bill";
 import {
   LEGACY_ANCHOR_MAX_GETS,
   MANAGED_BILL_STATUSES,
@@ -30,6 +36,7 @@ import {
   sourceTextHash,
   visibleKey,
 } from "../shared/billSourceReconcile";
+import { classifyBillVersionChange, manifestDateBasis, manifestDateMoves } from "../shared/billVersionChange";
 import { logLines } from "./logLines";
 
 const GUID = "BILLS-119hr7";
@@ -449,6 +456,67 @@ describe("decideMemberVoteCarry and carryForwardOfficialVotes (REL-35)", () => {
 
     expect(derivedPatch(processed, refetch)).toBeNull();
     expect(processed.officialVotes!.house).toBe(withMembers);
+  });
+});
+
+describe("sponsorDetails (REL-46 5.3)", () => {
+  const namedSponsor = {
+    bioguideId: "S000001",
+    firstName: "Sam",
+    lastName: "Stone",
+    fullName: "Rep. Stone, Sam [R-TX-7]",
+    party: "R",
+    state: "TX",
+    district: 7,
+  };
+  const STONE: BillSponsorDetail = {
+    bioguideId: "S000001",
+    name: "Sam Stone",
+    party: "R",
+    state: "TX",
+    district: "07",
+  };
+
+  it("patches a processed bill that has no sponsorDetails, and nothing else changes", () => {
+    const processed = processedDoc();
+    const patch = derivedPatch(processed, raw({ bill: { bill: { sponsors: [namedSponsor] } } }));
+
+    expect(patch?.changedFields).toEqual(["sponsorDetails"]);
+    expect(patch?.next.sponsorDetails).toEqual([STONE]);
+    expect(patch?.next.sponsors).toEqual(["S000001"]);
+  });
+
+  it("is a detail: the manifest row keeps its date and the change is not user-visible on a card", () => {
+    const processed = processedDoc();
+    const next = applyDerivedFields(processed, raw({ bill: { bill: { sponsors: [namedSponsor] } } }));
+
+    expect(manifestDateMoves(manifestDateBasis(processed), manifestDateBasis(next))).toEqual([]);
+    expect(classifyBillVersionChange(processed, next).changeClass).toBe("detail_only");
+  });
+
+  it("gives billDiffer nothing to patch once the bill carries the same details", () => {
+    const rawBill = raw({ bill: { bill: { sponsors: [namedSponsor] } } });
+    expect(derivedPatch(processedDoc({ sponsorDetails: [STONE] }), rawBill)).toBeNull();
+  });
+
+  it("follows a changed name or seat, and drops the details when the raw sponsors have no name", () => {
+    const moved = raw({ bill: { bill: { sponsors: [{ ...namedSponsor, district: 8 }] } } });
+    expect(derivedPatch(processedDoc({ sponsorDetails: [STONE] }), moved)?.next.sponsorDetails).toEqual([
+      { ...STONE, district: "08" },
+    ]);
+
+    const unnamed = applyDerivedFields(processedDoc({ sponsorDetails: [STONE] }), raw());
+    expect(unnamed).not.toHaveProperty("sponsorDetails");
+  });
+
+  it("keeps the details when the raw bill has no sponsor container", () => {
+    const next = applyDerivedFields(processedDoc({ sponsorDetails: [STONE] }), raw({ bill: { title: "flat shape" } }));
+    expect(next.sponsorDetails).toEqual([STONE]);
+  });
+
+  it("writes no empty list: a bill whose sponsors have no name stays without the field", () => {
+    expect(derivedPatch(processedDoc(), raw())).toBeNull();
+    expect(applyDerivedFields(processedDoc(), raw())).not.toHaveProperty("sponsorDetails");
   });
 });
 

@@ -91,6 +91,8 @@ describe("fetchProcessedBill handler", () => {
       subCategories: ["Education"],
       lifeAreas: ["Work"],
       sponsors: ["A123"],
+      // Served as stored, so a client can name a sponsor who left the members list (REL-46 5.3).
+      sponsorDetails: [{ bioguideId: "A123", name: "Ann Lee", party: "D", state: "OR", district: "03" }],
       cosponsors: ["B456"],
     };
 

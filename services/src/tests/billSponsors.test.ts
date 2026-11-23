@@ -1,6 +1,7 @@
 import type { RawBill } from "../models/bill";
 import {
   extractCosponsorIdsFromRawBill,
+  extractSponsorDetailsFromRawBill,
   extractSponsorIdsFromRawBill,
   isCosponsorListTruncated,
 } from "../shared/billSponsors";
@@ -28,6 +29,93 @@ describe("billSponsors (REL-28)", () => {
     expect(extractCosponsorIdsFromRawBill(bill)).toEqual([]);
     expect(extractSponsorIdsFromRawBill(rawBill(undefined))).toEqual([]);
     expect(extractCosponsorIdsFromRawBill(rawBill({}))).toEqual([]);
+  });
+
+  describe("extractSponsorDetailsFromRawBill (REL-46 5.3)", () => {
+    const sponsoredBy = (...sponsors: unknown[]) => rawBill({ bill: { bill: { sponsors } } });
+
+    it("names a representative from first and last name, with the party letter, state and two-digit district", () => {
+      const bill = sponsoredBy({
+        bioguideId: "D000001",
+        firstName: "Jane",
+        middleName: "Q.",
+        lastName: "Doe",
+        fullName: "Rep. Doe, Jane Q. [R-TX-7]",
+        party: "R",
+        state: "TX",
+        district: 7,
+        isByRequest: "N",
+      });
+
+      expect(extractSponsorDetailsFromRawBill(bill)).toEqual([
+        { bioguideId: "D000001", name: "Jane Doe", party: "R", state: "TX", district: "07" },
+      ]);
+    });
+
+    it("falls back to fullName without its title and bracket", () => {
+      const bill = sponsoredBy(
+        { bioguideId: "D000002", fullName: "Rep. Doe, Jane Q. [D-CA-12]", party: "D", state: "CA", district: 12 },
+        { bioguideId: "D000003", fullName: "Resident Commissioner Ruiz, Ana [R-PR-At Large]", state: "PR" },
+        { bioguideId: "D000004", fullName: "Sen. Lee" },
+      );
+
+      expect(extractSponsorDetailsFromRawBill(bill).map((detail) => detail.name)).toEqual([
+        "Jane Q. Doe",
+        "Ana Ruiz",
+        "Lee",
+      ]);
+    });
+
+    it("gives a senator a null district", () => {
+      const bill = sponsoredBy({
+        bioguideId: "S000001",
+        firstName: "John",
+        lastName: "Smith",
+        party: "D",
+        state: "NY",
+      });
+
+      expect(extractSponsorDetailsFromRawBill(bill)).toEqual([
+        { bioguideId: "S000001", name: "John Smith", party: "D", state: "NY", district: null },
+      ]);
+    });
+
+    it("writes an at-large seat or a delegate as 00", () => {
+      const bill = sponsoredBy(
+        { bioguideId: "W000001", firstName: "Al", lastName: "Wy", party: "R", state: "WY", district: 0 },
+        { bioguideId: "P000001", firstName: "Ana", lastName: "Ruiz", party: "R", state: "PR", district: "At Large" },
+      );
+
+      expect(extractSponsorDetailsFromRawBill(bill).map((detail) => detail.district)).toEqual(["00", "00"]);
+    });
+
+    it("reads ID as an independent and leaves any other party code out rather than show a wrong letter", () => {
+      const bill = sponsoredBy(
+        { bioguideId: "I000001", firstName: "Ida", lastName: "Indy", party: "ID", state: "CT" },
+        { bioguideId: "L000001", firstName: "Leo", lastName: "Lib", party: "L", state: "MI", district: 3 },
+      );
+
+      expect(extractSponsorDetailsFromRawBill(bill)).toEqual([
+        { bioguideId: "I000001", name: "Ida Indy", party: "I", state: "CT", district: null },
+        { bioguideId: "L000001", name: "Leo Lib", state: "MI", district: "03" },
+      ]);
+    });
+
+    it("leaves out a sponsor without a bioguide id or a name, and a state that is not a two-letter code", () => {
+      const bill = sponsoredBy(
+        null,
+        { firstName: "No", lastName: "Id" },
+        { bioguideId: "N000001" },
+        { bioguideId: "N000002", fullName: "Rep. [R-TX-1]" },
+        { bioguideId: "N000003", firstName: "Sam", lastName: "Stone", state: "Texas" },
+      );
+
+      expect(extractSponsorDetailsFromRawBill(bill)).toEqual([
+        { bioguideId: "N000003", name: "Sam Stone", district: null },
+      ]);
+      expect(extractSponsorDetailsFromRawBill(rawBill({}))).toEqual([]);
+      expect(extractSponsorDetailsFromRawBill(rawBill(undefined))).toEqual([]);
+    });
   });
 
   describe("isCosponsorListTruncated", () => {

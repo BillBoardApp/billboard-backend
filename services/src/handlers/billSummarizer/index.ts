@@ -24,7 +24,11 @@ import {
   reconcileProcessedBill,
   sourceTextHash,
 } from "../../shared/billSourceReconcile";
-import { extractCosponsorIdsFromRawBill, extractSponsorIdsFromRawBill } from "../../shared/billSponsors";
+import {
+  extractCosponsorIdsFromRawBill,
+  extractSponsorDetailsFromRawBill,
+  extractSponsorIdsFromRawBill,
+} from "../../shared/billSponsors";
 import { usableOfficialVotes } from "../../shared/congressVotes";
 import { processSqsRecords } from "../../shared/sqsBatch";
 import { mapWithConcurrency } from "../../shared/concurrency";
@@ -854,9 +858,10 @@ const buildProcessedBill = (
   const content = rawBill.content as Record<string, unknown>;
   const metadata = (rawBill as Partial<RawBill>)?.metadata;
 
-  // Sponsors from content.bill.bill.sponsors, cosponsors from content.cosponsors.cosponsors. billDiffer
-  // patches both with the same functions when only they change.
+  // Sponsors and their names and seats from content.bill.bill.sponsors, cosponsors from
+  // content.cosponsors.cosponsors. billDiffer patches them with the same functions when only they change.
   const sponsors = extractSponsorIdsFromRawBill(rawBill);
+  const sponsorDetails = extractSponsorDetailsFromRawBill(rawBill);
   const cosponsors = extractCosponsorIdsFromRawBill(rawBill);
 
   // Extract actions from content.actions.actions
@@ -896,6 +901,7 @@ const buildProcessedBill = (
     subCategories: analysis.subCategories,
     lifeAreas: analysis.lifeAreas,
     sponsors,
+    ...(sponsorDetails.length > 0 ? { sponsorDetails } : {}),
     cosponsors,
     actions,
     committees,

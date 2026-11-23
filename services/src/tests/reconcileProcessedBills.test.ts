@@ -217,7 +217,7 @@ describe("runReconcile", () => {
     expect(lines).toContain("summarize_missing (1): BILLS-119hr3");
     expect(lines).toContain("summarize_text_changed (1): BILLS-119hr4");
     expect(lines).toContain(
-      "patched fields: actions=1 committees=0 sponsors=0 cosponsors=0 billStatus=1 officialVotes=0",
+      "patched fields: actions=1 committees=0 sponsors=0 sponsorDetails=0 cosponsors=0 billStatus=1 officialVotes=0",
     );
     expect(lines).toContain("patches that add a passed or failed action or change billStatus (1)");
     expect(lines).toContain('  BILLS-119hr2 passed 2026-02-10 "Passed House"; billStatus New -> Passed');

@@ -239,6 +239,8 @@ describe("billSummarizer handler", () => {
       link: "https://www.congress.gov/bill/119th-congress/house-bill/BILLS-119hr1ih/text",
     });
     expect(stored["processed-bills/BILLS-119hr2.json"].lifeAreas).toEqual([]);
+    // The raw sponsor has no name, so the bill gets no sponsorDetails (rather than an empty list).
+    expect(doc).not.toHaveProperty("sponsorDetails");
 
     const request = JSON.parse(mockBedrockSend.mock.calls[0][0].input.body);
     // Haiku 4.5 keeps temperature 0 and gets no effort.
@@ -252,6 +254,35 @@ describe("billSummarizer handler", () => {
     });
     expect(promptBills(0)[0]).toHaveProperty("text", expect.stringContaining("Sec. 2. Grants"));
     expect(JSON.stringify(promptBills(0))).not.toContain("dublinCore");
+  });
+
+  it("stores the sponsor's name and seat beside the sponsor id (REL-46 5.3)", async () => {
+    const guid = "BILLS-119hr3ih";
+    const named = rawBill(guid);
+    (named.content as { bill: unknown }).bill = {
+      bill: {
+        sponsors: [
+          {
+            bioguideId: "S000001",
+            firstName: "Sam",
+            lastName: "Stone",
+            fullName: "Rep. Stone, Sam [I-VT-At Large]",
+            party: "I",
+            state: "VT",
+            district: 0,
+          },
+        ],
+      },
+    };
+    const stored = setupStore({ [guid]: named });
+    mockBedrockSend.mockResolvedValueOnce(bedrockResponse(billsJson(analysis(guid))));
+
+    await loadHandler()(sqsEvent([guid]));
+
+    expect(stored["processed-bills/BILLS-119hr3.json"]).toMatchObject({
+      sponsors: ["S000001"],
+      sponsorDetails: [{ bioguideId: "S000001", name: "Sam Stone", party: "I", state: "VT", district: "00" }],
+    });
   });
 
   it("logs one JSON line per Bedrock call with guids, stop reason, tokens and latency", async () => {
