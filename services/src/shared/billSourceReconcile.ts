@@ -308,6 +308,30 @@ export const changedVisibleFields = (before: ProcessedBillDocument, after: Proce
   return VISIBLE_FIELDS.filter((field) => stableStringify(a[field]) !== stableStringify(b[field]));
 };
 
+/**
+ * Fields processed bills gained after most bills were written, which a bill built from its latest raw version must
+ * still get: planReconcile reads such a bill as unchanged without deriving anything, so without this a bill whose raw
+ * bill never changes again would never get them. REL-46 5.3: sponsorDetails, so the apps can name a sponsor who has
+ * left the members list; backfill:sponsor-details sends those bills to BillDiffer.
+ */
+export const ADDED_FIELDS = ["sponsorDetails"] as const satisfies readonly VisibleField[];
+
+/**
+ * The processed bill with each ADDED_FIELDS field it lacks taken from the raw bill, nothing else changed, and the
+ * fields added; null when it lacks none that the raw bill gives.
+ */
+export const addedFieldsPatch = (
+  processed: ProcessedBillDocument,
+  rawBill: RawBill,
+): { next: ProcessedBillDocument; changedFields: VisibleField[] } | null => {
+  const derived = applyDerivedFields(processed, rawBill);
+  const changedFields = ADDED_FIELDS.filter((field) => processed[field] === undefined && derived[field] !== undefined);
+  if (changedFields.length === 0) return null;
+  const next: ProcessedBillDocument = { ...processed };
+  for (const field of changedFields) next[field] = derived[field];
+  return { next, changedFields };
+};
+
 /** applyDerivedFields and the fields it changed, or null when nothing clients can see changes. */
 export const derivedPatch = (
   processed: ProcessedBillDocument,
@@ -511,7 +535,7 @@ export type DecidedBy = "source-hash" | "legacy-anchor" | "assumed";
 
 export interface ReconcilePlan {
   kind: ReconcilePlanKind;
-  /** no_raw, no_meaningful_content, no_text, no_processed, same_raw_version, older_fetch, text_changed, no_visible_change, derived_fields_changed */
+  /** no_raw, no_meaningful_content, no_text, no_processed, same_raw_version, added_fields, older_fetch, text_changed, no_visible_change, derived_fields_changed */
   reason: string;
   /** The guid to send on: the raw bill's metadata.guid, else its guid, else the message guid; without a text-version suffix. */
   guid: string;
@@ -583,6 +607,23 @@ export const planReconcile = ({
         textHash,
         baseHash: source.textHash,
         decidedBy: "source-hash",
+      });
+    }
+    // Built from this raw version, so its derived fields are this version's, except a field added since (ADDED_FIELDS):
+    // that one alone is patched in, under the same source.
+    const added = addedFieldsPatch(processed.bill, rawBill);
+    if (added) {
+      return plan("patch", "added_fields", {
+        textHash,
+        baseHash: source.textHash,
+        decidedBy: "source-hash",
+        changedFields: added.changedFields,
+        next: { ...added.next, storedAt: now.toISOString() },
+        source: {
+          textHash: source.textHash,
+          rawVersion: raw.versionId,
+          ...(rawFetchedAt(rawBill) ? { fetchedAt: rawFetchedAt(rawBill) } : {}),
+        },
       });
     }
     return plan("unchanged", "same_raw_version", { textHash, baseHash: source.textHash, decidedBy: "source-hash" });

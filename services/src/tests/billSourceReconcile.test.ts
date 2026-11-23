@@ -765,6 +765,62 @@ describe("planReconcile", () => {
     });
   });
 
+  describe("a field added since the bill was written (ADDED_FIELDS, REL-46 5.3)", () => {
+    const named = raw({
+      bill: {
+        bill: {
+          sponsors: [
+            { bioguideId: "S000001", firstName: "Sam", lastName: "Stone", party: "R", state: "TX", district: 7 },
+          ],
+        },
+      },
+      actions: { actions: [PASSAGE, ACTION] },
+    });
+    const STONE: BillSponsorDetail = {
+      bioguideId: "S000001",
+      name: "Sam Stone",
+      party: "R",
+      state: "TX",
+      district: "07",
+    };
+
+    it("patches sponsorDetails alone into a bill built from the latest raw version, under the same source", () => {
+      const processed = processedDoc();
+      const result = plan(revision(processed, sourceFor(named, "rv2")), named);
+
+      expect(result).toMatchObject({
+        kind: "patch",
+        reason: "added_fields",
+        changedFields: ["sponsorDetails"],
+        source: { textHash: sourceTextHash(named), rawVersion: "rv2", fetchedAt: rawFetchedAt(named) },
+      });
+      // Only the field is added: the actions the raw bill has and the processed bill lacks wait for their own raw
+      // version, as before.
+      expect(result.next).toEqual({ ...processed, sponsorDetails: [STONE], storedAt: now.toISOString() });
+      expect(isActionablePlan(result.kind)).toBe(true);
+    });
+
+    it("stays unchanged once the bill has the field, and when the raw sponsors give no name", () => {
+      expect(plan(revision(processedDoc({ sponsorDetails: [STONE] }), sourceFor(named, "rv2")), named)).toMatchObject({
+        kind: "unchanged",
+        reason: "same_raw_version",
+      });
+      const unnamed = raw();
+      expect(plan(revision(processedDoc(), sourceFor(unnamed, "rv2")), unnamed)).toMatchObject({
+        kind: "unchanged",
+        reason: "same_raw_version",
+      });
+    });
+
+    it("leaves a text change waiting for its summary as it was", () => {
+      const changed = raw({ ...named.content, billXML: "<bill>new</bill>" });
+      expect(plan(revision(processedDoc(), sourceFor(raw(), "rv2")), changed)).toMatchObject({
+        kind: "summarize_text_changed",
+        reason: "text_changed",
+      });
+    });
+  });
+
   it("calls a raw bill from an older fetch stale", () => {
     const newer = raw({}, { fetchedAt: "2026-03-01T00:00:00.000Z" });
     const older = raw({ actions: { actions: [PASSAGE] } }, { fetchedAt: "2026-02-01T00:00:00.000Z" });
@@ -874,6 +930,24 @@ describe("reconcileProcessedBill", () => {
     const result = await reconcileProcessedBill(request(), { storage, processedDao });
     expect(result).toMatchObject({ outcome: "patched", attempts: 2 });
     expect(mockS3.current(PROCESSED_KEY)!.metadata).toMatchObject({ "source-raw-version": rawVersion });
+  });
+
+  it("writes sponsorDetails into a bill built from the latest raw version, keeping its source (REL-46 5.3)", async () => {
+    const named = raw({
+      bill: { bill: { sponsors: [{ bioguideId: "S000001", firstName: "Sam", lastName: "Stone", state: "TX" }] } },
+    });
+    const rawVersion = mockS3.put(RAW_KEY, named);
+    mockS3.put(PROCESSED_KEY, processedDoc(), sourceFor(named, rawVersion));
+
+    const result = await reconcileProcessedBill(request(), { storage, processedDao });
+
+    expect(result).toMatchObject({ outcome: "patched", plan: { reason: "added_fields" } });
+    expect(mockS3.json<ProcessedBillDocument>(PROCESSED_KEY)!.sponsorDetails).toEqual([
+      { bioguideId: "S000001", name: "Sam Stone", state: "TX", district: null },
+    ]);
+    expect(mockS3.current(PROCESSED_KEY)!.metadata).toMatchObject({ "source-raw-version": rawVersion });
+    // Applied once: the next message finds the field and changes nothing.
+    expect(await reconcileProcessedBill(request(), { storage, processedDao })).toMatchObject({ outcome: "unchanged" });
   });
 
   it("never sends from the summarizer's catch-up, and throws through a failed send", async () => {
