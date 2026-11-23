@@ -263,6 +263,37 @@ const MEMBER_MUST_ACCEPT = [
   ],
 ];
 
+// ── Sponsor details (REL-46 5.3) ──
+// The processed bill's sponsors' names and seats, so a client can name a sponsor who left the members manifest. Optional
+// (bills not rewritten since have none); a senator's district is null; a party congress.gov codes otherwise than D, R,
+// I or ID is left out, never sent as another letter.
+const withSponsorDetails = (details) => (bill) => ({ ...bill, sponsorDetails: details });
+const withoutSponsorDetails = ({ sponsorDetails, ...rest }) => rest;
+const SPONSOR = { bioguideId: "D000001", name: "Jane Doe", party: "D", state: "CA", district: "12" };
+const SPONSOR_MUST_ACCEPT = [
+  [PROCESSED_BILL, "a bill without sponsorDetails", withoutSponsorDetails],
+  [
+    PROCESSED_BILL,
+    "a senator sponsor (district null)",
+    withSponsorDetails([{ bioguideId: "S000001", name: "John Smith", party: "R", state: "NY", district: null }]),
+  ],
+  [
+    PROCESSED_BILL,
+    "a sponsor without a party, state or district",
+    withSponsorDetails([{ bioguideId: "D000001", name: "Jane Doe" }]),
+  ],
+  [PROCESSED_BILL, "an at-large sponsor", withSponsorDetails([{ ...SPONSOR, state: "WY", district: "00" }])],
+];
+const SPONSOR_MUST_REJECT = [
+  [PROCESSED_BILL, "a sponsor party other than D, R or I", withSponsorDetails([{ ...SPONSOR, party: "L" }])],
+  [PROCESSED_BILL, "a one-digit sponsor district", withSponsorDetails([{ ...SPONSOR, district: "7" }])],
+  [PROCESSED_BILL, "a sponsor state name", withSponsorDetails([{ ...SPONSOR, state: "Texas" }])],
+  [PROCESSED_BILL, "a sponsor without a name", withSponsorDetails([{ bioguideId: "D000001" }])],
+  [PROCESSED_BILL, "a sponsor with an empty name", withSponsorDetails([{ ...SPONSOR, name: "" }])],
+  [PROCESSED_BILL, "a sponsor with a name for an id", withSponsorDetails([{ ...SPONSOR, bioguideId: "Jane Doe" }])],
+  [PROCESSED_BILL, "a sponsor with an extra key", withSponsorDetails([{ ...SPONSOR, fullName: "Rep. Doe, Jane" }])],
+];
+
 // ── Stats, verification limit, label and App Attest cases (C2 4.2 and C3 4.4) ──
 // Sub-category label rename (LLM-10, decision 1B; names from question Q1): each legacy name and its new name. Both
 // spellings must validate in processed bills and manifest items until the legacy-name cleanup, which removes the legacy
@@ -710,6 +741,7 @@ const MUST_REJECT = [
   [SNAPSHOT_POINTER, "the manifest's bills inline", (pointer) => ({ ...pointer, bills: [] })],
   ...VETOED_MUST_REJECT,
   ...MEMBER_MUST_REJECT,
+  ...SPONSOR_MUST_REJECT,
   ...LABEL_MUST_REJECT,
   ...STATS_MUST_REJECT,
   ...VERIFICATION_MUST_REJECT,
@@ -807,6 +839,7 @@ const MUST_ACCEPT = [
   ],
   ...VETOED_MUST_ACCEPT,
   ...MEMBER_MUST_ACCEPT,
+  ...SPONSOR_MUST_ACCEPT,
   ...LABEL_MUST_ACCEPT,
   ...STATS_MUST_ACCEPT,
   ...VERIFICATION_MUST_ACCEPT,
