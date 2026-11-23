@@ -215,7 +215,9 @@ message) → `weeklyDigestWorker` → `UserWeeklyDigests` → `fetchLatestWeekly
 writes the brief: each bill item leads with Congress's latest action of the week and its date, member items name their
 bills, a decided bill the reader voted on is not in "Needs attention", and ceremonial resolutions never count as topic
 matches (RUNBOOK 11.4 has the rules). A vetoed bill's item adds `vetoed: true` and keeps its `billState`, and a
-companion group shows its vetoed member over a partner that only passed (project decision 2026-11-19). Snapshots expire
+companion group shows its vetoed member over a partner that only passed (project decision 2026-11-19). A followed
+member is named only by the name in the members table: one who is not there (who left Congress, REL-46 A4) gets no
+member item and no "Backed by" reason, never their bioguide id. Snapshots expire
 21 days after publication; only the current week's is read.
 
 **Companion bills (APPF-23).** Identical bills introduced in both chambers (H.R. 1285 and S. 570) are paired so the
