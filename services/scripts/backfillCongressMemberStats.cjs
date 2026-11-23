@@ -14,10 +14,14 @@ const HELP = args.includes("--help") || args.includes("-h");
 const DRY_RUN = args.includes("--dry-run");
 const ALLOW_SKIPPED = args.includes("--allow-skipped");
 const MAX_ITEMS = readNumberFlag("--max-items");
-// The counters count the 119th Congress only (COUNTED_CONGRESS in the handler), so this is fixed.
-const COUNTED_CONGRESS = "119";
+// Each Congress is counted apart, as the congressMemberStats handler counts it (src/shared/memberCounters.ts): the 119th
+// in billsSponsored, billsSupported, sponsoredBillGuids and supportedBillGuids, each later Congress in attributes named
+// with its number (billsSponsored120, ...). A run rebuilds one Congress's attributes and never touches another's.
+const LEGACY_CONGRESS = 119;
+const FIRST_NUMBERED_CONGRESS = 120;
 const CONGRESS = resolveCongress(args);
 const PREFIX = rawBillsPrefixFor(CONGRESS);
+const ATTRIBUTES = counterAttributesFor(CONGRESS);
 
 const s3 = new S3Client({ region: REGION });
 const ddb = new DynamoDBClient({ region: REGION });
@@ -42,16 +46,47 @@ function readNumberFlag(flagName) {
   return parsed;
 }
 
-function resolveCongress(argv) {
+// The Congress in session at a time: the Nth meets at 17:00Z on January 3 of 1789 + 2(N - 1). Same rule as
+// congressInSessionAt in src/shared/memberCounters.ts.
+function congressInSessionAt(atMs) {
+  const year = new Date(atMs).getUTCFullYear();
+  const startYear = year % 2 === 1 ? year : year - 1;
+  const congress = (startYear - 1789) / 2 + 1;
+  return atMs < Date.UTC(startYear, 0, 3, 17) ? congress - 1 : congress;
+}
+
+// --congress: the 119th (the default), or a later Congress that has started. Earlier Congresses are never counted.
+function resolveCongress(argv, nowMs = Date.now()) {
   const index = argv.indexOf("--congress");
-  if (index === -1) return COUNTED_CONGRESS;
+  if (index === -1) return String(LEGACY_CONGRESS);
   const value = (argv[index + 1] || "").trim();
-  if (value !== COUNTED_CONGRESS) {
+  const congress = /^\d+$/.test(value) ? Number(value) : NaN;
+  const inSession = congressInSessionAt(nowMs);
+  if (congress !== LEGACY_CONGRESS && !(congress >= FIRST_NUMBERED_CONGRESS && congress <= inSession)) {
     throw new Error(
-      `--congress ${value || "(missing)"} is not allowed: member counters count the ${COUNTED_CONGRESS}th Congress only`,
+      `--congress ${value || "(missing)"} is not allowed: member counters count the ${LEGACY_CONGRESS}th Congress and ` +
+        `each Congress from the ${FIRST_NUMBERED_CONGRESS}th that has started (the ${inSession}th is in session)`,
     );
   }
-  return value;
+  return String(congress);
+}
+
+// The counter attributes of one Congress; must match counterAttributesFor in src/shared/memberCounters.ts.
+function counterAttributesFor(congress) {
+  if (String(congress) === String(LEGACY_CONGRESS)) {
+    return {
+      sponsored: "billsSponsored",
+      supported: "billsSupported",
+      sponsoredGuids: "sponsoredBillGuids",
+      supportedGuids: "supportedBillGuids",
+    };
+  }
+  return {
+    sponsored: `billsSponsored${congress}`,
+    supported: `billsSupported${congress}`,
+    sponsoredGuids: `sponsoredBillGuids${congress}`,
+    supportedGuids: `supportedBillGuids${congress}`,
+  };
 }
 
 function rawBillsPrefixFor(congress) {
@@ -59,19 +94,24 @@ function rawBillsPrefixFor(congress) {
 }
 
 function printHelp() {
-  console.log("Rebuild Congress member sponsorship/support counts from raw-bills in S3.");
+  console.log("Rebuild one Congress's member sponsorship/support counts from raw-bills in S3.");
   console.log("");
-  console.log("Every member row is rewritten from scratch: billsSponsored/billsSupported and the");
-  console.log("sponsoredBillGuids/supportedBillGuids sets the congressMemberStats handler uses to");
-  console.log("count each bill once. Safe to re-run; run it while bill ingestion is quiet, because a");
-  console.log("bill counted by the handler between this script's read and its write is overwritten.");
+  console.log("Each member's counters for that Congress are rewritten from scratch: for the 119th,");
+  console.log("billsSponsored/billsSupported and the sponsoredBillGuids/supportedBillGuids sets the");
+  console.log("congressMemberStats handler uses to count each bill once; for the 120th, billsSponsored120,");
+  console.log("billsSupported120, sponsoredBillGuids120 and supportedBillGuids120 (and so on). Another");
+  console.log("Congress's attributes are never read or written. Members are the ones the raw bills name");
+  console.log("and the rows that already have this Congress's counters. Safe to re-run; run it while bill");
+  console.log("ingestion is quiet, because a bill counted by the handler between this script's read and");
+  console.log("its write is overwritten.");
   console.log("");
   console.log("Usage:");
   console.log("  node scripts/backfillCongressMemberStats.cjs --dry-run");
   console.log("  node scripts/backfillCongressMemberStats.cjs --congress 119 --max-items 500 --dry-run");
+  console.log("  node scripts/backfillCongressMemberStats.cjs --congress 120 --dry-run");
   console.log("");
   console.log("Flags:");
-  console.log("  --congress 119   The only Congress counted, and the default. Any other value is refused.");
+  console.log("  --congress <n>   119 (the default), or a Congress from the 120th that has started.");
   console.log("  --dry-run        Print the rows that would be written.");
   console.log("  --max-items N    Only scan N raw bills (requires --dry-run: a partial scan would undercount).");
   console.log("  --allow-skipped  Write even if some raw bills could not be read (they are left uncounted).");
@@ -189,16 +229,17 @@ function tallyRawBill(tallies, key, payload) {
   for (const bioguideId of cosponsors) addGuid(tallies.supported, bioguideId, guid);
 }
 
-// DynamoDB string sets cannot be empty, so an empty set is removed instead of written.
+// DynamoDB string sets cannot be empty, so an empty set is removed instead of written. The attribute names are plain
+// (no reserved words), so the expression names them directly.
 function buildMemberUpdateInput(
   bioguideId,
   sponsoredGuids,
   supportedGuids,
-  { tableName = TABLE_NAME, primaryKey = PRIMARY_KEY } = {},
+  { tableName = TABLE_NAME, primaryKey = PRIMARY_KEY, attributes = ATTRIBUTES } = {},
 ) {
   const sponsored = [...(sponsoredGuids ?? [])].sort();
   const supported = [...(supportedGuids ?? [])].sort();
-  const setClauses = ["billsSponsored = :sponsored", "billsSupported = :supported"];
+  const setClauses = [`${attributes.sponsored} = :sponsored`, `${attributes.supported} = :supported`];
   const removeClauses = [];
   const values = {
     ":sponsored": { N: String(sponsored.length) },
@@ -206,16 +247,16 @@ function buildMemberUpdateInput(
   };
 
   if (sponsored.length > 0) {
-    setClauses.push("sponsoredBillGuids = :sponsoredGuids");
+    setClauses.push(`${attributes.sponsoredGuids} = :sponsoredGuids`);
     values[":sponsoredGuids"] = { SS: sponsored };
   } else {
-    removeClauses.push("sponsoredBillGuids");
+    removeClauses.push(attributes.sponsoredGuids);
   }
   if (supported.length > 0) {
-    setClauses.push("supportedBillGuids = :supportedGuids");
+    setClauses.push(`${attributes.supportedGuids} = :supportedGuids`);
     values[":supportedGuids"] = { SS: supported };
   } else {
-    removeClauses.push("supportedBillGuids");
+    removeClauses.push(attributes.supportedGuids);
   }
 
   return {
@@ -228,6 +269,13 @@ function buildMemberUpdateInput(
   };
 }
 
+// The rows that already have this Congress's counters, so a member whose bills are gone is reset to 0. A row with
+// only another Congress's counters is left alone: writing zeros there would give a member new in the 120th Congress
+// 119th counts of 0, which the member APIs must not send (REL-46, D8).
+function rowHasCongressCounters(item, attributes = ATTRIBUTES) {
+  return item?.[attributes.sponsored] !== undefined || item?.[attributes.supported] !== undefined;
+}
+
 async function scanExistingMemberIds() {
   const ids = new Set();
   let startKey;
@@ -236,9 +284,11 @@ async function scanExistingMemberIds() {
     const response = await ddb.send(
       new ScanCommand({
         TableName: TABLE_NAME,
-        ProjectionExpression: "#pk",
+        ProjectionExpression: "#pk, #sponsored, #supported",
         ExpressionAttributeNames: {
           "#pk": PRIMARY_KEY,
+          "#sponsored": ATTRIBUTES.sponsored,
+          "#supported": ATTRIBUTES.supported,
         },
         ExclusiveStartKey: startKey,
       }),
@@ -246,7 +296,7 @@ async function scanExistingMemberIds() {
 
     for (const item of response.Items ?? []) {
       const bioguideId = item?.[PRIMARY_KEY]?.S;
-      if (typeof bioguideId === "string" && bioguideId.length > 0) {
+      if (typeof bioguideId === "string" && bioguideId.length > 0 && rowHasCongressCounters(item)) {
         ids.add(bioguideId);
       }
     }
@@ -273,8 +323,10 @@ async function main() {
   console.log("Starting congress member stats backfill");
   console.log(`Region: ${REGION}`);
   console.log(`Bucket: ${BUCKET_NAME}`);
+  console.log(`Congress: ${CONGRESS}`);
   console.log(`Prefix: ${PREFIX}`);
   console.log(`Stats table: ${TABLE_NAME}`);
+  console.log(`Attributes: ${Object.values(ATTRIBUTES).join(", ")}`);
   console.log(`Dry run: ${DRY_RUN ? "yes" : "no"}`);
   if (MAX_ITEMS) console.log(`Max items: ${MAX_ITEMS}`);
 
@@ -337,14 +389,18 @@ async function main() {
   console.log(`  Raw bills skipped: ${skipped}`);
   console.log(`  Members with sponsored counts: ${tallies.sponsored.size}`);
   console.log(`  Members with supported counts: ${tallies.supported.size}`);
-  console.log(`  Existing table members seen: ${existingMemberIds.size}`);
+  console.log(`  Existing rows with this Congress's counters: ${existingMemberIds.size}`);
   console.log(`  Member rows updated: ${updated}`);
 }
 
 module.exports = {
   CONGRESS,
   PREFIX,
+  ATTRIBUTES,
+  congressInSessionAt,
+  counterAttributesFor,
   resolveCongress,
+  rowHasCongressCounters,
   rawBillsPrefixFor,
   rawBillGuidFromKey,
   createTallies,
