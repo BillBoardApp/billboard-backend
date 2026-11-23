@@ -40,6 +40,8 @@ import {
  *   and the eyebrow's status word, which both apps strip. Its item adds `vetoed: true` for app 1.3's VETOED stamp, and
  *   the lines that would say "Passed this week" or "Failed this week" say what the veto news of the week was instead
  *   (vetoNews). A companion group shows its vetoed member over a partner that only passed (COMPANION_STATUS_RANK).
+ * - A member is named only by the name the members table stores (REL-46 A4). One who is not there, such as a member
+ *   who left Congress, gets no member item and no "Backed by" reason: the brief never shows a bioguide id as a name.
  * Nothing here reads other users' votes (INT-11): the only votes in the input are the user's own.
  */
 
@@ -575,6 +577,8 @@ function makeBillItem(
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .join(" ");
   const title = firstNonEmpty(bill.title, candidate.manifest.title, guid) ?? guid;
+  // REL-46 A4: the first followed member the members table names; one who left Congress is not there.
+  const namedMemberId = candidate.matchingMemberIds.find((memberId) => memberNameById.has(memberId));
   const vetoed = billIsVetoed(bill, candidate.manifest, status);
   const veto = vetoed ? vetoNews(bill, window) : null;
   const { summary, detail } = billItemText(bill, title, status, window, veto);
@@ -592,9 +596,8 @@ function makeBillItem(
       return "You voted on this";
     }
 
-    const memberId = candidate.matchingMemberIds[0];
-    if (memberId) {
-      return `Backed by ${memberNameById.get(memberId) ?? memberId}`;
+    if (namedMemberId) {
+      return `Backed by ${memberNameById.get(namedMemberId)}`;
     }
 
     if (candidate.topicMatches[0]) {
@@ -634,7 +637,7 @@ function makeBillItem(
     billState: digestState(status),
     ...(vetoed ? { vetoed: true as const } : {}),
     billGuid: guid,
-    primaryMemberBioguideId: candidate.matchingMemberIds[0],
+    primaryMemberBioguideId: namedMemberId,
   };
 }
 
@@ -642,6 +645,7 @@ function makeBillItem(
  * Each followed member with the bills they sponsor or cosponsor among `candidates` (all of the week's, S2),
  * busiest first. A companion group counts each of its bills for that bill's own sponsors. A member's bills are
  * ranked as the sections rank them, a group's moving member before its partner, so the first is the one named.
+ * A member the members table does not name (one who left Congress, REL-46 A4) gets no row.
  */
 function buildMemberActivityRows(candidates: Candidate[], memberNameById: Map<string, string>): MemberActivity[] {
   const grouped = new Map<string, MemberBill[]>();
@@ -649,6 +653,7 @@ function buildMemberActivityRows(candidates: Candidate[], memberNameById: Map<st
   for (const candidate of candidates) {
     for (const bill of candidate.companionMembers ?? [candidate]) {
       for (const memberId of bill.matchingMemberIds) {
+        if (!memberNameById.has(memberId)) continue;
         const existing = grouped.get(memberId) ?? [];
         existing.push({ candidate, manifest: bill.manifest, sponsored: bill.sponsoringMemberIds.includes(memberId) });
         grouped.set(memberId, existing);
@@ -670,7 +675,7 @@ function buildMemberActivityRows(candidates: Candidate[], memberNameById: Map<st
         seen.add(key);
         return true;
       });
-      return { id: memberId, name: memberNameById.get(memberId) ?? memberId, bills };
+      return { id: memberId, name: memberNameById.get(memberId)!, bills };
     })
     .filter((activity) => activity.bills.length > 0)
     .sort((left, right) => {

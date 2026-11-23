@@ -420,6 +420,58 @@ describe("member items name their bills, counted over the whole week (S2)", () =
   });
 });
 
+// REL-46 A4: from the first brief after Jan 3, 2027, members who left Congress are no longer in the members table. The
+// brief used to print their bioguide id as a name ("Backed by D000002"), which apps 1.1 and 1.2 show as is.
+describe("a followed member the members table does not name (one who left Congress)", () => {
+  const LEFT = "L000001";
+  const STAYED = "S000001";
+
+  it("gets no member item and no Backed by reason, and the brief never shows the id", async () => {
+    const digest = await build({
+      items: [entry("BILLS-119hr77", { sponsors: [LEFT], billStatus: "Passed" })],
+      followed: [LEFT],
+      memberNames: {},
+    });
+
+    expect(section(digest, "representatives")).toEqual([]);
+    expect(items(digest)).toEqual([
+      expect.objectContaining({ billGuid: "BILLS-119hr77", reason: "Matches your topic: Energy" }),
+    ]);
+    expect(items(digest)[0].primaryMemberBioguideId).toBeUndefined();
+    expect(shownTexts(digest!).join("\n")).not.toContain(LEFT);
+    expect(digest!.summary).not.toMatch(/member/i);
+  });
+
+  it("names the member who stayed, and counts only them in the headline", async () => {
+    const digest = await build({
+      items: [entry("BILLS-119hr77", { sponsors: [LEFT], cosponsors: [STAYED], subCategories: [] })],
+      followed: [LEFT, STAYED],
+      topics: [],
+      memberNames: { [STAYED]: "Rep. Jane Doe" },
+    });
+
+    expect(items(digest).find((item) => item.kind === "bill")).toEqual(
+      expect.objectContaining({ reason: "Backed by Rep. Jane Doe", primaryMemberBioguideId: STAYED }),
+    );
+    expect(section(digest, "representatives").map((item) => item.title)).toEqual(["Rep. Jane Doe"]);
+    expect(digest!.summary).toContain("one member you follow had a bill move");
+    expect(shownTexts(digest!).join("\n")).not.toContain(LEFT);
+  });
+
+  it("still lists a bill whose only reason was that member, with no reason line rather than an id", async () => {
+    const digest = await build({
+      items: [entry("BILLS-119hr77", { sponsors: [LEFT], subCategories: [], billStatus: "New" })],
+      followed: [LEFT],
+      topics: [],
+      memberNames: {},
+    });
+
+    expect(items(digest)).toEqual([expect.objectContaining({ billGuid: "BILLS-119hr77", reason: undefined })]);
+    expect(section(digest, "representatives")).toEqual([]);
+    expect(shownTexts(digest!).join("\n")).not.toContain(LEFT);
+  });
+});
+
 describe("the headline and labels (S2)", () => {
   const MEMBER = "D000001";
 
