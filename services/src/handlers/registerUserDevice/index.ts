@@ -25,6 +25,9 @@ const NOTIFY_UPDATED_ATTRIBUTE = process.env.NOTIFY_UPDATED_ATTRIBUTE ?? "notify
 const NOTIFY_ALERT_ATTRIBUTE = process.env.NOTIFY_ALERT_ATTRIBUTE ?? "notifyAlert";
 const NOTIFY_PASSED_ATTRIBUTE = process.env.NOTIFY_PASSED_ATTRIBUTE ?? "notifyPassed";
 const NOTIFY_FAILED_ATTRIBUTE = process.env.NOTIFY_FAILED_ATTRIBUTE ?? "notifyFailed";
+// UX-28: the Weekly Brief push flag has no default (deviceNotificationSettings); a stored value is carried over and an
+// absent one stays absent, so a new token neither opts the device out nor in.
+const NOTIFY_WEEKLY_BRIEF_ATTRIBUTE = process.env.NOTIFY_WEEKLY_BRIEF_ATTRIBUTE ?? "notifyWeeklyBrief";
 
 const db = new DynamoDBClient({});
 const sns = new SNSClient({});
@@ -195,6 +198,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const notifyAlert = attrToBool(existing.Item?.[NOTIFY_ALERT_ATTRIBUTE]) ?? true;
     const notifyPassed = attrToBool(existing.Item?.[NOTIFY_PASSED_ATTRIBUTE]) ?? true;
     const notifyFailed = attrToBool(existing.Item?.[NOTIFY_FAILED_ATTRIBUTE]) ?? true;
+    const notifyWeeklyBrief = attrToBool(existing.Item?.[NOTIFY_WEEKLY_BRIEF_ATTRIBUTE]);
 
     if (isAlreadyRegistered(existing.Item, pushToken)) {
       return { statusCode: 200, body: JSON.stringify({ message: "Device registered", endpointArn }) };
@@ -250,6 +254,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
           [NOTIFY_ALERT_ATTRIBUTE]: { BOOL: notifyAlert },
           [NOTIFY_PASSED_ATTRIBUTE]: { BOOL: notifyPassed },
           [NOTIFY_FAILED_ATTRIBUTE]: { BOOL: notifyFailed },
+          ...(notifyWeeklyBrief === null ? {} : { [NOTIFY_WEEKLY_BRIEF_ATTRIBUTE]: { BOOL: notifyWeeklyBrief } }),
           updatedAt: { S: new Date().toISOString() },
         },
       }),

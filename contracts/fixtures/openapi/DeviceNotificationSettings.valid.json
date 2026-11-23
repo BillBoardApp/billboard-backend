@@ -1,0 +1,10 @@
+{
+  "device_id": "5B1F0C7E-3A2D-4C8B-9E61-2F4A7D0B8C13",
+  "notifications_enabled": true,
+  "notify_new": true,
+  "notify_updated": false,
+  "notify_alert": true,
+  "notify_passed": true,
+  "notify_failed": true,
+  "notify_weekly_brief": true
+}

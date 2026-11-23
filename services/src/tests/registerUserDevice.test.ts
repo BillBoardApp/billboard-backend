@@ -225,6 +225,33 @@ describe("registerUserDevice handler", () => {
     expect(putInput.Item.notifyAlert.BOOL).toBe(false);
     expect(putInput.Item.notifyPassed.BOOL).toBe(true);
     expect(putInput.Item.notifyFailed.BOOL).toBe(false);
+    // A row without the Weekly Brief flag (every 1.1 and 1.2 device) stays without it.
+    expect(putInput.Item).not.toHaveProperty("notifyWeeklyBrief");
+  });
+
+  // UX-28: PutItem replaces the whole row, so a new token would silently opt the device out of the Sunday push (or,
+  // written as a default, opt a 1.2 device in) unless the stored flag is carried over exactly.
+  it.each([true, false])("carries a stored Weekly Brief flag (%s) over to the new token", async (stored) => {
+    mockDynamoSend.mockResolvedValueOnce({ Item: { adultStatus: { S: "attested_adult" } } }); // eligibility
+    mockDynamoSend.mockResolvedValueOnce({
+      Item: {
+        user_id: { S: "user123" },
+        device_id: { S: "device123" },
+        pushToken: { S: "b".repeat(64) },
+        endpointArn: { S: ENDPOINT_ARN },
+        notificationsEnabled: { BOOL: true },
+        notifyWeeklyBrief: { BOOL: stored },
+      },
+    }); // GetItem
+    mockDynamoSend.mockResolvedValueOnce({ Items: [] }); // Query conflicts by push token
+    mockSnsSend.mockResolvedValueOnce({}); // SetEndpointAttributes
+    mockDynamoSend.mockResolvedValueOnce({}); // PutItem
+
+    const result = await handler(registerEvent());
+
+    expect(result.statusCode).toBe(200);
+    expect(putItem().pushToken.S).toBe(PUSH_TOKEN);
+    expect(putItem().notifyWeeklyBrief).toEqual({ BOOL: stored });
   });
 
   it("returns early when the device is already registered with the same token", async () => {

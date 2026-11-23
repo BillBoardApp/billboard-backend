@@ -13,6 +13,7 @@ interface UserDeviceDaoConfig {
   notifyAlertAttribute?: string;
   notifyPassedAttribute?: string;
   notifyFailedAttribute?: string;
+  notifyWeeklyBriefAttribute?: string;
   userIdAttributeType?: "S" | "N";
 }
 
@@ -27,6 +28,8 @@ export interface UserDeviceRecord {
   notifyAlert?: boolean;
   notifyPassed?: boolean;
   notifyFailed?: boolean;
+  /** UX-28: the Sunday Weekly Brief push. Undefined when the row has never stored it (every 1.1 and 1.2 device). */
+  notifyWeeklyBrief?: boolean;
 }
 
 export class UserDeviceDao {
@@ -68,6 +71,7 @@ export class UserDeviceDao {
     const notifyAlertAttr = this.config.notifyAlertAttribute ?? "notifyAlert";
     const notifyPassedAttr = this.config.notifyPassedAttribute ?? "notifyPassed";
     const notifyFailedAttr = this.config.notifyFailedAttribute ?? "notifyFailed";
+    const notifyWeeklyBriefAttr = this.config.notifyWeeklyBriefAttribute ?? "notifyWeeklyBrief";
 
     const seenDevices = new Set<string>();
     const devices: UserDeviceRecord[] = [];
@@ -91,6 +95,7 @@ export class UserDeviceDao {
       const notifyAlert = this.attributeValueToBool(item[notifyAlertAttr]) ?? undefined;
       const notifyPassed = this.attributeValueToBool(item[notifyPassedAttr]) ?? undefined;
       const notifyFailed = this.attributeValueToBool(item[notifyFailedAttr]) ?? undefined;
+      const notifyWeeklyBrief = this.attributeValueToBool(item[notifyWeeklyBriefAttr]) ?? undefined;
 
       devices.push({
         deviceId,
@@ -103,6 +108,7 @@ export class UserDeviceDao {
         notifyAlert,
         notifyPassed,
         notifyFailed,
+        notifyWeeklyBrief,
       });
       seenDevices.add(deviceId);
     }

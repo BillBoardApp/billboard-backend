@@ -405,6 +405,28 @@ const CIVIC_PROFILE_MUST_REJECT = [
   [USER_CIVIC_PROFILE, "a body without isReady", without("isReady")],
 ];
 
+// GET and PUT /device-notification-settings (UX-28): notify_weekly_brief is left out until an app stores it, so a body
+// without it (every 1.1 and 1.2 device, and every server before UX-28) stays valid; it is a boolean when present.
+const DEVICE_SETTINGS = component("DeviceNotificationSettings");
+const DEVICE_SETTINGS_UPDATE = component("DeviceNotificationSettingsUpdate");
+const DEVICE_SETTINGS_MUST_ACCEPT = [
+  [DEVICE_SETTINGS, "settings without notify_weekly_brief (never stored)", without("notify_weekly_brief")],
+  [DEVICE_SETTINGS, "notify_weekly_brief false", (settings) => ({ ...settings, notify_weekly_brief: false })],
+  [
+    DEVICE_SETTINGS_UPDATE,
+    "an update carrying only the Weekly Brief flag (1.3)",
+    { device_id: "5B1F0C7E-3A2D-4C8B-9E61-2F4A7D0B8C13", notify_weekly_brief: false },
+  ],
+  [DEVICE_SETTINGS_UPDATE, "an update without the Weekly Brief flag (1.1 and 1.2)", { notify_new: false }],
+];
+const DEVICE_SETTINGS_MUST_REJECT = [
+  [DEVICE_SETTINGS, 'notify_weekly_brief "true"', (settings) => ({ ...settings, notify_weekly_brief: "true" })],
+  [DEVICE_SETTINGS, "a null notify_weekly_brief", (settings) => ({ ...settings, notify_weekly_brief: null })],
+  [DEVICE_SETTINGS, "an undeclared field", (settings) => ({ ...settings, notify_weekly_digest: true })],
+  [DEVICE_SETTINGS, "settings without notify_failed", without("notify_failed")],
+  [DEVICE_SETTINGS_UPDATE, "a numeric notify_weekly_brief", { notify_weekly_brief: 1 }],
+];
+
 // App Attest (C3 4.3-4.4): bodies of the two routes, the header grammar and its clientData, the version header, the
 // pre-sign-up ClientMetadata, and Retry-After.
 const MARKER = component("AppAttestMarker");
@@ -587,6 +609,7 @@ const MUST_REJECT = [
   ...STATS_MUST_REJECT,
   ...VERIFICATION_MUST_REJECT,
   ...CIVIC_PROFILE_MUST_REJECT,
+  ...DEVICE_SETTINGS_MUST_REJECT,
   ...APP_ATTEST_MUST_REJECT,
 ];
 
@@ -682,6 +705,7 @@ const MUST_ACCEPT = [
   ...STATS_MUST_ACCEPT,
   ...VERIFICATION_MUST_ACCEPT,
   ...CIVIC_PROFILE_MUST_ACCEPT,
+  ...DEVICE_SETTINGS_MUST_ACCEPT,
   ...APP_ATTEST_MUST_ACCEPT,
 ];
 
