@@ -186,14 +186,43 @@ const VETOED_MUST_REJECT = [false, "true", 1, null].flatMap((value) => [
   [WEEKLY_DIGEST, `vetoed ${JSON.stringify(value)} on a brief item`, withDigestItems(withVetoed(value))],
 ]);
 
-// ── Member facts (REL-52) ──
-// A member with no stats row (REL-46) or whose stats could not be read has none of the three counts (no 0 for a member
-// with no stats row or for an unknown count; a row with zeros keeps them), and a senator's per-Congress entries are
-// merged into terms that span several Congresses, the current one without endYear.
+// ── Member facts (REL-52, REL-46) ──
+// A member with no 119th counts (REL-46) or whose stats could not be read has none of the three 119th counts (no 0 for
+// a member with no 119th counts or for an unknown count; a row with zeros keeps them), and a senator's per-Congress
+// entries are merged into terms that span several Congresses, the current one without endYear. currentCongressCounts
+// (each Congress counted apart, REL-46) names its Congress, the 119th or later, and has both counts and nothing else; a
+// member new in the 120th Congress has it without the 119th counts.
 const withoutStatsCounts = (member) => {
-  const { currentCongressBillsSupportedCount, trackedSponsoredCount, trackedSupportedCount, ...rest } = member;
+  const {
+    currentCongressBillsSupportedCount,
+    trackedSponsoredCount,
+    trackedSupportedCount,
+    currentCongressCounts,
+    ...rest
+  } = member;
   return rest;
 };
+const newIn120th = (member) => ({
+  ...withoutStatsCounts(member),
+  currentCongressCounts: { congress: 120, sponsored: 0, supported: 3 },
+});
+const withCongressCounts = (counts) => (member) => ({ ...member, currentCongressCounts: counts });
+const withManifestMembers = (edit) => (manifest) => ({ ...manifest, members: manifest.members.map(edit) });
+const BAD_CONGRESS_COUNTS = [
+  ["a Congress before the 119th", { congress: 118, sponsored: 1, supported: 2 }],
+  ["no supported count", { congress: 120, sponsored: 1 }],
+  ["a negative count", { congress: 120, sponsored: -1, supported: 2 }],
+  ["an extra key", { congress: 120, sponsored: 1, supported: 2, cosponsored: 2 }],
+  ["a Congress as a string", { congress: "120", sponsored: 1, supported: 2 }],
+];
+const MEMBER_MUST_REJECT = BAD_CONGRESS_COUNTS.flatMap(([label, counts]) => [
+  [PROCESSED_MEMBER, `currentCongressCounts with ${label}`, withCongressCounts(counts)],
+  [
+    MEMBERS_MANIFEST,
+    `a manifest member's currentCongressCounts with ${label}`,
+    withManifestMembers(withCongressCounts(counts)),
+  ],
+]);
 const senateTerm = (congress, startYear, endYear) => ({
   chamber: "Senate",
   memberType: "Senator",
@@ -225,6 +254,12 @@ const MEMBER_MUST_ACCEPT = [
     MEMBERS_MANIFEST,
     "a manifest member without the stats counts (no stats row, or the stats read failed)",
     (manifest) => ({ ...manifest, members: manifest.members.map(withoutStatsCounts) }),
+  ],
+  [PROCESSED_MEMBER, "a member new in the 120th Congress: currentCongressCounts without the 119th counts", newIn120th],
+  [
+    MEMBERS_MANIFEST,
+    "manifest members new in the 120th Congress: currentCongressCounts without the 119th counts",
+    withManifestMembers(newIn120th),
   ],
 ];
 
@@ -674,6 +709,7 @@ const MUST_REJECT = [
   [SNAPSHOT_POINTER, "a negative count", (pointer) => ({ ...pointer, count: -1 })],
   [SNAPSHOT_POINTER, "the manifest's bills inline", (pointer) => ({ ...pointer, bills: [] })],
   ...VETOED_MUST_REJECT,
+  ...MEMBER_MUST_REJECT,
   ...LABEL_MUST_REJECT,
   ...STATS_MUST_REJECT,
   ...VERIFICATION_MUST_REJECT,

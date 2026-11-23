@@ -146,6 +146,25 @@ is a flag beside the status instead, optional and additive; clients that predate
 - Generated: `vetoed?: true` in TypeScript and `vetoed: Bool?` in Swift (a boolean `const` is a `Bool`; only a string
   `const` becomes a `String` enum).
 
+## Member counts per Congress (REL-46)
+
+Each Congress's bills are counted apart in BillBoard's member stats, so every count can be labelled with the Congress it
+covers. All of it is optional and additive; builds 1.1 and 1.2 keep decoding both member responses.
+
+- `trackedSponsoredCount`, `trackedSupportedCount` and `currentCongressBillsSupportedCount` stay the 119th Congress's,
+  which 1.1 and 1.2 label "119th Congress". They are absent when the member has no 119th counts: a member new in the
+  120th Congress has a stats row once a 120th bill counts, but still none of the three (project decision D8).
+- `currentCongressCounts` (`$defs/congressCounts` of `congress-member-manifest.v1`, title `CongressMemberCongressCountsV1`,
+  also on `processed-congress-member.v1` by `$ref`): `congress` (an integer, at least 119), `sponsored` and `supported`
+  (at least 0), all required, nothing else. It is the newest Congress the member has counts in, else the 119th, and is
+  absent when the member has none or the stats could not be read. Label the counts with `congress`, never with a
+  Congress computed from a date (decision D78). A returning member shows the 119th until a 120th bill counts (D79).
+- `check-contracts.mjs` accepts each member shape without the field and a member new in the 120th Congress (the field
+  without the 119th counts), and rejects a Congress before the 119th or as a string, a missing count, a negative count
+  and an extra key.
+- Generated: `CongressMemberCongressCountsV1` and `currentCongressCounts?` on both member types in TypeScript;
+  `UserAPIContractsV1.CongressMemberCongressCounts` and `currentCongressCounts` in Swift.
+
 ## Stats, verification limits and labels (C2)
 
 All additive; builds 1.0 and R1 keep decoding every response.
