@@ -6,7 +6,11 @@ import { extractActionsFromRawBill } from "./billActions";
 import { extractCommitteesFromRawBill } from "./billCommittees";
 import { plainBillGuid } from "./billCompanions";
 import { deriveBillStatusFromActions } from "./billOutcomes";
-import { extractCosponsorIdsFromRawBill, extractSponsorIdsFromRawBill } from "./billSponsors";
+import {
+  extractCosponsorIdsFromRawBill,
+  extractSponsorDetailsFromRawBill,
+  extractSponsorIdsFromRawBill,
+} from "./billSponsors";
 import { computeCompleteness, usableOfficialVotes, type VoteChamber } from "./congressVotes";
 import { logger } from "./logger";
 import { emitEmbeddedMetric } from "./metrics";
@@ -194,7 +198,8 @@ export const mergeOfficialVotes = (
 /**
  * The processed bill with every field billDiffer maintains taken from the raw bill. A field is
  * replaced only when its raw container is present: actions (content.actions), committees
- * (content.committees), sponsors (content.bill.bill), cosponsors (content.cosponsors). Votes: usable
+ * (content.committees), sponsors and sponsorDetails (content.bill.bill; sponsorDetails is left out
+ * when no sponsor has a name), cosponsors (content.cosponsors). Votes: usable
  * raw votes are merged (mergeOfficialVotes); none, with the actions container present, removes them
  * (the REL-31 repair's delete case); otherwise the processed votes stay. A missing, "", "New",
  * "Passed", "Failed" or "Finalized" billStatus is derived from the resulting actions (REL-37, REL-44).
@@ -206,7 +211,12 @@ export const applyDerivedFields = (processed: ProcessedBillDocument, rawBill: Ra
 
   if (actionsPresent) next.actions = extractActionsFromRawBill(rawBill);
   if (asRecord(content.committees)) next.committees = extractCommitteesFromRawBill(rawBill);
-  if (asRecord(asRecord(content.bill)?.bill)) next.sponsors = extractSponsorIdsFromRawBill(rawBill);
+  if (asRecord(asRecord(content.bill)?.bill)) {
+    next.sponsors = extractSponsorIdsFromRawBill(rawBill);
+    const sponsorDetails = extractSponsorDetailsFromRawBill(rawBill);
+    if (sponsorDetails.length > 0) next.sponsorDetails = sponsorDetails;
+    else delete next.sponsorDetails;
+  }
   if (asRecord(content.cosponsors)) next.cosponsors = extractCosponsorIdsFromRawBill(rawBill);
 
   const rawVotes = usableOfficialVotes(content.officialVotes);
@@ -227,6 +237,7 @@ export const VISIBLE_FIELDS = [
   "actions",
   "committees",
   "sponsors",
+  "sponsorDetails",
   "cosponsors",
   "billStatus",
   "officialVotes",
@@ -277,6 +288,7 @@ const visibleParts = (doc: ProcessedBillDocument): Record<VisibleField, unknown>
   actions: doc.actions ?? [],
   committees: doc.committees ?? [],
   sponsors: doc.sponsors ?? [],
+  sponsorDetails: doc.sponsorDetails ?? [],
   cosponsors: doc.cosponsors ?? [],
   billStatus: doc.billStatus ?? "",
   officialVotes: visibleVotes(doc.officialVotes),
@@ -284,7 +296,7 @@ const visibleParts = (doc: ProcessedBillDocument): Record<VisibleField, unknown>
 
 /**
  * A stable string of what clients can see of the maintained fields: actions, committees, sponsors,
- * cosponsors, billStatus and officialVotes (without lastSyncedAt and completeness, members sorted by
+ * sponsorDetails, cosponsors, billStatus and officialVotes (without lastSyncedAt and completeness, members sorted by
  * bioguideId). Object keys are sorted; arrays of actions, committees and ids keep their order.
  */
 export const visibleKey = (doc: ProcessedBillDocument): string => stableStringify(visibleParts(doc));

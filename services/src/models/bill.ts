@@ -1,5 +1,6 @@
 import { BillCategoryReference } from "./categories";
 import type {
+  BillSponsorDetailV1,
   BillsManifestItemV1,
   BillsManifestV1,
   BillStatusV1,
@@ -126,6 +127,11 @@ export interface ProcessedBillDocument extends BillDocument {
   subCategories: string[];
   lifeAreas: string[];
   sponsors: string[];
+  /**
+   * The sponsors' names and seats from the raw bill (shared/billSponsors.ts extractSponsorDetailsFromRawBill), so the
+   * apps can name a sponsor who has left the members list (REL-46 5.3). Absent when the raw bill gives no name.
+   */
+  sponsorDetails?: BillSponsorDetail[];
   cosponsors: string[];
   isPriority?: boolean;
   priorityRank?: number;
@@ -149,6 +155,9 @@ export interface ProcessedBillDocument extends BillDocument {
    */
   vetoed?: true;
 }
+
+/** A sponsor's name and seat as the processed bill stores them (REL-46 5.3). */
+export type BillSponsorDetail = BillSponsorDetailV1;
 
 /** Bills grouped as one because Congress.gov lists them as identical (APPF-23). */
 export type CompanionGroup = CompanionGroupV1;
