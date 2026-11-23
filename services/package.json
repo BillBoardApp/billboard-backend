@@ -29,6 +29,7 @@
         "eval:compare-priority": "node -r ts-node/register/transpile-only scripts/comparePriorityModels.ts",
         "probe:bedrock": "node -r ts-node/register/transpile-only scripts/probeBedrockModel.ts",
         "replay:member-votes": "node -r ts-node/register/transpile-only scripts/replayCongressVoteProfiles.ts",
+        "backfill:member-vote-record": "node -r ts-node/register/transpile-only scripts/backfillCongressMemberVoteRecord.ts",
         "relabel:sub-categories": "node -r ts-node/register/transpile-only scripts/relabelSubCategories.ts",
         "relabel:ceremonial-rows": "node -r ts-node/register/transpile-only scripts/relabelCeremonialRows.ts",
         "update:disposable-domains": "node -r ts-node/register/transpile-only scripts/updateDisposableDomains.ts",
