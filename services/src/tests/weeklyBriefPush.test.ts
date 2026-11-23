@@ -376,6 +376,17 @@ describe("who gets it", () => {
     expect(publishedTo()).toEqual([arn("ny", "takes")]);
   });
 
+  it("sends once to one phone that two device rows name", async () => {
+    addUser("ny", { state: "NY", devices: [{ id: "d1" }, { id: "d2" }] });
+    const [first, second] = mockWorld.devices.get("ny")!;
+    second.endpointArn = first.endpointArn;
+
+    const result = await runAt(RUN_1030_ET);
+
+    expect(publishedTo()).toEqual([arn("ny", "d1")]);
+    expect(result.devices.sent).toBe(1);
+  });
+
   it("leaves a user whose devices never stored the flag (1.1 and 1.2) unclaimed and unsent", async () => {
     addUser("old", { state: "NY", devices: [{ brief: null }] });
 

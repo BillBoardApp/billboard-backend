@@ -155,15 +155,20 @@ async function listRecipients(): Promise<{ scanned: number; recipients: Recipien
   return { scanned, recipients };
 }
 
-/** The devices that take the Sunday push: an endpoint, notifications not off, and the Weekly Brief flag exactly true. */
-export const devicesTakingTheBrief = (devices: readonly UserDeviceRecord[]): UserDeviceRecord[] =>
-  devices.filter(
-    (device) =>
-      typeof device.endpointArn === "string" &&
-      device.endpointArn.length > 0 &&
-      device.notificationsEnabled !== false &&
-      device.notifyWeeklyBrief === true,
-  );
+/**
+ * The devices that take the Sunday push: an endpoint, notifications not off, and the Weekly Brief flag exactly true.
+ * Two rows that name one endpoint (one phone) get it once.
+ */
+export const devicesTakingTheBrief = (devices: readonly UserDeviceRecord[]): UserDeviceRecord[] => {
+  const endpoints = new Set<string>();
+  return devices.filter((device) => {
+    const endpoint = device.endpointArn;
+    if (!endpoint || device.notificationsEnabled === false || device.notifyWeeklyBrief !== true) return false;
+    if (endpoints.has(endpoint)) return false;
+    endpoints.add(endpoint);
+    return true;
+  });
+};
 
 /** userNotifier's message shape: the same APNs payload for APNS and APNS_SANDBOX, the title as the default. */
 export const weeklyBriefPushMessage = (copy: { title: string; body: string }, digestId: string): string => {
