@@ -187,7 +187,8 @@ describe("generateWeeklyDigests handler", () => {
       expect(mockSqsSend).not.toHaveBeenCalled();
 
       // The fixture user watches H.R. 21, follows its sponsor, and voted on H.R. 22, which passed (S2: so it is
-      // under "Moved", not "Needs attention"). Every text the apps show, as stored.
+      // under "Moved", not "Needs attention"). Every text the apps show, as stored. H.R. 22 is also under Your bills
+      // this week (UX-41 concept 4), which 1.3 shows instead, while 1.1 and 1.2 keep it under Moved.
       const storedDigest = JSON.parse(putInput.Item.payload.S);
       expect(storedDigest).toEqual({
         id: "2026-03-22T14:00:00.000Z",
@@ -272,6 +273,20 @@ describe("generateWeeklyDigests handler", () => {
                 primaryMemberBioguideId: "A000360",
               },
             ],
+          },
+        ],
+        yourBills: [
+          {
+            id: "bill|BILLS-119hr22ih",
+            kind: "bill",
+            title: "Tracked Passed Bill",
+            eyebrow: "Passed Mar 19",
+            summary: "Mar 19: Passed the House.",
+            detail: "A tracked-area bill passed.",
+            reason: "You voted on this",
+            accent: "movement",
+            billState: "passed",
+            billGuid: "BILLS-119hr22ih",
           },
         ],
       });

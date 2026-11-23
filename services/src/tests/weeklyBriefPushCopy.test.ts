@@ -144,6 +144,18 @@ describe("the push body (the brief's bills, in page order)", () => {
     ]);
   });
 
+  it("starts with Your bills this week, as app 1.3's page does, and names a bill listed there and in a section once", () => {
+    const voted = bill("Farm Credit Act of 2026", "BILLS-119hr5");
+    const body = weeklyBriefPushBody({
+      ...digest([
+        { kind: "needs_attention", items: [bill("Rural Broadband Access Act", "BILLS-119hr1")] },
+        { kind: "moved_this_week", items: [voted, bill("Clean Water Act", "BILLS-119s3")] },
+      ]),
+      yourBills: [{ ...voted, reason: "You voted on this" }],
+    });
+    expect(body).toBe("Includes Farm Credit Act of 2026, Rural Broadband Access Act, and 1 more.");
+  });
+
   it("says the brief's own headline when it has no bill item (only members you follow)", () => {
     const body = weeklyBriefPushBody(
       digest(

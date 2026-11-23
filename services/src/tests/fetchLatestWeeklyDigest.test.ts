@@ -151,6 +151,45 @@ describe("fetchLatestWeeklyDigest handler", () => {
     });
   });
 
+  // UX-41 concept 4: the snapshot is served as stored, so app 1.3 gets Your bills this week, and 1.1 and 1.2 ignore it.
+  test("serves Your bills this week as stored, and never the push claim", async () => {
+    jest.setSystemTime(new Date("2026-03-22T14:00:00.000Z"));
+    const yourBills = [
+      {
+        id: "bill|BILLS-119hr22ih",
+        kind: "bill",
+        title: "Tracked Passed Bill",
+        summary: "Mar 19: Passed the House.",
+        reason: "You voted on this",
+        accent: "movement",
+        billState: "passed",
+        billGuid: "BILLS-119hr22ih",
+      },
+    ];
+    const storedDigest = {
+      id: "2026-03-22T14:00:00.000Z",
+      title: "Your Week in Congress | Mar 15-21, 2026",
+      summary: "One bill moved this week.",
+      weekStart: "2026-03-15T04:00:00.000Z",
+      weekEnd: "2026-03-21T04:00:00.000Z",
+      publishedAt: "2026-03-22T14:00:00.000Z",
+      isRead: false,
+      stats: [],
+      sections: [],
+      yourBills,
+    };
+    mockDynamoSend.mockResolvedValue({
+      Item: { payload: { S: JSON.stringify(storedDigest) }, pushClaimedAt: { S: "2026-03-22T15:30:00.000Z" } },
+    });
+
+    const { handler } = require("../handlers/fetchLatestWeeklyDigest");
+    const response = await handler(event);
+
+    expect(JSON.parse(response.body)).toEqual(storedDigest);
+    expect(response.body).not.toContain("pushClaimedAt");
+    expect(mockDynamoSend.mock.calls[0][0].input.ProjectionExpression).toBe("payload");
+  });
+
   test("uses the previous release window before Sunday 10am Eastern", async () => {
     jest.setSystemTime(new Date("2026-03-22T13:59:00.000Z"));
     mockDynamoSend.mockResolvedValue({});

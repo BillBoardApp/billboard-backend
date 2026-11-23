@@ -503,9 +503,16 @@ describe("INT-11 Q6: the Weekly Brief builder writes no results, even when its i
       ].sort(),
     );
 
+    // Your bills this week (UX-41 concept 4) lists the voted bills that moved, with the fixed reason and never the vote.
+    expect(digest.yourBills.map((item: DigestItem) => [item.billGuid, item.reason]).sort()).toEqual(
+      votedOn.map((guid) => [guid, "You voted on this"]).sort(),
+    );
+    expect(JSON.stringify(digest.yourBills)).not.toMatch(/\b(yea|nay|abstain)\b/i);
+
     // Everything else, the reasons above aside: no seeded count or percentage, no results key or wording.
     const withoutOwnVoteReasons = {
       ...digest,
+      yourBills: digest.yourBills.map((item: DigestItem) => ({ ...item, reason: "" })),
       sections: digest.sections.map((section: Digest["sections"][number]) => ({
         ...section,
         items: section.items.map((item) => (ownVoteReasons.has(item.reason ?? "") ? { ...item, reason: "" } : item)),
