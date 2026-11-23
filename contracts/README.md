@@ -233,7 +233,9 @@ and `cursor`) it serves only the member's votes on those bills. New and additive
 Facts the apps rank and label a bill by before they open it, on `BillsManifest.bills[]` (inline, windowed and
 snapshot alike), optional and additive; clients that predate them ignore them. CreateBillsManifest derives each from
 the processed bill on every row write and writes it only when the document gives it. None of them is part of what
-dates a row, so a rows-only replay adds them without moving a row.
+dates a row, so a rows-only replay adds them to a row that reflects its document without moving it. A row whose
+document has news it never got moves, as at any write, and a row at a key newer than its document (unless written from
+it) is skipped and gets none.
 
 - `isCommemorative`: `{"type": "boolean", "const": true}`, like `vetoed`, for a ceremonial resolution
   (`services/src/shared/commemorativeResolutions.ts`, the rule that also empties its topics and life areas).

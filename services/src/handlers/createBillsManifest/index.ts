@@ -1045,7 +1045,7 @@ const readManifestEntry = async (key: string, nowIso: string): Promise<ManifestR
   // The row's bill facts (UX-29, UX-38; shared/billManifestFacts.ts, billOutcomes.ts chamberPassageDates), from the
   // same actions on every write, a kept one too: the actions GET /processed-bill serves, so latestAction is the one the
   // app's bill page shows. Like the veto flag, nothing of the date decision reads them, so a rows-only replay adds them
-  // to a row without moving it.
+  // to a row that reflects its document without moving it.
   const introducedDate = billIntroducedDate(
     contentBill?.introducedDate ?? rawSnapshot?.introducedDate ?? parsed?.introducedDate,
     actions,
