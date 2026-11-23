@@ -1854,7 +1854,9 @@ describe("Senate member lookup refresh (REL-46)", () => {
   });
 });
 
-describe("counters count the 119th Congress only (REL-46)", () => {
+describe("each Congress counted apart (REL-46)", () => {
+  const IN_THE_120TH = Date.parse("2027-01-05T12:00:00.000Z");
+  const BEFORE_THE_120TH = Date.parse("2026-11-23T12:00:00.000Z");
   const processedBill = (guid: string) => ({
     schemaVersion: 1,
     kind: "processed",
@@ -1870,33 +1872,122 @@ describe("counters count the 119th Congress only (REL-46)", () => {
       house: { actionDate: "2027-01-04", members: [{ bioguideId: "A000001", votePosition: "Yea" }] },
     },
   });
-  type SentCommand = { input?: { TableName?: string; RequestItems?: Record<string, unknown> } };
+  type SentCommand = {
+    input?: {
+      TableName?: string;
+      RequestItems?: Record<string, unknown>;
+      ExpressionAttributeNames?: Record<string, string>;
+    };
+  };
   const counterCalls = () =>
     mockDdbSend.mock.calls.filter(
       (call: unknown[]) => (call[0] as SentCommand).input?.TableName === "congress-member-stats-table",
     );
+  const counterAttributes = () =>
+    counterCalls().map((call: unknown[]) => (call[0] as SentCommand).input?.ExpressionAttributeNames);
   const profileTables = () =>
     mockDdbSend.mock.calls.flatMap((call: unknown[]) =>
       Object.keys((call[0] as SentCommand).input?.RequestItems ?? {}),
     );
+  const at = (ms: number) => jest.spyOn(Date, "now").mockReturnValue(ms);
 
-  it("sends no counter update for a processed 120th bill, and still writes its profile rows", async () => {
+  it("counts a processed 120th bill in the 120th's own attributes only, and still writes its profile rows", async () => {
+    at(IN_THE_120TH);
     const key = "processed-bills/BILLS-120hr1.json";
-    statsTable();
+    const rows = statsTable();
+    mockRawBills({ [key]: processedBill("BILLS-120hr1") });
+
+    const res = await handler(sqsWrappedS3Keys([key]) as unknown as SQSEvent);
+
+    expect(res).toEqual({ batchItemFailures: [] });
+    expect(counterAttributes()).toEqual([
+      { "#counter": "billsSponsored120", "#countedGuids": "sponsoredBillGuids120" },
+      { "#counter": "billsSupported120", "#countedGuids": "supportedBillGuids120" },
+    ]);
+    expect(rows).toEqual({
+      A000001: {
+        bioguideId: { S: "A000001" },
+        billsSponsored120: { N: "1" },
+        sponsoredBillGuids120: { SS: ["BILLS-120hr1"] },
+      },
+      B000002: {
+        bioguideId: { S: "B000002" },
+        billsSupported120: { N: "1" },
+        supportedBillGuids120: { SS: ["BILLS-120hr1"] },
+      },
+    });
+    expect(profileTables()).toEqual(
+      expect.arrayContaining(["CongressMemberVoteProfiles", "CongressMemberLegislativeProfiles"]),
+    );
+    expect(embeddedMetrics()).toEqual([]);
+  });
+
+  it("counts a raw 120th bill in the 120th's attributes and keeps a returning member's 119th counts as they are", async () => {
+    at(IN_THE_120TH);
+    const key = "raw-bills/BILLS-120s5.json";
+    const rows = statsTable({
+      A000001: {
+        bioguideId: { S: "A000001" },
+        billsSponsored: { N: "2" },
+        billsSupported: { N: "0" },
+        sponsoredBillGuids: { SS: ["BILLS-119hr1", "BILLS-119hr2"] },
+      },
+    });
+    mockRawBills({ [key]: rawBillPayload(["A000001"], ["B000002"]) });
+
+    await handler(sqsWrappedS3Keys([key]) as unknown as SQSEvent);
+    await handler(sqsWrappedS3Keys([key]) as unknown as SQSEvent); // a redelivery counts nothing again
+
+    expect(rows.A000001).toEqual({
+      bioguideId: { S: "A000001" },
+      billsSponsored: { N: "2" },
+      billsSupported: { N: "0" },
+      sponsoredBillGuids: { SS: ["BILLS-119hr1", "BILLS-119hr2"] },
+      billsSponsored120: { N: "1" },
+      sponsoredBillGuids120: { SS: ["BILLS-120s5"] },
+    });
+    expect(rows.B000002).toEqual({
+      bioguideId: { S: "B000002" },
+      billsSupported120: { N: "1" },
+      supportedBillGuids120: { SS: ["BILLS-120s5"] },
+    });
+  });
+
+  it("still counts a 119th bill in the original attributes after the 120th starts", async () => {
+    at(IN_THE_120TH);
+    const key = "raw-bills/BILLS-119hr1.json";
+    const rows = statsTable();
+    mockRawBills({ [key]: rawBillPayload(["A000001"], ["B000002"]) });
+
+    await handler(sqsWrappedS3Keys([key]) as unknown as SQSEvent);
+
+    expect(rows.A000001).toEqual({
+      bioguideId: { S: "A000001" },
+      billsSponsored: { N: "1" },
+      sponsoredBillGuids: { SS: ["BILLS-119hr1"] },
+    });
+    expect(rows.B000002.billsSupported).toEqual({ N: "1" });
+    expect(embeddedMetrics()).toEqual([]);
+  });
+
+  it("counts no bill of a Congress not yet in session", async () => {
+    at(BEFORE_THE_120TH);
+    const key = "processed-bills/BILLS-120hr1.json";
+    const rows = statsTable();
     mockRawBills({ [key]: processedBill("BILLS-120hr1") });
 
     const res = await handler(sqsWrappedS3Keys([key]) as unknown as SQSEvent);
 
     expect(res).toEqual({ batchItemFailures: [] });
     expect(counterCalls()).toEqual([]);
-    expect(profileTables()).toEqual(
-      expect.arrayContaining(["CongressMemberVoteProfiles", "CongressMemberLegislativeProfiles"]),
-    );
+    expect(rows).toEqual({});
     expect(logLines(console.log)).toContainEqual(
       expect.objectContaining({
-        message: expect.stringContaining("other Congress"),
+        message: expect.stringContaining("do not count"),
         key,
         billGuid: "BILLS-120hr1",
+        congress: 120,
+        latestCounted: 119,
         offered: 2,
       }),
     );
@@ -1907,28 +1998,16 @@ describe("counters count the 119th Congress only (REL-46)", () => {
     });
   });
 
-  it("changes no counter for a raw 120th bill", async () => {
-    const key = "raw-bills/BILLS-120s5.json";
-    const rows = statsTable();
-    mockRawBills({ [key]: rawBillPayload(["A000001"], ["B000002"]) });
-
-    const res = await handler(sqsWrappedS3Keys([key]) as unknown as SQSEvent);
-
-    expect(res).toEqual({ batchItemFailures: [] });
-    expect(counterCalls()).toEqual([]);
-    expect(rows).toEqual({});
-  });
-
-  it("still counts a 119th bill", async () => {
-    const key = "raw-bills/BILLS-119hr1.json";
+  it("counts no bill of a Congress before the 119th", async () => {
+    at(IN_THE_120TH);
+    const key = "raw-bills/BILLS-118hr9.json";
     const rows = statsTable();
     mockRawBills({ [key]: rawBillPayload(["A000001"], ["B000002"]) });
 
     await handler(sqsWrappedS3Keys([key]) as unknown as SQSEvent);
 
-    expect(rows.A000001.billsSponsored).toEqual({ N: "1" });
-    expect(rows.B000002.billsSupported).toEqual({ N: "1" });
-    expect(embeddedMetrics()).toEqual([]);
+    expect(counterCalls()).toEqual([]);
+    expect(rows).toEqual({});
   });
 
   it("counts nothing for a guid without a Congress number", async () => {
