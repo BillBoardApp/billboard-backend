@@ -14,6 +14,12 @@ import { processedBillGuid } from "../../adapters/processedBillKeys";
 import { mapWithConcurrency } from "../../shared/concurrency";
 import { batchWriteAll } from "../../shared/dynamoBatchWrite";
 import { logger } from "../../shared/logger";
+import {
+  congressOfBillGuid,
+  counterAttributesFor,
+  latestCountedCongressAt,
+  type CongressCounterAttributes,
+} from "../../shared/memberCounters";
 import { emitEmbeddedMetric } from "../../shared/metrics";
 import { extractS3ObjectRefsFromSQSEvent } from "../../shared/s3EventExtract";
 import { processSqsRecords } from "../../shared/sqsBatch";
@@ -54,14 +60,18 @@ const RAW_BILLS_PREFIX = process.env.RAW_BILLS_PREFIX ?? "raw-bills/";
 const PROCESSED_BILLS_PREFIX = process.env.PROCESSED_BILLS_PREFIX ?? "processed-bills/";
 const COUNTER_UPDATE_CONCURRENCY = 10;
 
-// Per-member string sets of the bill guids already counted in each counter. The counter and
-// its set change in one conditional UpdateItem, so a redelivered or replayed event cannot
-// count the same bill twice.
-const COUNTED_BILL_GUIDS_ATTRIBUTE = {
-  billsSponsored: "sponsoredBillGuids",
-  billsSupported: "supportedBillGuids",
-} as const;
-type MemberCounterField = keyof typeof COUNTED_BILL_GUIDS_ATTRIBUTE;
+// The two counters of a member, as the logs name them. Each Congress keeps them under its own attributes
+// (shared/memberCounters.ts), each with a string set of the bill guids already counted in it. The counter and its set
+// change in one conditional UpdateItem, so a redelivered or replayed event cannot count the same bill twice.
+type MemberCounterField = "billsSponsored" | "billsSupported";
+
+const counterAttributeNames = (
+  field: MemberCounterField,
+  attributes: CongressCounterAttributes,
+): { counter: string; countedGuids: string } =>
+  field === "billsSponsored"
+    ? { counter: attributes.sponsored, countedGuids: attributes.sponsoredGuids }
+    : { counter: attributes.supported, countedGuids: attributes.supportedGuids };
 
 /*
  * When a counter may be incremented for a bill:
@@ -78,18 +88,13 @@ const COUNTER_INCREMENT_CONDITION =
   "(attribute_not_exists(#countedGuids) AND (attribute_not_exists(#counter) OR #counter = :zero))";
 
 /*
- * The per-member counters count 119th Congress bills only. The apps label them "Sponsored/Supported in
- * 119th Congress", and that stays true once 120th bills arrive on 2027-01-03. It is a code constant on
- * purpose: a config change must not be able to undo it. Vote and legislative profile rows are still
- * written for every Congress.
+ * Each Congress is counted apart (REL-46). A 119th bill changes only billsSponsored, billsSupported and their sets,
+ * which apps 1.1 and 1.2 label "Sponsored/Supported in 119th Congress" and the counter audit reads; that stays true once
+ * 120th bills arrive on 2027-01-03. A bill of the 120th or a later Congress changes only that Congress's attributes
+ * (billsSponsored120, sponsoredBillGuids120, ...). The rule is code on purpose: a config change must not be able to mix
+ * Congresses. A bill of an earlier Congress, of a Congress not yet in session, or without a Congress number counts
+ * nowhere. Vote and legislative profile rows are still written for every Congress.
  */
-const COUNTED_CONGRESS = 119;
-
-/** BILLS-119hr1234ih -> 119; null for a guid with no Congress number. */
-const congressOfBillGuid = (guid: string): number | null => {
-  const match = guid.match(/^BILLS-(\d+)[a-z]/i);
-  return match ? Number(match[1]) : null;
-};
 
 export const MEMBER_STATS_METRIC_NAMESPACE = "BillBoard/CongressMemberStats";
 const UNSEEDED_LOG_SAMPLE_SIZE = 10;
@@ -277,8 +282,9 @@ const incrementCounter = async (
   bioguideId: string,
   field: MemberCounterField,
   billGuid: string,
+  attributes: CongressCounterAttributes,
 ): Promise<CounterOutcome> => {
-  const countedGuidsAttribute = COUNTED_BILL_GUIDS_ATTRIBUTE[field];
+  const { counter, countedGuids: countedGuidsAttribute } = counterAttributeNames(field, attributes);
   try {
     await ddb.send(
       new UpdateItemCommand({
@@ -289,7 +295,7 @@ const incrementCounter = async (
         UpdateExpression: "ADD #counter :inc, #countedGuids :billGuidSet",
         ConditionExpression: COUNTER_INCREMENT_CONDITION,
         ExpressionAttributeNames: {
-          "#counter": field,
+          "#counter": counter,
           "#countedGuids": countedGuidsAttribute,
         },
         ExpressionAttributeValues: {
@@ -331,18 +337,20 @@ const applyCounterUpdates = async (
   updates: Array<{ bioguideId: string; field: MemberCounterField }>,
   key: string,
 ): Promise<number> => {
-  if (congressOfBillGuid(billGuid) !== COUNTED_CONGRESS) {
-    logger.info("Did not count a bill from another Congress; member counters count the 119th only", {
-      key,
-      billGuid,
-      offered: updates.length,
-    });
+  const congress = congressOfBillGuid(billGuid);
+  const nowMs = Date.now();
+  const attributes = congress === null ? null : counterAttributesFor(congress, nowMs);
+  if (!attributes) {
+    logger.info(
+      "Did not count a bill from a Congress the member counters do not count (the 119th and the 120th on are counted)",
+      { key, billGuid, congress, latestCounted: latestCountedCongressAt(nowMs), offered: updates.length },
+    );
     emitEmbeddedMetric(MEMBER_STATS_METRIC_NAMESPACE, "MemberCounterOtherCongress", updates.length);
     return 0;
   }
   // Large bills have hundreds of cosponsors; cap the UpdateItem calls in flight.
   const outcomes = await mapWithConcurrency(updates, COUNTER_UPDATE_CONCURRENCY, (update) =>
-    incrementCounter(update.bioguideId, update.field, billGuid),
+    incrementCounter(update.bioguideId, update.field, billGuid, attributes),
   );
   const counted = outcomes.filter((outcome) => outcome === "counted").length;
   const alreadyCounted = outcomes.filter((outcome) => outcome === "alreadyCounted").length;
@@ -359,6 +367,7 @@ const applyCounterUpdates = async (
       {
         key,
         billGuid,
+        congress: attributes.congress,
         skippedUnseeded: unseeded.length,
         members: unseeded.slice(0, UNSEEDED_LOG_SAMPLE_SIZE),
       },
