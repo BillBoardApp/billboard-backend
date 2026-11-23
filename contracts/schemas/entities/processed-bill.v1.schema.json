@@ -103,6 +103,11 @@
       "items": { "$ref": "#/$defs/bioguideId" },
       "uniqueItems": true
     },
+    "sponsorDetails": {
+      "type": "array",
+      "description": "The sponsors' names and seats as Congress.gov lists them on the bill, in the order of sponsors (REL-46 5.3), so a client can still name a sponsor who is no longer in the members manifest. Written by billSummarizer and billDiffer from the raw bill; absent on a bill not rewritten since, and when Congress.gov gives no name. A sponsor who moved chambers keeps the seat the bill lists.",
+      "items": { "$ref": "#/$defs/sponsorDetail" }
+    },
     "cosponsors": {
       "type": "array",
       "description": "Bioguide IDs of the cosponsors. fetchRawBill reads every page of Congress.gov cosponsors (REL-28); a bill fetched before that change lists only the first 20 until `npm run backfill:cosponsors` (in services) refreshes it. IDs may repeat: one stored bill lists a cosponsor twice.",
@@ -242,6 +247,35 @@
         "Digital Services",
         "Pet Ownership"
       ]
+    },
+    "sponsorDetail": {
+      "title": "BillSponsorDetailV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bioguideId", "name"],
+      "properties": {
+        "bioguideId": { "$ref": "#/$defs/bioguideId" },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "First and last name, such as Jane Doe."
+        },
+        "party": {
+          "type": "string",
+          "enum": ["D", "R", "I"],
+          "description": "The party letter. Congress.gov's ID (Independent Democrat) is I; absent for any other code."
+        },
+        "state": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$",
+          "description": "The two-letter code of the state or territory."
+        },
+        "district": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{2}$",
+          "description": "A House seat in two digits, as the members manifest writes it (00 for an at-large seat or a delegate); null for a senator."
+        }
+      }
     },
     "bioguideId": {
       "description": "A Congress.gov bioguide ID: one capital letter and six digits, such as D000001.",

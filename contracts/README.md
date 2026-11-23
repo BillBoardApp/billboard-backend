@@ -165,6 +165,26 @@ covers. All of it is optional and additive; builds 1.1 and 1.2 keep decoding bot
 - Generated: `CongressMemberCongressCountsV1` and `currentCongressCounts?` on both member types in TypeScript;
   `UserAPIContractsV1.CongressMemberCongressCounts` and `currentCongressCounts` in Swift.
 
+## Sponsor names on processed bills (REL-46 5.3)
+
+A bill keeps naming its sponsor after the sponsor leaves the members manifest (the 119th's departing members, from
+2027-01-03). Optional and additive: builds 1.1 and 1.2 ignore it, and the bills manifest does not change.
+
+- `ProcessedBill.sponsorDetails` (`$defs/sponsorDetail`, title `BillSponsorDetailV1`): one entry per sponsor, in the
+  order of `sponsors`, with `bioguideId` and `name` (first and last name) always, `party` (`D`, `R` or `I`; congress.gov's
+  `ID` is `I`, any other code is left out), `state` (two letters) and `district` (two digits as the members manifest
+  writes it, `00` at-large or for a delegate; `null` for a senator). Stored, so `validate:live` checks it: billSummarizer
+  and billDiffer write it from the raw bill (`services/src/shared/billSponsors.ts`), and a bill built before it gets it
+  from billDiffer's next message (`ADDED_FIELDS`) or `npm run backfill:sponsor-details`. Absent when congress.gov gives
+  no name.
+- Clients show it only for a sponsor missing from the members manifest; a sponsor who moved chambers keeps the seat the
+  bill lists.
+- `check-contracts.mjs` accepts a bill without it, a senator (`district: null`), an entry with only `bioguideId` and
+  `name`, and an at-large seat, and rejects another party letter, a one-digit district, a state name, a missing or
+  empty name, a name for an id and an extra key.
+- Generated: `BillSponsorDetailV1` and `ProcessedBillV1.sponsorDetails?` in TypeScript;
+  `UserAPIContractsV1.BillSponsorDetail` and `ProcessedBill.sponsorDetails` in Swift.
+
 ## Stats, verification limits and labels (C2)
 
 All additive; builds 1.0 and R1 keep decoding every response.

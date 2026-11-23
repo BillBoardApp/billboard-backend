@@ -62,6 +62,22 @@ export interface ProcessedBillBreakdownV1 {
   why?: string;
 }
 
+export interface BillSponsorDetailV1 {
+  /** A Congress.gov bioguide ID: one capital letter and six digits, such as D000001. */
+  bioguideId: string;
+  /** First and last name, such as Jane Doe. */
+  name: string;
+  /** The party letter. Congress.gov's ID (Independent Democrat) is I; absent for any other code. */
+  party?: "D" | "R" | "I";
+  /** The two-letter code of the state or territory. */
+  state?: string;
+  /**
+   * A House seat in two digits, as the members manifest writes it (00 for an at-large seat or a delegate); null for a
+   * senator.
+   */
+  district?: string | null;
+}
+
 /**
  * One Congress.gov bill action. Only the fields clients read are listed; the rest of the Congress.gov object
  * (sourceSystem, committees, recordedVotes, actionTime) is stored unchanged.
@@ -191,6 +207,13 @@ export interface ProcessedBillV1 {
   lifeAreas: string[];
   /** Bioguide IDs of the sponsors, from Congress.gov. */
   sponsors: string[];
+  /**
+   * The sponsors' names and seats as Congress.gov lists them on the bill, in the order of sponsors (REL-46 5.3), so a
+   * client can still name a sponsor who is no longer in the members manifest. Written by billSummarizer and billDiffer
+   * from the raw bill; absent on a bill not rewritten since, and when Congress.gov gives no name. A sponsor who moved
+   * chambers keeps the seat the bill lists.
+   */
+  sponsorDetails?: BillSponsorDetailV1[];
   /**
    * Bioguide IDs of the cosponsors. fetchRawBill reads every page of Congress.gov cosponsors (REL-28); a bill fetched
    * before that change lists only the first 20 until `npm run backfill:cosponsors` (in services) refreshes it. IDs may

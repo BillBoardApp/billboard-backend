@@ -409,6 +409,11 @@ nonisolated enum UserAPIContractsV1 {
         let lifeAreas: [String]
         /// Bioguide IDs of the sponsors, from Congress.gov.
         let sponsors: [String]
+        /// The sponsors' names and seats as Congress.gov lists them on the bill, in the order of sponsors (REL-46 5.3),
+        /// so a client can still name a sponsor who is no longer in the members manifest. Written by billSummarizer and
+        /// billDiffer from the raw bill; absent on a bill not rewritten since, and when Congress.gov gives no name. A
+        /// sponsor who moved chambers keeps the seat the bill lists.
+        let sponsorDetails: [BillSponsorDetail]?
         /// Bioguide IDs of the cosponsors. fetchRawBill reads every page of Congress.gov cosponsors (REL-28); a bill
         /// fetched before that change lists only the first 20 until `npm run backfill:cosponsors` (in services)
         /// refreshes it. IDs may repeat: one stored bill lists a cosponsor twice.
@@ -448,6 +453,20 @@ nonisolated enum UserAPIContractsV1 {
         let when: String
         let `where`: String
         let why: String?
+    }
+
+    nonisolated struct BillSponsorDetail: Decodable {
+        /// A Congress.gov bioguide ID: one capital letter and six digits, such as D000001.
+        let bioguideId: String
+        /// First and last name, such as Jane Doe.
+        let name: String
+        /// The party letter. Congress.gov's ID (Independent Democrat) is I; absent for any other code.
+        let party: String?
+        /// The two-letter code of the state or territory.
+        let state: String?
+        /// A House seat in two digits, as the members manifest writes it (00 for an at-large seat or a delegate); null
+        /// for a senator.
+        let district: String?
     }
 
     /// One Congress.gov bill action. Only the fields clients read are listed; the rest of the Congress.gov object

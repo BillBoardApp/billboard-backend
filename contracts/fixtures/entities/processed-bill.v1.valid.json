@@ -25,6 +25,7 @@
   "subCategories": ["Energy", "Climate Change"],
   "lifeAreas": ["Utility Bills", "Home Energy"],
   "sponsors": ["D000001"],
+  "sponsorDetails": [{ "bioguideId": "D000001", "name": "Jane Doe", "party": "D", "state": "CA", "district": "12" }],
   "cosponsors": ["S000001", "L000001"],
   "isPriority": true,
   "priorityRank": 1,
