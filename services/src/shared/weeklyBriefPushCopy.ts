@@ -1,0 +1,77 @@
+import type { WeeklyDigest } from "../models/weeklyDigest";
+import { normalizeInlineText, truncateUtf8 } from "./pushText";
+import { formatWeeklyDigestShortRange } from "./weeklyDigestSchedule";
+
+/*
+ * What the Sunday Weekly Brief push says (UX-28, decision D4 (a)). UX-27's rule is that a push says what it is about,
+ * so it names the brief's week and its bills, never counts:
+ * - Title: "Weekly Brief · Nov 15–21", the week as app 1.3's front page docket gives it ("Oct 25–Nov 1" across months).
+ * - Body: "Includes {bill}." for one bill, "Includes {bill 1} and {bill 2}." for two, "Includes {bill 1}, {bill 2}, and
+ *   {N} more." for three or more, the bills in the brief's page order with member items skipped. Listed titles are cut
+ *   to 36 bytes with "...", as userNotifier's example titles are; a lone title gets the whole body. The body stays within
+ *   160 bytes, as a bill push's does.
+ * - A brief with no bill item (only members you follow) says its own headline instead.
+ * The words come only from the user's own brief: bill titles and the headline. Nothing here reads anyone's vote.
+ */
+
+export const WEEKLY_BRIEF_PUSH_BODY_MAX_BYTES = 160;
+/** A listed bill title's length in the body, as in userNotifier's exampleTitlesBody. */
+export const WEEKLY_BRIEF_LISTED_TITLE_MAX_BYTES = 36;
+const INCLUDES = "Includes ";
+const ELLIPSIS = "...";
+
+export interface WeeklyBriefPushCopy {
+  title: string;
+  body: string;
+}
+
+/** The brief's bill titles in page order: each section's items as shown, member items skipped, each bill once. */
+export const weeklyBriefBillTitles = (digest: Pick<WeeklyDigest, "sections">): string[] => {
+  const seen = new Set<string>();
+  const titles: string[] = [];
+  for (const section of digest.sections ?? []) {
+    for (const item of section.items ?? []) {
+      if (item.kind !== "bill") continue;
+      const key = item.billGuid ?? item.id;
+      const title = normalizeInlineText(item.title);
+      if (!title || seen.has(key)) continue;
+      seen.add(key);
+      titles.push(title);
+    }
+  }
+  return titles;
+};
+
+/** "Weekly Brief · Nov 15–21". */
+export const weeklyBriefPushTitle = (weekStart: Date, weekEnd: Date): string =>
+  `Weekly Brief · ${formatWeeklyDigestShortRange(weekStart, weekEnd)}`;
+
+/** A sentence's closing period, left off after a cut title's "..." so it never reads "....". */
+const closed = (text: string): string => (text.endsWith(ELLIPSIS) ? text : `${text}.`);
+
+export const weeklyBriefPushBody = (digest: Pick<WeeklyDigest, "sections" | "summary">): string => {
+  const titles = weeklyBriefBillTitles(digest);
+  if (titles.length === 0) {
+    return truncateUtf8(digest.summary, WEEKLY_BRIEF_PUSH_BODY_MAX_BYTES) || "Here is your week in Congress.";
+  }
+
+  if (titles.length === 1) {
+    const room = WEEKLY_BRIEF_PUSH_BODY_MAX_BYTES - Buffer.byteLength(`${INCLUDES}.`, "utf8");
+    return closed(`${INCLUDES}${truncateUtf8(titles[0], room)}`);
+  }
+
+  const [first, second] = titles.map((title) => truncateUtf8(title, WEEKLY_BRIEF_LISTED_TITLE_MAX_BYTES));
+  const body =
+    titles.length === 2
+      ? closed(`${INCLUDES}${first} and ${second}`)
+      : `${INCLUDES}${first}, ${second}, and ${titles.length - 2} more.`;
+  return truncateUtf8(body, WEEKLY_BRIEF_PUSH_BODY_MAX_BYTES);
+};
+
+/** The push's title and body for `digest`, whose week is `weekStart` to `weekEnd` (the snapshot's own). */
+export const weeklyBriefPushCopy = (
+  digest: Pick<WeeklyDigest, "sections" | "summary" | "weekStart" | "weekEnd">,
+): WeeklyBriefPushCopy => ({
+  title: weeklyBriefPushTitle(new Date(digest.weekStart), new Date(digest.weekEnd)),
+  body: weeklyBriefPushBody(digest),
+});

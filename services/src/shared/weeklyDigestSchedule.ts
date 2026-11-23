@@ -209,6 +209,17 @@ export function formatWeeklyDigestDay(dayKey: string): string {
   return monthDay({ year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) });
 }
 
+/**
+ * The week as app 1.3's Weekly Brief front page gives it on its docket line, with an en dash and no year: "Nov 15–21",
+ * "Oct 25–Nov 1", "Dec 27–Jan 2" (WeeklyDigestDateFormatter.shortRangeString). The Sunday push's title uses it (UX-28).
+ */
+export function formatWeeklyDigestShortRange(weekStart: Date, weekEnd: Date): string {
+  const start = getLocalDateParts(weekStart);
+  const end = getLocalDateParts(weekEnd);
+  const endLabel = start.year === end.year && start.month === end.month ? String(end.day) : monthDay(end);
+  return `${monthDay(start)}\u2013${endLabel}`;
+}
+
 export function formatWeeklyDigestTitle(weekStart: Date, weekEnd: Date): string {
   const start = getLocalDateParts(weekStart);
   const end = getLocalDateParts(weekEnd);
