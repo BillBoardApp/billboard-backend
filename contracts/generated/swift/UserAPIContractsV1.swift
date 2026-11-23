@@ -76,11 +76,16 @@ nonisolated enum UserAPIContractsV1 {
         /// YYYY-MM-DD: the earliest action coded 8000, Passed/agreed to in House (billOutcomes.ts chamberPassageDates);
         /// absent when no stored action records it (a fetch stores the newest 250 actions). A vote over a veto (32000),
         /// on an amendment or on a motion is not one. Set whatever billStatus says: a bill that later failed or became
-        /// law keeps it.
+        /// law keeps it. A bill reaches the second chamber only once the chamber it began in passed it, so a bill that
+        /// began in the Senate and has passedHouseOn passed the Senate too, even when passedSenateOn is absent because
+        /// that action is older than the stored ones.
         let passedHouseOn: String?
         /// YYYY-MM-DD: the earliest action coded 17000, Passed/agreed to in Senate (billOutcomes.ts
         /// chamberPassageDates); absent when no stored action records it (a fetch stores the newest 250 actions). A
-        /// vote over a veto (34000), on an amendment or on a motion is not one. Set whatever billStatus says.
+        /// vote over a veto (34000), on an amendment or on a motion is not one. Set whatever billStatus says. A bill
+        /// reaches the second chamber only once the chamber it began in passed it, so a bill that began in the House
+        /// and has passedSenateOn passed the House too, even when passedHouseOn is absent because that action is older
+        /// than the stored ones.
         let passedSenateOn: String?
         /// The bill's latest action, the one the app's bill page and the website show as Latest action (UX-43;
         /// billManifestFacts.ts latestManifestAction): of the processed bill's actions, those of the greatest

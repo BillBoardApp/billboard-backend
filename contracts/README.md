@@ -241,7 +241,9 @@ dates a row, so a rows-only replay adds them without moving a row.
   (`services/src/shared/billManifestFacts.ts`). A fetch stores the newest 250 actions, so a longer history gives a later
   day.
 - `passedHouseOn`, `passedSenateOn` (`format: date`): the earliest action coded 8000 or 17000
-  (`services/src/shared/billOutcomes.ts` `chamberPassageDates`), whatever the status says.
+  (`services/src/shared/billOutcomes.ts` `chamberPassageDates`), whatever the status says. A bill reaches the second
+  chamber only once the chamber it began in passed it, so the second chamber's day alone (the first passage older than
+  the stored actions) still means both passed.
 - `latestAction` (title `BillsManifestLatestActionV1`): `actionDate` (`format: date`, required) and `text` (congress.gov's,
   trimmed, at least one character, absent when that action has none) of the action the app's bill page and the website
   show as Latest action (UX-43; `billManifestFacts.ts` `latestManifestAction`, the rule of `timelineActions` in both):

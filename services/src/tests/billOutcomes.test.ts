@@ -1287,6 +1287,20 @@ describe("billOutcomes: chamberPassageDates (UX-38)", () => {
     expect(chamberPassageDates(actions)).toEqual({ house: "2026-02-03", senate: "2026-02-19" });
   });
 
+  it("gives only the second chamber's day when the first passage is older than the newest 250 stored actions", () => {
+    // An H.R. after a Senate vote-a-rama, newest first: one fetch stores 250 actions, and the House's passage, months
+    // before, is not among them. The schema says what it means: the Senate takes up a House bill only once it passed.
+    const amendments = Array.from({ length: 249 }, (_, index) => ({
+      actionCode: "95000",
+      actionDate: "2026-07-30",
+      text: `Amendment SA ${3000 + index} not agreed to in Senate by Yea-Nay Vote.`,
+      type: "Floor",
+    }));
+    const stored = [senate("2026-07-31"), ...amendments];
+    expect(stored).toHaveLength(250);
+    expect(chamberPassageDates(stored)).toEqual({ senate: "2026-07-31" });
+  });
+
   it("reads nothing from a missing or malformed list", () => {
     expect(chamberPassageDates(undefined)).toEqual({});
     expect(chamberPassageDates(null)).toEqual({});
