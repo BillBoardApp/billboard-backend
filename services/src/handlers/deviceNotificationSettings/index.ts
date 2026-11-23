@@ -13,6 +13,12 @@ const NOTIFY_UPDATED_ATTRIBUTE = process.env.NOTIFY_UPDATED_ATTRIBUTE ?? "notify
 const NOTIFY_ALERT_ATTRIBUTE = process.env.NOTIFY_ALERT_ATTRIBUTE ?? "notifyAlert";
 const NOTIFY_PASSED_ATTRIBUTE = process.env.NOTIFY_PASSED_ATTRIBUTE ?? "notifyPassed";
 const NOTIFY_FAILED_ATTRIBUTE = process.env.NOTIFY_FAILED_ATTRIBUTE ?? "notifyFailed";
+/**
+ * UX-28: the Sunday Weekly Brief push. Unlike the five bill types it has no default: it is stored only once an app
+ * (1.3 or later) writes it, and the push goes only to a device whose row says true (decision D2). GET returns it only
+ * when stored, and a PUT keeps a stored value, so a 1.1 or 1.2 PUT (which never sends it) neither creates nor drops it.
+ */
+const NOTIFY_WEEKLY_BRIEF_ATTRIBUTE = process.env.NOTIFY_WEEKLY_BRIEF_ATTRIBUTE ?? "notifyWeeklyBrief";
 
 const db = new DynamoDBClient({});
 
@@ -23,6 +29,8 @@ type DeviceNotificationSettings = {
   notifyAlert: boolean;
   notifyPassed: boolean;
   notifyFailed: boolean;
+  /** Undefined when the row has never stored it. */
+  notifyWeeklyBrief?: boolean;
 };
 
 const DEFAULT_SETTINGS: DeviceNotificationSettings = {
@@ -75,7 +83,19 @@ function readSettingsFromItem(item?: Record<string, AttributeValue>): DeviceNoti
     notifyAlert: attrToBool(item?.[NOTIFY_ALERT_ATTRIBUTE]) ?? DEFAULT_SETTINGS.notifyAlert,
     notifyPassed: attrToBool(item?.[NOTIFY_PASSED_ATTRIBUTE]) ?? DEFAULT_SETTINGS.notifyPassed,
     notifyFailed: attrToBool(item?.[NOTIFY_FAILED_ATTRIBUTE]) ?? DEFAULT_SETTINGS.notifyFailed,
+    ...weeklyBriefSettingOf(item),
   };
+}
+
+/** The stored Weekly Brief flag, or nothing when the row has none (or one that is not a boolean). */
+function weeklyBriefSettingOf(
+  item?: Record<string, AttributeValue>,
+): Pick<DeviceNotificationSettings, "notifyWeeklyBrief"> {
+  return weeklyBriefSettingOrNone(attrToBool(item?.[NOTIFY_WEEKLY_BRIEF_ATTRIBUTE]) ?? undefined);
+}
+
+function weeklyBriefSettingOrNone(value: boolean | undefined): Pick<DeviceNotificationSettings, "notifyWeeklyBrief"> {
+  return value === undefined ? {} : { notifyWeeklyBrief: value };
 }
 
 function responsePayload(deviceId: string, settings: DeviceNotificationSettings) {
@@ -87,6 +107,7 @@ function responsePayload(deviceId: string, settings: DeviceNotificationSettings)
     notify_alert: settings.notifyAlert,
     notify_passed: settings.notifyPassed,
     notify_failed: settings.notifyFailed,
+    ...(settings.notifyWeeklyBrief === undefined ? {} : { notify_weekly_brief: settings.notifyWeeklyBrief }),
   };
 }
 
@@ -165,6 +186,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       let notifyAlert: boolean | undefined;
       let notifyPassed: boolean | undefined;
       let notifyFailed: boolean | undefined;
+      let notifyWeeklyBrief: boolean | undefined;
 
       try {
         notificationsEnabled = parseOptionalBool(body.notifications_enabled);
@@ -173,10 +195,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         notifyAlert = parseOptionalBool(body.notify_alert);
         notifyPassed = parseOptionalBool(body.notify_passed);
         notifyFailed = parseOptionalBool(body.notify_failed);
+        notifyWeeklyBrief = parseOptionalBool(body.notify_weekly_brief);
       } catch {
         return json(400, {
           error:
-            "Invalid boolean field. Expected booleans for notifications_enabled/notify_new/notify_updated/notify_alert/notify_passed/notify_failed",
+            "Invalid boolean field. Expected booleans for notifications_enabled/notify_new/notify_updated/notify_alert/notify_passed/notify_failed/notify_weekly_brief",
         });
       }
 
@@ -199,6 +222,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         notifyAlert: notifyAlert ?? baseSettings.notifyAlert,
         notifyPassed: notifyPassed ?? baseSettings.notifyPassed,
         notifyFailed: notifyFailed ?? baseSettings.notifyFailed,
+        // Written when the body has it, else kept when the row has it; never created by a body without it.
+        ...weeklyBriefSettingOrNone(notifyWeeklyBrief ?? baseSettings.notifyWeeklyBrief),
       };
 
       const item: Record<string, AttributeValue> = {
@@ -210,6 +235,9 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         [NOTIFY_ALERT_ATTRIBUTE]: { BOOL: nextSettings.notifyAlert },
         [NOTIFY_PASSED_ATTRIBUTE]: { BOOL: nextSettings.notifyPassed },
         [NOTIFY_FAILED_ATTRIBUTE]: { BOOL: nextSettings.notifyFailed },
+        ...(nextSettings.notifyWeeklyBrief === undefined
+          ? {}
+          : { [NOTIFY_WEEKLY_BRIEF_ATTRIBUTE]: { BOOL: nextSettings.notifyWeeklyBrief } }),
         updatedAt: { S: new Date().toISOString() },
       };
 
