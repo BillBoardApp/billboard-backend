@@ -10,6 +10,7 @@ import type {
   CongressMemberManifestItemV1 as CongressMemberManifestEntry,
   CongressMembersManifestV1 as CongressMembersManifest,
 } from "../../contracts";
+import { memberCountsFromItem, memberCountsProjection, type MemberCounts } from "../../shared/memberCounters";
 import { sleep } from "../../shared/retry";
 
 const TABLE_NAME = process.env.TABLE_NAME!;
@@ -56,27 +57,19 @@ const chunk = <T>(items: T[], size: number): T[][] => {
   return out;
 };
 
-const toNumberOrZero = (value: unknown): number => {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-};
-
-type TrackedCounts = { sponsored: number; supported: number };
-
 /**
- * Reads billsSponsored and billsSupported from CongressMembersStats. A member missing from the map gets no tracked
- * counts: it has no stats row (no tracked 119th bill, as for every member new in the 120th Congress; REL-46, project
- * decision D8), or its row could not be read (no table configured, a failed read, or a key still unprocessed after
- * the retries). A member with a row keeps its counts, zeros included.
+ * Reads each member's counters from CongressMembersStats (shared/memberCounters.ts). A member missing from the map has no
+ * stats row, or its row could not be read (no table configured, a failed read, or a key still unprocessed after the
+ * retries): it gets no counts at all. A member with a row gets what the row holds, zeros included: its 119th counts
+ * only when the row has a 119th counter (none for a member new in the 120th Congress; REL-46, project decision D8), and
+ * the newest Congress it has a counter for.
  */
-const getTrackedCountsByBioguideId = async (bioguideIds: string[]): Promise<Map<string, TrackedCounts>> => {
-  const counts = new Map<string, TrackedCounts>();
+const getMemberCountsByBioguideId = async (bioguideIds: string[]): Promise<Map<string, MemberCounts>> => {
+  const counts = new Map<string, MemberCounts>();
   if (!STATS_TABLE_NAME) return counts;
 
+  const nowMs = Date.now();
+  const projection = memberCountsProjection(STATS_PRIMARY_KEY, nowMs);
   try {
     for (const idsChunk of chunk(bioguideIds, 100)) {
       let keys: Array<Record<string, AttributeValue>> = idsChunk.map((bioguideId) => ({
@@ -89,10 +82,7 @@ const getTrackedCountsByBioguideId = async (bioguideIds: string[]): Promise<Map<
             RequestItems: {
               [STATS_TABLE_NAME]: {
                 Keys: keys,
-                ProjectionExpression: "#pk, billsSponsored, billsSupported",
-                ExpressionAttributeNames: {
-                  "#pk": STATS_PRIMARY_KEY,
-                },
+                ...projection,
               },
             },
           }),
@@ -101,10 +91,7 @@ const getTrackedCountsByBioguideId = async (bioguideIds: string[]): Promise<Map<
         for (const item of response.Responses?.[STATS_TABLE_NAME] ?? []) {
           const bioguideId = item?.[STATS_PRIMARY_KEY]?.S;
           if (!bioguideId) continue;
-          counts.set(bioguideId, {
-            sponsored: toNumberOrZero(item?.billsSponsored?.N),
-            supported: toNumberOrZero(item?.billsSupported?.N),
-          });
+          counts.set(bioguideId, memberCountsFromItem(item, nowMs));
         }
 
         // DynamoDB returns throttled keys as UnprocessedKeys instead of failing the call.
@@ -177,19 +164,23 @@ export async function handler(event?: ManifestRequestEvent): Promise<APIGatewayP
       startKey = result.LastEvaluatedKey;
     } while (startKey);
 
-    const trackedCounts = await getTrackedCountsByBioguideId(members.map((member) => member.bioguideId));
-    const enrichedMembers = members.map((member) => {
-      const counts = trackedCounts.get(member.bioguideId);
-      // All three counts are omitted when the stats could not be read (APPF-03 and REL-52), so the app never shows a
-      // false zero, and for a member with no stats row (REL-46, D8), so apps 1.1 and 1.2 hide "Tracked by Billboard".
-      return counts
-        ? {
-            ...member,
-            currentCongressBillsSupportedCount: counts.supported,
-            trackedSponsoredCount: counts.sponsored,
-            trackedSupportedCount: counts.supported,
-          }
-        : member;
+    const memberCounts = await getMemberCountsByBioguideId(members.map((member) => member.bioguideId));
+    const enrichedMembers = members.map((member): CongressMemberManifestEntry => {
+      const counts = memberCounts.get(member.bioguideId);
+      // The three 119th counts are omitted when the stats could not be read (APPF-03 and REL-52), so the app never
+      // shows a false zero, and for a member with no 119th counter (REL-46, D8), so apps 1.1 and 1.2 hide "Tracked by
+      // Billboard". currentCongressCounts names the Congress its counts cover; apps from 1.3 label the counts with it.
+      return {
+        ...member,
+        ...(counts?.tracked
+          ? {
+              currentCongressBillsSupportedCount: counts.tracked.supported,
+              trackedSponsoredCount: counts.tracked.sponsored,
+              trackedSupportedCount: counts.tracked.supported,
+            }
+          : {}),
+        ...(counts?.current ? { currentCongressCounts: counts.current } : {}),
+      };
     });
 
     const manifest: CongressMembersManifest = {

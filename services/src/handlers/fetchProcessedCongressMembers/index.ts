@@ -2,6 +2,7 @@ import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
 import { S3Client } from "@aws-sdk/client-s3";
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { ProcessedCongressMemberDao } from "../../adapters/processedCongressMemberDao";
+import { memberCountsFromItem, memberCountsProjection, type MemberCounts } from "../../shared/memberCounters";
 
 const BUCKET_NAME = process.env.BUCKET_NAME!;
 const STATS_TABLE_NAME = process.env.STATS_TABLE_NAME;
@@ -14,23 +15,13 @@ const s3 = new S3Client({});
 const ddb = new DynamoDBClient({});
 const processedMemberDao = new ProcessedCongressMemberDao(s3, BUCKET_NAME);
 
-const toNumberOrZero = (value: unknown): number => {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-};
-
-type TrackedCounts = { sponsored: number; supported: number };
-
-// Null when the stats table is not configured, the read failed, or the member has no stats row. No row means no tracked
-// 119th bill, as for every member new in the 120th Congress: no counts rather than zeros, so the apps hide "Tracked by
-// Billboard" (REL-46, project decision D8). A row keeps its counts, zeros included.
-const getTrackedCounts = async (bioguideId: string): Promise<TrackedCounts | null> => {
+// Null when the stats table is not configured, the read failed, or the member has no stats row; then the member gets no
+// counts at all. A row gives its 119th counts only when it has a 119th counter: a member new in the 120th Congress has
+// none, so the apps hide "Tracked by Billboard" (REL-46, project decision D8). A row keeps its counts, zeros included.
+const getMemberCounts = async (bioguideId: string): Promise<MemberCounts | null> => {
   if (!STATS_TABLE_NAME) return null;
 
+  const nowMs = Date.now();
   try {
     const response = await ddb.send(
       new GetItemCommand({
@@ -38,50 +29,57 @@ const getTrackedCounts = async (bioguideId: string): Promise<TrackedCounts | nul
         Key: {
           [STATS_PRIMARY_KEY]: { S: bioguideId },
         },
-        ProjectionExpression: "billsSponsored, billsSupported",
+        ...memberCountsProjection(STATS_PRIMARY_KEY, nowMs),
       }),
     );
 
     if (!response.Item) return null;
-    return {
-      sponsored: toNumberOrZero(response.Item.billsSponsored?.N),
-      supported: toNumberOrZero(response.Item.billsSupported?.N),
-    };
+    return memberCountsFromItem(response.Item, nowMs);
   } catch (error) {
     console.warn("Failed to load current-Congress member stats", { bioguideId, error });
     return null;
   }
 };
 
-const STATS_FIELDS = ["currentCongressBillsSupportedCount", "trackedSponsoredCount", "trackedSupportedCount"] as const;
+// Every count this handler sets; a stored object's own values for them are always dropped.
+const STATS_FIELDS = [
+  "currentCongressBillsSupportedCount",
+  "trackedSponsoredCount",
+  "trackedSupportedCount",
+  "currentCongressCounts",
+] as const;
 
-const withStatsFields = (member: Record<string, unknown>, trackedCounts: TrackedCounts | null) => {
+const withStatsFields = (member: Record<string, unknown>, counts: MemberCounts | null) => {
   const rest = { ...member };
   for (const field of STATS_FIELDS) delete rest[field];
-  return trackedCounts
-    ? {
-        ...rest,
-        currentCongressBillsSupportedCount: trackedCounts.supported,
-        trackedSponsoredCount: trackedCounts.sponsored,
-        trackedSupportedCount: trackedCounts.supported,
-      }
-    : rest;
+  return {
+    ...rest,
+    ...(counts?.tracked
+      ? {
+          currentCongressBillsSupportedCount: counts.tracked.supported,
+          trackedSponsoredCount: counts.tracked.sponsored,
+          trackedSupportedCount: counts.tracked.supported,
+        }
+      : {}),
+    ...(counts?.current ? { currentCongressCounts: counts.current } : {}),
+  };
 };
 
-// currentCongressBillsSupportedCount is kept for app builds that read it. All three counts are left out when the stats
-// could not be read (tracked counts since APPF-03, the supported count since REL-52), so the app never shows a false
-// zero: apps 1.1 and 1.2 then show the members manifest's tracked counts, or no "Tracked by Billboard" rows. A member
-// with no stats row gets none either (REL-46, D8), and the manifest leaves them out of that member too.
-const augmentProcessedMemberPayload = (payload: unknown, trackedCounts: TrackedCounts | null): unknown => {
+// currentCongressBillsSupportedCount is kept for app builds that read it. All three 119th counts are left out when the
+// stats could not be read (tracked counts since APPF-03, the supported count since REL-52), so the app never shows a
+// false zero: apps 1.1 and 1.2 then show the members manifest's tracked counts, or no "Tracked by Billboard" rows. A
+// member with no 119th counter gets none either (REL-46, D8), and the manifest leaves them out of that member too.
+// currentCongressCounts, the newest Congress the member has counters for, follows the same rules.
+const augmentProcessedMemberPayload = (payload: unknown, counts: MemberCounts | null): unknown => {
   if (!payload || typeof payload !== "object") return payload;
 
   const root = payload as Record<string, unknown>;
   const member = root.member;
   if (member && typeof member === "object" && !Array.isArray(member)) {
-    return { ...root, member: withStatsFields(member as Record<string, unknown>, trackedCounts) };
+    return { ...root, member: withStatsFields(member as Record<string, unknown>, counts) };
   }
 
-  return withStatsFields(root, trackedCounts);
+  return withStatsFields(root, counts);
 };
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
@@ -105,11 +103,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   try {
     const payload = await processedMemberDao.get<unknown>(normalizedId);
     if (payload) {
-      const trackedCounts = await getTrackedCounts(normalizedId);
+      const counts = await getMemberCounts(normalizedId);
       return {
         statusCode: 200,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(augmentProcessedMemberPayload(payload, trackedCounts)),
+        body: JSON.stringify(augmentProcessedMemberPayload(payload, counts)),
       };
     }
 
