@@ -41,6 +41,12 @@ const LEGISLATIVE_PROFILE_BILL_GUID_INDEX_NAME =
   process.env.LEGISLATIVE_PROFILE_BILL_GUID_INDEX_NAME ?? "BillGuidIndex";
 const LEGISLATIVE_PROFILE_BILL_GUID_INDEX_PK = process.env.LEGISLATIVE_PROFILE_BILL_GUID_INDEX_PK ?? "billGuid";
 const LEGISLATIVE_PROFILE_BILL_GUID_INDEX_SK = process.env.LEGISLATIVE_PROFILE_BILL_GUID_INDEX_SK ?? "bioguideId";
+// UX-39d: the members' public roll-call record. Without the table name the handler writes none.
+const VOTE_RECORD_TABLE_NAME = process.env.VOTE_RECORD_TABLE_NAME;
+const VOTE_RECORD_PRIMARY_KEY = process.env.VOTE_RECORD_PRIMARY_KEY ?? "bioguideId";
+const VOTE_RECORD_SORT_KEY = process.env.VOTE_RECORD_SORT_KEY ?? "recordKey";
+const VOTE_RECORD_BILL_GUID_INDEX_NAME = process.env.VOTE_RECORD_BILL_GUID_INDEX_NAME ?? "BillGuidIndex";
+const VOTE_RECORD_BILL_GUID_INDEX_PK = process.env.VOTE_RECORD_BILL_GUID_INDEX_PK ?? "billGuid";
 
 const s3 = new S3Client({});
 const ddb = new DynamoDBClient({});
@@ -727,6 +733,167 @@ const deleteLegislativeProfileRows = async (bioguideIds: string[], billGuid: str
   await batchWriteAll({ db: ddb, tableName: LEGISLATIVE_PROFILE_TABLE_NAME, requests });
 };
 
+// ─── The members' roll-call record (UX-39d) ─────────────────────────────────
+//
+// One CongressMemberVoteRecord row per member and chamber vote in the processed bill's officialVotes: the latest roll
+// call of each chamber, as the bill page's "How Congress voted" shows it, whether or not the bill has a civic profile.
+// Every position is kept as Congress records it (Yea, Nay, Present, Not Voting; an Unknown row is left out), never
+// judged. The sort key is "<votedAt>#<billGuid>", so a member's rows read newest first. A row the bill no longer gives
+// (a newer roll call, a member's row gone) is deleted, found through the BillGuidIndex. The vote and legislative
+// profiles above, and what they score, do not change.
+
+/** A position as the record stores it. */
+type VoteRecordPosition = "Yea" | "Nay" | "Present" | "Not Voting";
+
+type VoteRecordRow = {
+  bioguideId: string;
+  recordKey: string;
+  chamber: "House" | "Senate";
+  position: VoteRecordPosition;
+  votedAt: string;
+  actionText?: string;
+  actionCode?: string;
+};
+
+const VOTE_RECORD_ACTION_TEXT_MAX = 500;
+
+const normalizeRecordPosition = (value: unknown): VoteRecordPosition | null => {
+  const normalized = toTrimmedString(value).toLowerCase();
+  if (normalized === "yea" || normalized === "yes" || normalized === "aye") return "Yea";
+  if (normalized === "nay" || normalized === "no") return "Nay";
+  if (normalized === "present") return "Present";
+  if (normalized === "not voting" || normalized === "not-voting" || normalized === "nv") return "Not Voting";
+  return null;
+};
+
+/** The record rows of a processed bill's official votes, keyed by the key's plain guid. */
+const extractVoteRecordRows = async (payload: unknown, billGuid: string): Promise<VoteRecordRow[]> => {
+  if (!payload || typeof payload !== "object") return [];
+  const root = payload as Record<string, unknown>;
+  const officialVotes = root.officialVotes as Record<string, unknown> | undefined;
+  const rows: VoteRecordRow[] = [];
+  const seen = new Set<string>();
+
+  const addChamber = async (chamber: "House" | "Senate", value: unknown) => {
+    if (!value || typeof value !== "object") return;
+    const chamberVote = value as Record<string, unknown>;
+    // The roll call's day; a vote without one is dated as the profile rows date it, never with the time of the write.
+    const votedAtSource =
+      toTrimmedString(chamberVote.actionDate) ||
+      toTrimmedString(officialVotes?.lastSyncedAt) ||
+      toTrimmedString(root.storedAt);
+    if (!votedAtSource || Number.isNaN(Date.parse(votedAtSource))) return;
+    const votedAt = new Date(votedAtSource).toISOString();
+    const actionText = toTrimmedString(chamberVote.resultText).slice(0, VOTE_RECORD_ACTION_TEXT_MAX);
+    const actionCode = toTrimmedString(chamberVote.actionCode);
+    const members = Array.isArray(chamberVote.members) ? (chamberVote.members as unknown[]) : [];
+    for (const member of members) {
+      if (!member || typeof member !== "object") continue;
+      const memberRecord = member as Record<string, unknown>;
+      const rawId = toTrimmedString(memberRecord.bioguideId ?? memberRecord.memberId ?? memberRecord.id);
+      const bioguideId =
+        chamber === "Senate"
+          ? await resolveSenateBioguideId(
+              rawId,
+              toTrimmedString(memberRecord.displayName ?? memberRecord.name),
+              toTrimmedString(memberRecord.state),
+            )
+          : rawId;
+      const position = normalizeRecordPosition(memberRecord.votePosition ?? memberRecord.vote ?? memberRecord.position);
+      if (!bioguideId || !position) continue;
+      const recordKey = `${votedAt}#${billGuid}`;
+      const dedupeKey = `${bioguideId}|${recordKey}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      rows.push({
+        bioguideId,
+        recordKey,
+        chamber,
+        position,
+        votedAt,
+        ...(actionText ? { actionText } : {}),
+        ...(actionCode ? { actionCode } : {}),
+      });
+    }
+  };
+
+  await addChamber("House", officialVotes?.house);
+  await addChamber("Senate", officialVotes?.senate);
+  return rows;
+};
+
+/** The bill's record rows now stored, as "bioguideId|recordKey" with their keys. */
+const queryExistingVoteRecordRows = async (billGuid: string): Promise<Map<string, Record<string, AttributeValue>>> => {
+  const existing = new Map<string, Record<string, AttributeValue>>();
+  if (!VOTE_RECORD_TABLE_NAME) return existing;
+  let startKey: Record<string, AttributeValue> | undefined;
+  do {
+    const response = await ddb.send(
+      new QueryCommand({
+        TableName: VOTE_RECORD_TABLE_NAME,
+        IndexName: VOTE_RECORD_BILL_GUID_INDEX_NAME,
+        KeyConditionExpression: "#billGuid = :billGuid",
+        ExpressionAttributeNames: {
+          "#billGuid": VOTE_RECORD_BILL_GUID_INDEX_PK,
+          "#memberId": VOTE_RECORD_PRIMARY_KEY,
+          "#recordKey": VOTE_RECORD_SORT_KEY,
+        },
+        ExpressionAttributeValues: { ":billGuid": { S: billGuid } },
+        ProjectionExpression: "#memberId, #recordKey",
+        ExclusiveStartKey: startKey,
+      }),
+    );
+    for (const item of response.Items ?? []) {
+      const bioguideId = item?.[VOTE_RECORD_PRIMARY_KEY]?.S;
+      const recordKey = item?.[VOTE_RECORD_SORT_KEY]?.S;
+      if (!bioguideId || !recordKey) continue;
+      existing.set(`${bioguideId}|${recordKey}`, {
+        [VOTE_RECORD_PRIMARY_KEY]: { S: bioguideId },
+        [VOTE_RECORD_SORT_KEY]: { S: recordKey },
+      });
+    }
+    startKey = response.LastEvaluatedKey;
+  } while (startKey);
+  return existing;
+};
+
+/** Puts the bill's record rows and deletes the ones it no longer gives; the number of rows written or deleted. */
+const writeVoteRecord = async (key: string, current: unknown, billGuid: string): Promise<number> => {
+  if (!VOTE_RECORD_TABLE_NAME) return 0;
+  const rows = await extractVoteRecordRows(current, billGuid);
+  const existing = await queryExistingVoteRecordRows(billGuid);
+  const incoming = new Set(rows.map((row) => `${row.bioguideId}|${row.recordKey}`));
+  const stale = [...existing.entries()].filter(([id]) => !incoming.has(id)).map(([, itemKey]) => itemKey);
+
+  const timestamp = new Date().toISOString();
+  const puts: WriteRequest[] = rows.map((row) => ({
+    PutRequest: {
+      Item: {
+        [VOTE_RECORD_PRIMARY_KEY]: { S: row.bioguideId },
+        [VOTE_RECORD_SORT_KEY]: { S: row.recordKey },
+        [VOTE_RECORD_BILL_GUID_INDEX_PK]: { S: billGuid },
+        chamber: { S: row.chamber },
+        position: { S: row.position },
+        votedAt: { S: row.votedAt },
+        ...(row.actionText ? { actionText: { S: row.actionText } } : {}),
+        ...(row.actionCode ? { actionCode: { S: row.actionCode } } : {}),
+        updatedAt: { S: timestamp },
+      },
+    },
+  }));
+  const deletes: WriteRequest[] = stale.map((itemKey) => ({ DeleteRequest: { Key: itemKey } }));
+  await batchWriteAll({ db: ddb, tableName: VOTE_RECORD_TABLE_NAME, requests: puts });
+  await batchWriteAll({ db: ddb, tableName: VOTE_RECORD_TABLE_NAME, requests: deletes });
+  if (stale.length > 0) {
+    console.log("Deleted member vote record rows the processed bill no longer gives", {
+      key,
+      billGuid,
+      rows: stale.length,
+    });
+  }
+  return puts.length + deletes.length;
+};
+
 // The processed-bill fields everything below reads. storedAt is left out on purpose: it changes on
 // every write (an actions-only patch too) and only stands in for a missing vote or action date.
 const MEMBER_STATS_INPUT_FIELDS = ["guid", "sponsors", "cosponsors", "officialVotes", "civicProfile"] as const;
@@ -880,6 +1047,13 @@ const applyProcessedBill = async (key: string, current: unknown): Promise<number
     writes += await applyCounterUpdates(counterGuid, counterUpdates, key);
   }
 
+  // The key's plain guid: a suffixed document guid (BILLS-119hr1181rh) gave the bill a second set of profile rows,
+  // which the stale-row cleanup below never reached.
+  const billGuid = processedBillGuid(key, rootGuid);
+
+  // UX-39d: every bill with official votes, civic profile or not.
+  if (billGuid) writes += await writeVoteRecord(key, current, billGuid);
+
   if (!VOTE_PROFILE_TABLE_NAME && !LEGISLATIVE_PROFILE_TABLE_NAME) {
     console.warn("Skipping processed bill profile ingest; missing profile table env vars", { key });
     return writes;
@@ -887,9 +1061,6 @@ const applyProcessedBill = async (key: string, current: unknown): Promise<number
 
   const voteExtracted = await extractVoteRows(current);
   const legislativeExtracted = extractLegislativeRows(current);
-  // The key's plain guid: a suffixed document guid (BILLS-119hr1181rh) gave the bill a second set of profile rows,
-  // which the stale-row cleanup below never reached.
-  const billGuid = processedBillGuid(key, rootGuid);
   if (!billGuid) {
     console.warn("Skipping processed bill profile ingest; missing bill guid", { key });
     return writes;
