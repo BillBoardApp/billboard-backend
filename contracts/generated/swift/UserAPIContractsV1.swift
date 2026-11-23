@@ -114,14 +114,29 @@ nonisolated enum UserAPIContractsV1 {
         let currentCongressBillsSupportedCount: Int?
         /// Bills in the 119th Congress that BillBoard tracks and this member sponsored, from BillBoard's own member
         /// stats (billsSponsored), not Congress.gov career totals. Absent, with the other two counts, when the member
-        /// has no stats row (no tracked 119th bill, as for every member new in the 120th Congress) or the stats could
-        /// not be read; a member with a row gets its counts, zeros included.
+        /// has no 119th counts (no tracked 119th bill, as for every member new in the 120th Congress, whose stats row
+        /// then holds counts of later Congresses only) or the stats could not be read; a member with 119th counts gets
+        /// them, zeros included. Always the 119th Congress's: currentCongressCounts carries the newest Congress's.
         let trackedSponsoredCount: Int?
         /// Bills in the 119th Congress that BillBoard tracks and this member cosponsored, from BillBoard's own member
         /// stats (billsSupported), not Congress.gov career totals. Absent, with the other two counts, when the member
-        /// has no stats row (no tracked 119th bill, as for every member new in the 120th Congress) or the stats could
-        /// not be read; a member with a row gets its counts, zeros included.
+        /// has no 119th counts (no tracked 119th bill, as for every member new in the 120th Congress, whose stats row
+        /// then holds counts of later Congresses only) or the stats could not be read; a member with 119th counts gets
+        /// them, zeros included. Always the 119th Congress's: currentCongressCounts carries the newest Congress's.
         let trackedSupportedCount: Int?
+        let currentCongressCounts: CongressMemberCongressCounts?
+    }
+
+    /// A member's counts for one Congress, from BillBoard's own member stats, which count each Congress apart (REL-46):
+    /// the newest Congress the member has counts in, else the 119th. Absent when the member has no counts or the stats
+    /// could not be read. Clients label the counts with this congress, never with one computed from a date.
+    nonisolated struct CongressMemberCongressCounts: Decodable {
+        /// The Congress the counts cover, such as 120.
+        let congress: Int
+        /// Bills of that Congress that BillBoard tracks and this member sponsored.
+        let sponsored: Int
+        /// Bills of that Congress that BillBoard tracks and this member cosponsored.
+        let supported: Int
     }
 
     nonisolated struct ProcessedCongressMember: Decodable {
@@ -140,19 +155,22 @@ nonisolated enum UserAPIContractsV1 {
         let sponsoredLegislationCount: Int?
         let cosponsoredLegislationCount: Int?
         /// The same count as trackedSupportedCount, kept for older app builds. GET /processed-congress-members adds it
-        /// with the tracked counts and leaves all three out when the member has no stats row (REL-46) or the member
-        /// stats could not be read (REL-52), never sending 0 for a member with no stats row or an unknown count.
+        /// with the tracked counts and leaves all three out when the member has no 119th counts (REL-46) or the member
+        /// stats could not be read (REL-52), never sending 0 for a member with no 119th counts or an unknown count.
         let currentCongressBillsSupportedCount: Int?
         /// Bills in the 119th Congress that BillBoard tracks and this member sponsored, from BillBoard's own member
         /// stats (billsSponsored), not Congress.gov career totals. Absent, with the other two counts, when the member
-        /// has no stats row (no tracked 119th bill, as for every member new in the 120th Congress) or the stats could
-        /// not be read; a member with a row gets its counts, zeros included.
+        /// has no 119th counts (no tracked 119th bill, as for every member new in the 120th Congress, whose stats row
+        /// then holds counts of later Congresses only) or the stats could not be read; a member with 119th counts gets
+        /// them, zeros included. Always the 119th Congress's: currentCongressCounts carries the newest Congress's.
         let trackedSponsoredCount: Int?
         /// Bills in the 119th Congress that BillBoard tracks and this member cosponsored, from BillBoard's own member
         /// stats (billsSupported), not Congress.gov career totals. Absent, with the other two counts, when the member
-        /// has no stats row (no tracked 119th bill, as for every member new in the 120th Congress) or the stats could
-        /// not be read; a member with a row gets its counts, zeros included.
+        /// has no 119th counts (no tracked 119th bill, as for every member new in the 120th Congress, whose stats row
+        /// then holds counts of later Congresses only) or the stats could not be read; a member with 119th counts gets
+        /// them, zeros included. Always the 119th Congress's: currentCongressCounts carries the newest Congress's.
         let trackedSupportedCount: Int?
+        let currentCongressCounts: CongressMemberCongressCounts?
         /// The number of entries in terms (0 when it is missing). Clients count terms and use this only when terms is
         /// missing.
         let termCount: Int?
@@ -186,6 +204,7 @@ nonisolated enum UserAPIContractsV1 {
             case currentCongressBillsSupportedCount
             case trackedSponsoredCount
             case trackedSupportedCount
+            case currentCongressCounts
             case termCount
             case congress
             case memberType
@@ -215,6 +234,7 @@ nonisolated enum UserAPIContractsV1 {
             currentCongressBillsSupportedCount = try container.decodeIfPresent(Int.self, forKey: .currentCongressBillsSupportedCount)
             trackedSponsoredCount = try container.decodeIfPresent(Int.self, forKey: .trackedSponsoredCount)
             trackedSupportedCount = try container.decodeIfPresent(Int.self, forKey: .trackedSupportedCount)
+            currentCongressCounts = try container.decodeIfPresent(CongressMemberCongressCounts.self, forKey: .currentCongressCounts)
             termCount = try container.decodeIfPresent(Int.self, forKey: .termCount)
             congress = try container.decodeIfPresent(Int.self, forKey: .congress)
             memberType = try container.decodeIfPresent(String.self, forKey: .memberType)

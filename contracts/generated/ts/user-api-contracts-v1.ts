@@ -298,6 +298,20 @@ export interface BillsManifestSnapshotPointerV1 {
   expiresAt: string;
 }
 
+/**
+ * A member's counts for one Congress, from BillBoard's own member stats, which count each Congress apart (REL-46): the
+ * newest Congress the member has counts in, else the 119th. Absent when the member has no counts or the stats could not
+ * be read. Clients label the counts with this congress, never with one computed from a date.
+ */
+export interface CongressMemberCongressCountsV1 {
+  /** The Congress the counts cover, such as 120. */
+  congress: number;
+  /** Bills of that Congress that BillBoard tracks and this member sponsored. */
+  sponsored: number;
+  /** Bills of that Congress that BillBoard tracks and this member cosponsored. */
+  supported: number;
+}
+
 export interface CongressMemberManifestItemV1 {
   bioguideId: string;
   name: string;
@@ -310,18 +324,21 @@ export interface CongressMemberManifestItemV1 {
   currentCongressBillsSupportedCount?: number | null;
   /**
    * Bills in the 119th Congress that BillBoard tracks and this member sponsored, from BillBoard's own member stats
-   * (billsSponsored), not Congress.gov career totals. Absent, with the other two counts, when the member has no stats
-   * row (no tracked 119th bill, as for every member new in the 120th Congress) or the stats could not be read; a member
-   * with a row gets its counts, zeros included.
+   * (billsSponsored), not Congress.gov career totals. Absent, with the other two counts, when the member has no 119th
+   * counts (no tracked 119th bill, as for every member new in the 120th Congress, whose stats row then holds counts of
+   * later Congresses only) or the stats could not be read; a member with 119th counts gets them, zeros included. Always
+   * the 119th Congress's: currentCongressCounts carries the newest Congress's.
    */
   trackedSponsoredCount?: number;
   /**
    * Bills in the 119th Congress that BillBoard tracks and this member cosponsored, from BillBoard's own member stats
-   * (billsSupported), not Congress.gov career totals. Absent, with the other two counts, when the member has no stats
-   * row (no tracked 119th bill, as for every member new in the 120th Congress) or the stats could not be read; a member
-   * with a row gets its counts, zeros included.
+   * (billsSupported), not Congress.gov career totals. Absent, with the other two counts, when the member has no 119th
+   * counts (no tracked 119th bill, as for every member new in the 120th Congress, whose stats row then holds counts of
+   * later Congresses only) or the stats could not be read; a member with 119th counts gets them, zeros included. Always
+   * the 119th Congress's: currentCongressCounts carries the newest Congress's.
    */
   trackedSupportedCount?: number;
+  currentCongressCounts?: CongressMemberCongressCountsV1;
 }
 
 export interface CongressMembersManifestV1 {
@@ -361,24 +378,27 @@ export interface ProcessedCongressMemberV1 {
   cosponsoredLegislationCount?: number;
   /**
    * The same count as trackedSupportedCount, kept for older app builds. GET /processed-congress-members adds it with
-   * the tracked counts and leaves all three out when the member has no stats row (REL-46) or the member stats could not
-   * be read (REL-52), never sending 0 for a member with no stats row or an unknown count.
+   * the tracked counts and leaves all three out when the member has no 119th counts (REL-46) or the member stats could
+   * not be read (REL-52), never sending 0 for a member with no 119th counts or an unknown count.
    */
   currentCongressBillsSupportedCount?: number;
   /**
    * Bills in the 119th Congress that BillBoard tracks and this member sponsored, from BillBoard's own member stats
-   * (billsSponsored), not Congress.gov career totals. Absent, with the other two counts, when the member has no stats
-   * row (no tracked 119th bill, as for every member new in the 120th Congress) or the stats could not be read; a member
-   * with a row gets its counts, zeros included.
+   * (billsSponsored), not Congress.gov career totals. Absent, with the other two counts, when the member has no 119th
+   * counts (no tracked 119th bill, as for every member new in the 120th Congress, whose stats row then holds counts of
+   * later Congresses only) or the stats could not be read; a member with 119th counts gets them, zeros included. Always
+   * the 119th Congress's: currentCongressCounts carries the newest Congress's.
    */
   trackedSponsoredCount?: number;
   /**
    * Bills in the 119th Congress that BillBoard tracks and this member cosponsored, from BillBoard's own member stats
-   * (billsSupported), not Congress.gov career totals. Absent, with the other two counts, when the member has no stats
-   * row (no tracked 119th bill, as for every member new in the 120th Congress) or the stats could not be read; a member
-   * with a row gets its counts, zeros included.
+   * (billsSupported), not Congress.gov career totals. Absent, with the other two counts, when the member has no 119th
+   * counts (no tracked 119th bill, as for every member new in the 120th Congress, whose stats row then holds counts of
+   * later Congresses only) or the stats could not be read; a member with 119th counts gets them, zeros included. Always
+   * the 119th Congress's: currentCongressCounts carries the newest Congress's.
    */
   trackedSupportedCount?: number;
+  currentCongressCounts?: CongressMemberCongressCountsV1;
   /**
    * The number of entries in terms (0 when it is missing). Clients count terms and use this only when terms is missing.
    */
