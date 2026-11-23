@@ -1,4 +1,5 @@
 import { applyTestEnv } from "./fixtures/env";
+import { logLines } from "./logLines";
 
 jest.mock("@aws-sdk/client-dynamodb", () => {
   const mockSend = jest.fn();
@@ -86,6 +87,67 @@ describe("fetchLatestWeeklyDigest handler", () => {
         userId: { S: "user-1" },
         publishedAt: { S: "2026-03-22T14:00:00.000Z" },
       },
+    });
+  });
+
+  // UX-28, decision D7 (a): the brief fetch app 1.3 makes after a tap on the Sunday push carries ?trigger=push, and
+  // only that fetch adds 1 to WeeklyBriefOpenedFromPush. The metric line holds no user id; the response is the same.
+  describe("the push-open count (?trigger=push)", () => {
+    const opens = () => logLines(console.log).filter((line) => line._aws && "WeeklyBriefOpenedFromPush" in line);
+
+    beforeEach(() => {
+      jest.spyOn(console, "log").mockImplementation();
+      jest.setSystemTime(new Date("2026-03-22T15:00:00.000Z"));
+      mockDynamoSend.mockResolvedValue({});
+      delete process.env.AWS_LAMBDA_LOG_FORMAT;
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    test("counts a fetch with trigger=push, without the caller's id", async () => {
+      const { handler } = require("../handlers/fetchLatestWeeklyDigest");
+
+      const response = await handler({ ...event, queryStringParameters: { trigger: "push" } });
+
+      expect(response.statusCode).toBe(204);
+      expect(opens()).toHaveLength(1);
+      expect(opens()[0]).toEqual(
+        expect.objectContaining({
+          WeeklyBriefOpenedFromPush: 1,
+          _aws: expect.objectContaining({
+            CloudWatchMetrics: [
+              {
+                Namespace: "BillBoard/WeeklyDigest",
+                Dimensions: [[]],
+                Metrics: [{ Name: "WeeklyBriefOpenedFromPush", Unit: "Count" }],
+              },
+            ],
+          }),
+        }),
+      );
+      expect(JSON.stringify(opens())).not.toContain("user-1");
+    });
+
+    test.each([undefined, { trigger: "updates" }, { other: "push" }])(
+      "counts nothing for the query %p",
+      async (queryStringParameters) => {
+        const { handler } = require("../handlers/fetchLatestWeeklyDigest");
+
+        await handler({ ...event, queryStringParameters });
+
+        expect(opens()).toEqual([]);
+      },
+    );
+
+    test("counts nothing for a caller who is not signed in", async () => {
+      const { handler } = require("../handlers/fetchLatestWeeklyDigest");
+
+      const response = await handler({ queryStringParameters: { trigger: "push" } });
+
+      expect(response.statusCode).toBe(401);
+      expect(opens()).toEqual([]);
     });
   });
 

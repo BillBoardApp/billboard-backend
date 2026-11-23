@@ -214,6 +214,15 @@
         "operationId": "getLatestWeeklyDigest",
         "summary": "Read the caller's weekly digest for the latest published week",
         "tags": ["Weekly digest"],
+        "parameters": [
+          {
+            "name": "trigger",
+            "in": "query",
+            "required": false,
+            "description": "push when app 1.3 fetches the brief after a tap on the Sunday push (UX-28). Each such fetch adds 1 to the WeeklyBriefOpenedFromPush count, which holds no user id; the response is the same. Any other value, or none, counts nothing.",
+            "schema": { "type": "string", "enum": ["push"] }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Weekly digest payload",
