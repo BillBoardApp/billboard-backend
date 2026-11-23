@@ -317,6 +317,7 @@ describe("UserAPIServiceStack", () => {
     const WORKERS = [
       "GenerateWeeklyDigests",
       "WeeklyDigestWorker",
+      "WeeklyBriefPush",
       "CleanupOrphanedUsers",
       "ExportCognitoUsers",
       "PublishBillsManifest",
@@ -375,6 +376,7 @@ describe("UserAPIServiceStack", () => {
 
     expect(configFor("GenerateWeeklyDigests")).toBe("CodeDeployDefault.LambdaAllAtOnce");
     expect(configFor("WeeklyDigestWorker")).toBe("CodeDeployDefault.LambdaAllAtOnce");
+    expect(configFor("WeeklyBriefPush")).toBe("CodeDeployDefault.LambdaAllAtOnce");
     expect(configFor("PublishBillsManifest")).toBe("CodeDeployDefault.LambdaAllAtOnce");
     expect(configFor("CleanupOrphanedUsers")).toBe("CodeDeployDefault.LambdaAllAtOnce");
     expect(configFor("ExportCognitoUsers")).toBe("CodeDeployDefault.LambdaAllAtOnce");
@@ -1013,6 +1015,77 @@ describe("UserAPIServiceStack", () => {
     ]));
     expect(roleStatements("WeeklyDigestWorker").flatMap(actionsOf)
       .filter((action) => /^(sns|kms|secretsmanager|cognito-idp):/.test(action))).toEqual([]);
+  });
+
+  // UX-28: the Sunday Weekly Brief push.
+  describe("WeeklyBriefPush (UX-28)", () => {
+    test("runs hourly on Sunday from 10:30 to 17:30 New York, on its prod alias, with the generator's week", () => {
+      const schedules = Object.entries(templates.userApiTemplate.findResources("AWS::Scheduler::Schedule"))
+        .filter(([logicalId]) => logicalId.startsWith("WeeklyBriefPushSchedule"));
+      expect(schedules).toHaveLength(1);
+      const [, schedule] = schedules[0];
+      expect(schedule.Properties).toEqual(expect.objectContaining({
+        ScheduleExpression: "cron(30 10-17 ? * SUN *)",
+        ScheduleExpressionTimezone: "America/New_York",
+        FlexibleTimeWindow: { Mode: "OFF" },
+        State: "ENABLED",
+      }));
+      expect(JSON.stringify(schedule.Properties.Target.Arn)).toMatch(/WeeklyBriefPushProdAlias/);
+
+      const environment = functionEnvironment("WeeklyBriefPush");
+      const generator = functionEnvironment("GenerateWeeklyDigests");
+      expect(environment).toEqual({
+        TABLE_NAME: "UserWeeklyDigests",
+        PARTITION_KEY: "userId",
+        SORT_KEY: "publishedAt",
+        CANONICAL_SCHEDULE_EXPRESSION: generator.CANONICAL_SCHEDULE_EXPRESSION,
+        CANONICAL_PUBLISH_TIMEZONE: generator.CANONICAL_PUBLISH_TIMEZONE,
+        CANONICAL_PUBLISH_DAY: generator.CANONICAL_PUBLISH_DAY,
+        CANONICAL_PUBLISH_HOUR: generator.CANONICAL_PUBLISH_HOUR,
+        CANONICAL_PUBLISH_MINUTE: generator.CANONICAL_PUBLISH_MINUTE,
+        PII_TABLE_NAME: "UserPII",
+        PII_PARTITION_KEY: "userId",
+        DEVICES_TABLE_NAME: "UserDevices",
+        DEVICES_PARTITION_KEY: "userId",
+        DEVICES_SORT_KEY: "deviceId",
+        QUIET_HOURS: "on",
+        WEEKLY_BRIEF_PUSH: "on",
+        WEEKLY_BRIEF_PUSH_LAST_RUN_HOUR: "17",
+      });
+      templates.userApiTemplate.hasResourceProperties("AWS::Lambda::Function", {
+        FunctionName: "WeeklyBriefPush",
+        Timeout: 300,
+        MemorySize: 256,
+      });
+    });
+
+    test("keeps async retries and records a run that still fails in ScheduledJobFailures", () => {
+      templates.userApiTemplate.hasResourceProperties("AWS::Lambda::EventInvokeConfig", {
+        FunctionName: { Ref: Match.stringLikeRegexp("^WeeklyBriefPush") },
+        MaximumRetryAttempts: 2,
+        DestinationConfig: {
+          OnFailure: { Destination: Match.objectLike({ "Fn::Join": ["", Match.arrayWith([":ScheduledJobFailures"])] }) },
+        },
+      });
+    });
+
+    test("may scan UserPII, read and claim snapshots, read devices and drop an endpoint, and publish to endpoints only", () => {
+      expect(storeActions(roleStatements("WeeklyBriefPush"))).toEqual({
+        "table/UserDevices": ["dynamodb:Query", "dynamodb:UpdateItem"],
+        "table/UserPII": ["dynamodb:Scan"],
+        "table/UserWeeklyDigests": ["dynamodb:GetItem", "dynamodb:UpdateItem"],
+      });
+      const snsStatements = roleStatements("WeeklyBriefPush")
+        .filter((statement) => actionsOf(statement).some((action) => action.startsWith("sns:")));
+      expect(snsStatements).toHaveLength(1);
+      expect(actionsOf(snsStatements[0])).toEqual(["sns:Publish"]);
+      expect(JSON.stringify(snsStatements[0].Resource)).toMatch(/:endpoint\/APNS\//);
+      expect(JSON.stringify(snsStatements[0].Resource)).not.toMatch(/:app\/APNS\//);
+      // Its metrics are EMF log lines; it needs no PutMetricData, KMS, secrets or Cognito access.
+      expect(roleStatements("WeeklyBriefPush").flatMap(actionsOf)
+        .filter((action) => /^(cloudwatch|kms|secretsmanager|cognito-idp|sqs):/.test(action))
+        .filter((action) => !["sqs:SendMessage", "sqs:GetQueueAttributes", "sqs:GetQueueUrl"].includes(action))).toEqual([]);
+    });
   });
 
   // CQ-15: the store tables and buckets are granted here by their fixed names.

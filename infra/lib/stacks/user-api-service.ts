@@ -62,8 +62,12 @@ import {
   WEEKLY_DIGEST_WORKER_MAX_CONCURRENCY,
   WEEKLY_DIGEST_WORKER_MEMORY_MB,
   WEEKLY_DIGEST_WORKER_TIMEOUT_SECONDS,
+  WEEKLY_BRIEF_PUSH_ENABLED,
+  WEEKLY_BRIEF_PUSH_LAST_RUN_HOUR,
+  WEEKLY_BRIEF_PUSH_SCHEDULE_EXPRESSION,
+  WEEKLY_BRIEF_PUSH_TIMEOUT_SECONDS,
 } from '../config/weekly-digest-constants';
-import { APNS_PLATFORM_APPLICATION_NAME } from '../config/notification-service-constants';
+import { APNS_PLATFORM_APPLICATION_NAME, QUIET_HOURS_ENABLED } from '../config/notification-service-constants';
 import {
   ACCOUNT_EMAIL_FROM_ADDRESS,
   ACCOUNT_EMAIL_FROM_NAME,
@@ -142,6 +146,7 @@ import {
 import {
   CLEANUP_ORPHANED_USERS_ASYNC_RETRY_ATTEMPTS,
   GENERATE_WEEKLY_DIGESTS_ASYNC_RETRY_ATTEMPTS,
+  WEEKLY_BRIEF_PUSH_ASYNC_RETRY_ATTEMPTS,
 } from '../config/scheduled-jobs-constants';
 import { UserApiCanary } from '../constructs/user-api-canary';
 import { UserApiGateway } from '../constructs/user-api-gateway';
@@ -225,6 +230,8 @@ export class UserAPIServiceStack extends cdk.Stack {
   public readonly fetchLatestWeeklyDigest: lambda.IFunction;
   public readonly generateWeeklyDigests: lambda.IFunction;
   public readonly weeklyDigestWorker: lambda.IFunction;
+  /** UX-28: the Sunday Weekly Brief push, hourly 10:30 to 17:30 New York (WeeklyBriefPushSchedule). */
+  public readonly weeklyBriefPush: lambda.IFunction;
   public readonly accountData: lambda.IFunction;
   public readonly accountDataStatus: lambda.IFunction;
   public readonly cleanupOrphanedUsers: lambda.IFunction;
@@ -1086,6 +1093,53 @@ export class UserAPIServiceStack extends cdk.Stack {
     billsManifestTable.grantReadData(this.weeklyDigestWorker);
     congressMembersManifestTable.grantReadData(this.weeklyDigestWorker);
 
+    // ── Weekly Brief push (UX-28) ──
+    // Sends each user's brief once, at the first hourly run outside their quiet hours, to the devices whose row says
+    // notifyWeeklyBrief true (app 1.3 only). Not held by, and not counted in, UserNotifier's push pace.
+    const weeklyBriefPush = addProdFunction('WeeklyBriefPush', 'weeklyBriefPush', {
+      environment: {
+        // The snapshots: TABLE_NAME, PARTITION_KEY and SORT_KEY, as the other weekly digest functions read them.
+        ...weeklyDigestTableEnvironment,
+        // The same schedule settings as the generator, so both name the same week.
+        ...weeklyDigestScheduleEnvironment,
+        ...piiTableReferenceEnvironment,
+        DEVICES_TABLE_NAME: USER_DEVICES_TABLE_NAME,
+        DEVICES_PARTITION_KEY: USER_PARTITION_KEY,
+        DEVICES_SORT_KEY: USER_DEVICES_SORT_KEY,
+        // UserNotifier's quiet hours (QUIET_HOURS_ENABLED), from the state on the user's UserPII row.
+        QUIET_HOURS: QUIET_HOURS_ENABLED ? 'on' : 'off',
+        WEEKLY_BRIEF_PUSH: WEEKLY_BRIEF_PUSH_ENABLED ? 'on' : 'off',
+        WEEKLY_BRIEF_PUSH_LAST_RUN_HOUR: WEEKLY_BRIEF_PUSH_LAST_RUN_HOUR.toString(),
+      },
+      timeout: cdk.Duration.seconds(WEEKLY_BRIEF_PUSH_TIMEOUT_SECONDS),
+    }, 'worker');
+    this.weeklyBriefPush = weeklyBriefPush.alias;
+    // A run that could not finish some users throws: the async retries try them again (the claim keeps everyone
+    // else from a second push), then the run is recorded in ScheduledJobFailures.
+    weeklyBriefPush.alias.configureAsyncInvoke({
+      retryAttempts: WEEKLY_BRIEF_PUSH_ASYNC_RETRY_ATTEMPTS,
+      onFailure: scheduledJobFailureDestination(this),
+    });
+    // Exactly what it does: scan UserPII (deletion and adult status, the state for the quiet hours), read each
+    // user's snapshot and claim its push (pushClaimedAt), query the user's devices and drop a gone endpoint's ARN,
+    // and publish to the APNs platform endpoints. Its metrics are EMF log lines, so it needs no PutMetricData.
+    weeklyBriefPush.fn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:Scan'],
+      resources: [piiTable.tableArn],
+    }));
+    weeklyBriefPush.fn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
+      resources: [weeklyDigestsTable.tableArn],
+    }));
+    weeklyBriefPush.fn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:Query', 'dynamodb:UpdateItem'],
+      resources: [devicesTable.tableArn],
+    }));
+    weeklyBriefPush.fn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['sns:Publish'],
+      resources: [apnsPlatformEndpointArn],
+    }));
+
     const accountData = addProdFunction('AccountData', 'accountData', {
       environment: {
         ...accountDataEnvironment,
@@ -1369,6 +1423,34 @@ export class UserAPIServiceStack extends cdk.Stack {
       })
     );
     grantScheduledJobFailuresSend(weeklyDigestSchedulerRole);
+
+    const weeklyBriefPushSchedulerRole = new iam.Role(this, 'WeeklyBriefPushSchedulerRole', {
+      assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com'),
+    });
+    weeklyBriefPushSchedulerRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['lambda:InvokeFunction'],
+        resources: [weeklyBriefPush.alias.functionArn],
+      })
+    );
+    grantScheduledJobFailuresSend(weeklyBriefPushSchedulerRole);
+
+    // UX-28, decision D3 (a): hourly on Sunday from 10:30 to 17:30 New York, so each user gets the brief at the first
+    // run outside their quiet hours. A run that cannot be delivered goes to ScheduledJobFailures.
+    new scheduler.CfnSchedule(this, 'WeeklyBriefPushSchedule', {
+      description: 'Sunday Weekly Brief push, hourly 10:30 AM to 5:30 PM America/New_York (UX-28).',
+      flexibleTimeWindow: {
+        mode: 'OFF',
+      },
+      scheduleExpression: WEEKLY_BRIEF_PUSH_SCHEDULE_EXPRESSION,
+      scheduleExpressionTimezone: WEEKLY_DIGEST_CANONICAL_PUBLISH_TIMEZONE,
+      state: 'ENABLED',
+      target: {
+        arn: weeklyBriefPush.alias.functionArn,
+        roleArn: weeklyBriefPushSchedulerRole.roleArn,
+        deadLetterConfig: { arn: scheduledJobFailuresQueue(this).queueArn },
+      },
+    });
 
     new scheduler.CfnSchedule(this, 'WeeklyDigestGenerationSchedule', {
       description: 'Canonical weekly digest publication every Sunday at 10:00 AM America/New_York.',
