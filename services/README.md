@@ -218,7 +218,10 @@ matches (RUNBOOK 11.4 has the rules). A vetoed bill's item adds `vetoed: true` a
 companion group shows its vetoed member over a partner that only passed (project decision 2026-11-19). A followed
 member is named only by the name in the members table: one who is not there (who left Congress, REL-46 A4) gets no
 member item and no "Backed by" reason, never their bioguide id, and does not count toward a bill's rank (unless the
-table names nobody), so a bill only they back is not in the brief. Snapshots expire
+table names nobody), so a bill only they back is not in the brief. UX-41 concept 4: a top-level `yourBills` lists every bill
+the reader voted on whose latest action is dated in the week, newest first (at most 20; left out when none), each with
+the reason "You voted on this" and never the vote itself. App 1.3 shows it first; the sections are built as before, so
+1.1 and 1.2 (which ignore the key) lose nothing, and 1.3 shows a bill that is also in a section once, under Your bills. Snapshots expire
 21 days after publication; only the current week's is read.
 
 **Companion bills (APPF-23).** Identical bills introduced in both chambers (H.R. 1285 and S. 570) are paired so the

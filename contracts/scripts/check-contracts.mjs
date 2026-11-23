@@ -186,6 +186,32 @@ const VETOED_MUST_REJECT = [false, "true", 1, null].flatMap((value) => [
   [WEEKLY_DIGEST, `vetoed ${JSON.stringify(value)} on a brief item`, withDigestItems(withVetoed(value))],
 ]);
 
+// ── Your bills this week (UX-41 concept 4, decision D5 (a)) ──
+// A top-level list of brief items, left out in a week with none (and by every server before it), so a brief without it
+// must validate. Its items are brief items: no vote, no undeclared field. The sections stay as 1.1 and 1.2 read them, so
+// a bill can be in both. The fixture has one, so check:swift decodes it.
+const YOUR_BILLS_MUST_ACCEPT = [
+  [
+    WEEKLY_DIGEST,
+    "a brief without yourBills (no voted bill moved, or a server before UX-41)",
+    ({ yourBills, ...digest }) => digest,
+  ],
+  [WEEKLY_DIGEST, "a brief whose only items are your bills", (digest) => ({ ...digest, sections: [] })],
+];
+const YOUR_BILLS_MUST_REJECT = [
+  [WEEKLY_DIGEST, "a null yourBills", (digest) => ({ ...digest, yourBills: null })],
+  [
+    WEEKLY_DIGEST,
+    "a yourBills item carrying the reader's vote",
+    (digest) => ({ ...digest, yourBills: digest.yourBills.map((item) => ({ ...item, vote: "yea" })) }),
+  ],
+  [
+    WEEKLY_DIGEST,
+    "a yourBills item without a summary",
+    (digest) => ({ ...digest, yourBills: digest.yourBills.map(({ summary, ...item }) => item) }),
+  ],
+];
+
 // ── Member facts (REL-52, REL-46) ──
 // A member with no 119th counts (REL-46) or whose stats could not be read has none of the three 119th counts (no 0 for
 // a member with no 119th counts or for an unknown count; a row with zeros keeps them), and a senator's per-Congress
@@ -860,6 +886,7 @@ const MUST_REJECT = [
   ...MEMBER_MUST_REJECT,
   ...SPONSOR_MUST_REJECT,
   ...RECORD_MUST_REJECT,
+  ...YOUR_BILLS_MUST_REJECT,
   ...LABEL_MUST_REJECT,
   ...STATS_MUST_REJECT,
   ...VERIFICATION_MUST_REJECT,
@@ -957,6 +984,7 @@ const MUST_ACCEPT = [
     withManifestCompanionGroup(unknownRelationship),
   ],
   ...VETOED_MUST_ACCEPT,
+  ...YOUR_BILLS_MUST_ACCEPT,
   ...MEMBER_MUST_ACCEPT,
   ...SPONSOR_MUST_ACCEPT,
   ...RECORD_MUST_ACCEPT,

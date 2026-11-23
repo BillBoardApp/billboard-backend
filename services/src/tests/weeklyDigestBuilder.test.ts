@@ -420,6 +420,159 @@ describe("member items name their bills, counted over the whole week (S2)", () =
   });
 });
 
+// UX-41 concept 4 (decision D5 (a)): "Your bills this week", a top-level list app 1.3 shows first. Apps 1.1 and 1.2 never
+// read it, so the sections stay exactly as they were and a listed bill can also be in one.
+describe("your bills this week (yourBills)", () => {
+  const acted = (day: string, text = "Passed the House.") => processed({ actions: [{ actionDate: day, text }] });
+
+  it("lists every voted bill whose latest action is dated in the week, newest first, saying only 'You voted on this'", async () => {
+    const digest = await build({
+      items: [
+        entry("BILLS-119hr1", { billStatus: "Passed" }),
+        entry("BILLS-119hr2", { billStatus: "Passed" }),
+        entry("BILLS-119hr3", { billStatus: "Passed" }),
+      ],
+      bills: {
+        "BILLS-119hr1": acted("2026-03-16"),
+        "BILLS-119hr2": acted("2026-03-20"),
+        "BILLS-119hr3": acted("2026-03-18"),
+      },
+      votedOn: ["BILLS-119hr1", "BILLS-119hr2"],
+    });
+
+    expect(digest!.yourBills).toEqual([
+      expect.objectContaining({
+        id: "bill|BILLS-119hr2",
+        kind: "bill",
+        billGuid: "BILLS-119hr2",
+        summary: "Mar 20: Passed the House.",
+        reason: "You voted on this",
+        accent: "movement",
+        billState: "passed",
+      }),
+      expect.objectContaining({ billGuid: "BILLS-119hr1", summary: "Mar 16: Passed the House." }),
+    ]);
+  });
+
+  it("leaves the sections as 1.1 and 1.2 read them: a listed bill is still under Moved, and the headline is unchanged", async () => {
+    const options = {
+      items: [entry("BILLS-119hr9", { billStatus: "Passed" as const })],
+      bills: { "BILLS-119hr9": acted("2026-03-19") },
+      votedOn: ["BILLS-119hr9"],
+    };
+    const digest = await build(options);
+
+    expect(section(digest, "moved_this_week")).toEqual([
+      expect.objectContaining({ billGuid: "BILLS-119hr9", reason: "You voted on this" }),
+    ]);
+    expect(digest!.yourBills!.map((item) => item.billGuid)).toEqual(["BILLS-119hr9"]);
+    expect(digest!.summary).toBe("One bill moved this week.");
+  });
+
+  it("also lists a voted bill that needs attention again, which stays there", async () => {
+    const digest = await build({
+      items: [entry("BILLS-119hr9")],
+      bills: { "BILLS-119hr9": acted("2026-03-19", "Reported by the Committee on Energy and Commerce.") },
+      votedOn: ["BILLS-119hr9"],
+    });
+
+    expect(section(digest, "needs_attention")).toEqual([
+      expect.objectContaining({ billGuid: "BILLS-119hr9", reason: "You voted on this before" }),
+    ]);
+    expect(digest!.yourBills).toEqual([
+      expect.objectContaining({ billGuid: "BILLS-119hr9", reason: "You voted on this" }),
+    ]);
+  });
+
+  it("leaves out a voted bill with no action dated in the week, and the field when nothing is left", async () => {
+    const digest = await build({
+      items: [entry("BILLS-119hr1"), entry("BILLS-119hr2")],
+      // A summary change only (no action in the week), and a bill whose processed copy cannot be read.
+      bills: { "BILLS-119hr1": acted("2026-03-02", "Introduced in House") },
+      votedOn: ["BILLS-119hr1", "BILLS-119hr2"],
+    });
+
+    expect(
+      items(digest)
+        .map((item) => item.billGuid)
+        .sort(),
+    ).toEqual(["BILLS-119hr1", "BILLS-119hr2"]);
+    expect(digest).not.toHaveProperty("yourBills");
+  });
+
+  it("is left out for a reader with no vote", async () => {
+    const digest = await build({
+      items: [entry("BILLS-119hr1", { billStatus: "Passed" })],
+      bills: { "BILLS-119hr1": acted("2026-03-19") },
+    });
+
+    expect(digest).not.toHaveProperty("yourBills");
+  });
+
+  it("loads and lists voted bills ranked past the dozen the sections draw on, up to 20", async () => {
+    // Twelve watched bills fill the sections' slots; 25 voted bills rank after them.
+    const watched = Array.from({ length: 12 }, (_, index) =>
+      entry(`BILLS-119hr${100 + index}`, { billStatus: "Passed" }),
+    );
+    const voted = Array.from({ length: 25 }, (_, index) =>
+      entry(`BILLS-119s${index + 1}`, { subCategories: [], updatedAt: "2026-03-16T15:00:00.000Z" }),
+    );
+    const bills = Object.fromEntries(
+      voted.map((bill, index) => [bill.guid, acted(`2026-03-${String(15 + (index % 7)).padStart(2, "0")}`)]),
+    );
+    const loaded: string[] = [];
+    const digest = await build({
+      items: [...watched, ...voted],
+      bills,
+      watched: watched.map((bill) => bill.guid),
+      votedOn: voted.map((bill) => bill.guid),
+      loaded,
+    });
+
+    expect(loaded.filter((guid) => guid.startsWith("BILLS-119s"))).toHaveLength(20);
+    expect(digest!.yourBills).toHaveLength(20);
+    const days = digest!.yourBills!.map((item) => item.summary.slice(0, 6));
+    expect(days).toEqual([...days].sort((left, right) => Date.parse(`${right} 2026`) - Date.parse(`${left} 2026`)));
+    expect(items(digest).some((item) => item.billGuid?.startsWith("BILLS-119s"))).toBe(false);
+  });
+
+  it("lists a companion pair once, whichever bill the reader voted on", async () => {
+    const HOUSE = "BILLS-119hr1285ih";
+    const SENATE = "BILLS-119s570is";
+    const digest = await build({
+      items: [entry(HOUSE, { billStatus: "Passed" }), entry(SENATE, { billStatus: "Passed" })],
+      bills: { [HOUSE]: acted("2026-03-19"), [SENATE]: acted("2026-03-18", "Passed the Senate.") },
+      companions: [[HOUSE, SENATE]],
+      votedOn: [SENATE],
+    });
+
+    expect(digest!.yourBills).toHaveLength(1);
+  });
+
+  it("never writes the reader's vote", async () => {
+    const digest = await buildWeeklyDigest({
+      window,
+      preferences: {
+        trackedTopics: ["Energy"],
+        trackedLifeAreas: [],
+        followedMembers: [],
+        watchedBillGuids: [],
+        selectedBillContentTypes: [],
+      },
+      voteStatesByBillId: new Map([
+        ["bills-119hr1", { billId: "BILLS-119hr1", feedback: "Nay", votedAt: "2026-03-10T12:00:00.000Z" }],
+      ]),
+      manifestItems: [entry("BILLS-119hr1", { billStatus: "Passed" })],
+      memberNameById: new Map(),
+      loadProcessedBill: async () =>
+        ({ ...acted("2026-03-19"), guid: "BILLS-119hr1" }) as unknown as ProcessedBillDocument,
+    });
+
+    expect(digest!.yourBills).toHaveLength(1);
+    expect(JSON.stringify(digest)).not.toMatch(/\bNay\b|2026-03-10/);
+  });
+});
+
 // REL-46 A4: from the first brief after Jan 3, 2027, members who left Congress are no longer in the members table. The
 // brief used to print their bioguide id as a name ("Backed by D000002"), which apps 1.1 and 1.2 show as is.
 describe("a followed member the members table does not name (one who left Congress)", () => {

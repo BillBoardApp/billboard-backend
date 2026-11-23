@@ -116,5 +116,19 @@
         }
       ]
     }
+  ],
+  "yourBills": [
+    {
+      "id": "bill|BILLS-119hr1285ih",
+      "kind": "bill",
+      "title": "Rural Broadband Access Act",
+      "eyebrow": "Passed Mar 18",
+      "summary": "Mar 18: Passed the House.",
+      "detail": "Funds broadband lines to rural homes and schools.",
+      "reason": "You voted on this",
+      "accent": "movement",
+      "billState": "passed",
+      "billGuid": "BILLS-119hr1285ih"
+    }
   ]
 }

@@ -40,6 +40,13 @@ import {
  *   and the eyebrow's status word, which both apps strip. Its item adds `vetoed: true` for app 1.3's VETOED stamp, and
  *   the lines that would say "Passed this week" or "Failed this week" say what the veto news of the week was instead
  *   (vetoNews). A companion group shows its vetoed member over a partner that only passed (COMPANION_STATUS_RANK).
+ * - "Your bills this week" (`yourBills`, UX-41 concept 4, decision D5 (a)): every bill the user voted on whose latest
+ *   action is dated in the week, newest action first, at most YOUR_BILLS_MAX. It is a top-level field because apps 1.1
+ *   and 1.2 decode section kinds as a strict enum but ignore unknown top-level keys; app 1.3 shows it first. Its items
+ *   say "You voted on this" (1.3 words the reader's own vote from its own store); no vote choice is ever written. The
+ *   sections are built exactly as before, so 1.1 and 1.2, which never read the list, keep every item they showed: a
+ *   bill listed here can also be in a section, and app 1.3 shows it once, here. The field is left out in a week with
+ *   no such bill.
  * - A member is named only by the name the members table stores (REL-46 A4). One who is not there, such as a member
  *   who left Congress, gets no member item and no "Backed by" reason: the brief never shows a bioguide id as a name.
  *   Nor do they count toward a bill's rank, so a bill that only such a member backs is not in the brief unless
@@ -54,6 +61,10 @@ const ACTION_TEXT_MAX_CHARS = 200;
 const CONTEXT_TEXT_MAX_CHARS = 300;
 /** Candidates whose processed bills are loaded for the bill sections. */
 const HYDRATED_CANDIDATES = 12;
+/** The most bills "Your bills this week" lists (UX-41 concept 4): a bound on the snapshot, far above a usual week. */
+export const YOUR_BILLS_MAX = 20;
+/** A yourBills item's reason; app 1.3 says the reader's own vote instead ("You voted Yea"). */
+export const YOUR_BILLS_REASON = "You voted on this";
 
 export interface WeeklyDigestPreferencesSummary {
   trackedTopics: string[];
@@ -1031,19 +1042,30 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
     return null;
   }
 
-  const hydratedCandidates = (
-    await Promise.all(
-      rankedCandidates.slice(0, HYDRATED_CANDIDATES).map(async (candidate): Promise<RankedCandidate | null> => {
-        const bill = (await input.loadProcessedBill(candidate.manifest)) ?? createPlaceholderBill(candidate.manifest);
-        const settled = withCeremonial(candidate, ceremonialVerdict(candidate, bill));
-        return settled ? { ...settled, bill } : null;
-      }),
+  const hydrate = async (candidates: Candidate[]): Promise<RankedCandidate[]> =>
+    (
+      await Promise.all(
+        candidates.map(async (candidate): Promise<RankedCandidate | null> => {
+          const bill = (await input.loadProcessedBill(candidate.manifest)) ?? createPlaceholderBill(candidate.manifest);
+          const settled = withCeremonial(candidate, ceremonialVerdict(candidate, bill));
+          return settled ? { ...settled, bill } : null;
+        }),
+      )
     )
-  )
-    .filter((candidate): candidate is RankedCandidate => candidate !== null)
-    .sort(compareCandidates);
+      .filter((candidate): candidate is RankedCandidate => candidate !== null)
+      .sort(compareCandidates);
 
-  if (hydratedCandidates.length === 0) {
+  const hydratedCandidates = await hydrate(rankedCandidates.slice(0, HYDRATED_CANDIDATES));
+  // UX-41 concept 4: "Your bills this week" lists every voted bill that moved, also those ranked past the dozen the
+  // sections draw on. Their processed bills are loaded too (once per run, shared by every user), up to YOUR_BILLS_MAX.
+  const votedBeyondSections = await hydrate(
+    rankedCandidates
+      .slice(HYDRATED_CANDIDATES)
+      .filter((candidate) => candidate.userPreviouslyVoted)
+      .slice(0, YOUR_BILLS_MAX),
+  );
+
+  if (hydratedCandidates.length === 0 && votedBeyondSections.length === 0) {
     return null;
   }
 
@@ -1075,6 +1097,22 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
       consumed.add(usedKey(candidate));
       return makeBillItem(candidate, input.window, input.memberNameById, "attention");
     });
+
+  // UX-41 concept 4: the voted bills with an action dated in the week, newest action first. No section takes notice
+  // of it (see the module comment).
+  const yourBills = [...hydratedCandidates, ...votedBeyondSections]
+    .filter((candidate) => candidate.userPreviouslyVoted)
+    .map((candidate) => ({ candidate, action: latestActionInWeek(candidate.bill, input.window) }))
+    .filter((entry): entry is { candidate: RankedCandidate; action: WeekAction } => entry.action !== undefined)
+    .sort(
+      (left, right) =>
+        right.action.day.localeCompare(left.action.day) || compareCandidates(left.candidate, right.candidate),
+    )
+    .slice(0, YOUR_BILLS_MAX)
+    .map(({ candidate }) => ({
+      ...makeBillItem(candidate, input.window, input.memberNameById, "movement"),
+      reason: YOUR_BILLS_REASON,
+    }));
 
   const movedThisWeek = hydratedCandidates
     .filter((candidate) => !consumed.has(usedKey(candidate)))
@@ -1140,7 +1178,7 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
     },
   ].filter((section) => section.items.length > 0);
 
-  if (sections.length === 0) {
+  if (sections.length === 0 && yourBills.length === 0) {
     return null;
   }
 
@@ -1181,5 +1219,6 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
       },
     ],
     sections,
+    ...(yourBills.length > 0 ? { yourBills } : {}),
   };
 }
