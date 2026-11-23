@@ -209,9 +209,10 @@ describe("MonitoringStack", () => {
     // Integrity-GeocoderVintageFallback, Ingestion-BillPollerLag119 and Ingestion-BillPollerStateMismatch.
     // The poller's heartbeat (Billboard-Heartbeat-BillsApiPoller) adds 1. REL-56 adds 4: Ingestion-BillPollerFilterImprecise,
     // Ingestion-BillPollerPageDrift, Ingestion-BillPollerFallback and Ingestion-BillPollerLateRows. REL-58 adds 1:
-    // Ingestion-FetchRawBillFailing. UX-28 adds 2: WeeklyDigest-BriefPushFailed and WeeklyBriefPush's Errors.
-    test("MonitoringStack has 146 metric alarms and 3 composites", () => {
-      expect(Object.keys(metricAlarms())).toHaveLength(146);
+    // Ingestion-FetchRawBillFailing. UX-28 adds 2: WeeklyDigest-BriefPushFailed and WeeklyBriefPush's Errors. UX-39d
+    // adds 1: FetchCongressMemberRecord's Errors.
+    test("MonitoringStack has 147 metric alarms and 3 composites", () => {
+      expect(Object.keys(metricAlarms())).toHaveLength(147);
       expect(Object.values(compositeAlarms()).map((resource) => resource.Properties.AlarmName).sort()).toEqual([
         "Billboard-Ingest-Unhealthy",
         "Billboard-Page-AppBroken",
@@ -328,7 +329,7 @@ describe("MonitoringStack", () => {
         MONITORED_DLQ_NAMES,
       ].forEach((list) => expect(new Set(list).size).toBe(list.length));
 
-      expect(MONITORED_LAMBDA_NAMES).toHaveLength(49);
+      expect(MONITORED_LAMBDA_NAMES).toHaveLength(50);
       expect(MONITORED_LAMBDA_NAMES).toEqual(expect.arrayContaining([
         "ExportCognitoUsers",
         "PublishBillsManifest",
@@ -2557,12 +2558,13 @@ describe("MonitoringStack", () => {
     // Billboard-Ingestion-BillPollerPageDrift, Billboard-Ingestion-BillPollerFallback and
     // Billboard-Ingestion-BillPollerLateRows make it 146 and 197. REL-58: Billboard-Ingestion-FetchRawBillFailing
     // makes it 147 and 198. UX-28: Billboard-WeeklyDigest-BriefPushFailed and WeeklyBriefPush's Errors alarm make
-    // MonitoringStack 149, and its alias error alarm the service stacks 52: 201.
-    test("the app has 201 alarms: 149 in MonitoringStack and 52 in the service stacks", () => {
+    // MonitoringStack 149, and its alias error alarm the service stacks 52: 201. UX-39d: FetchCongressMemberRecord's
+    // Errors alarm here and its alias's error alarm in UserAPIServiceStack make it 150 and 203 (53 in the service stacks).
+    test("the app has 203 alarms: 150 in MonitoringStack and 53 in the service stacks", () => {
       const alarms = resources.filter((resource) =>
         resource.Type === "AWS::CloudWatch::Alarm" || resource.Type === "AWS::CloudWatch::CompositeAlarm");
-      expect(alarms).toHaveLength(201);
-      expect(Object.keys({ ...metricAlarms(), ...compositeAlarms() })).toHaveLength(149);
+      expect(alarms).toHaveLength(203);
+      expect(Object.keys({ ...metricAlarms(), ...compositeAlarms() })).toHaveLength(150);
     });
 
     // infra/README.md gives the totals twice (the stack table and the alarm list); a PR that adds an alarm must move

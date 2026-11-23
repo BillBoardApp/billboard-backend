@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.billboard/schemas/entities/congress-member-record.v1.schema.json",
+  "title": "CongressMemberRecordV1",
+  "description": "A member of Congress's public record in BillBoard (UX-39d), from GET /congress-member-record: their latest roll-call vote on each bill in BillBoard, newest first, a page at a time, and the bills they sponsored. Facts only, as Congress records them: no score, no ranking, no judging words, and no BillBoard user's vote.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["bioguideId", "votes"],
+  "properties": {
+    "bioguideId": { "$ref": "processed-bill.v1.schema.json#/$defs/bioguideId" },
+    "votes": {
+      "type": "array",
+      "description": "The member's latest roll-call vote on each bill in BillBoard that has one, newest first (by votedAt, then bill guid), at most the request's limit. A member in both chambers' latest roll calls of a bill (who moved chambers) has one entry for each. Empty for a member with no recorded vote, or past the last page.",
+      "items": { "$ref": "#/$defs/vote" }
+    },
+    "nextCursor": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Present when more votes follow: send it as cursor to read the next page. Absent on the last page."
+    },
+    "sponsoredBills": {
+      "type": "array",
+      "description": "The bills in BillBoard the member sponsored (not cosponsored), from BillBoard's member stats: the 119th Congress and each later Congress counted apart (REL-46), newest Congress first, then by updatedAt, newest first. At most 250 (sponsoredBillCount is the whole number). Sent on the first page only (no cursor).",
+      "items": { "$ref": "#/$defs/bill" }
+    },
+    "sponsoredBillCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many bills in BillBoard the member sponsored, sponsoredBills or more. Sent with sponsoredBills."
+    }
+  },
+  "$defs": {
+    "vote": {
+      "title": "CongressMemberRecordVoteV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["billGuid", "congress", "billType", "billNumber", "chamber", "position", "votedAt"],
+      "properties": {
+        "billGuid": {
+          "type": "string",
+          "pattern": "^BILLS-[0-9]+[a-z]+[0-9]+$",
+          "description": "The bill's plain guid, such as BILLS-119hr1234."
+        },
+        "congress": { "type": "string", "minLength": 1, "description": "From the guid, such as 119." },
+        "billType": { "type": "string", "minLength": 1, "description": "From the guid, such as hr or s." },
+        "billNumber": { "type": "string", "minLength": 1, "description": "From the guid, such as 1234." },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The bill's title as the bills manifest has it; absent when the bill has no manifest row yet."
+        },
+        "chamber": {
+          "type": "string",
+          "enum": ["House", "Senate"],
+          "description": "The chamber whose roll call this is."
+        },
+        "position": { "$ref": "#/$defs/position" },
+        "votedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The roll call's day (midnight UTC), or when the vote was synced when Congress gave no day."
+        },
+        "actionText": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the roll call was on, as Congress words it (a passage, a cloture vote, a motion), at most 500 characters; absent when Congress gave none."
+        }
+      }
+    },
+    "position": {
+      "title": "CongressMemberRecordPositionV1",
+      "type": "string",
+      "enum": ["Yea", "Nay", "Present", "Not Voting"],
+      "description": "The member's position as Congress records it."
+    },
+    "bill": {
+      "title": "CongressMemberRecordBillV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["billGuid", "congress", "billType", "billNumber"],
+      "properties": {
+        "billGuid": {
+          "type": "string",
+          "pattern": "^BILLS-[0-9]+[a-z]+[0-9]+$",
+          "description": "The bill's plain guid, such as BILLS-119hr1234."
+        },
+        "congress": { "type": "string", "minLength": 1, "description": "From the guid, such as 119." },
+        "billType": { "type": "string", "minLength": 1, "description": "From the guid, such as hr or s." },
+        "billNumber": { "type": "string", "minLength": 1, "description": "From the guid, such as 1234." },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The bill's title as the bills manifest has it; absent when the bill has no manifest row yet."
+        },
+        "billStatus": { "$ref": "processed-bill.v1.schema.json#/properties/billStatus" },
+        "vetoed": {
+          "type": "boolean",
+          "const": true,
+          "description": "Only as true, when the bill's veto stands, as the bills manifest has it; absent otherwise."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The bill's date in the bills manifest (its latest news); absent without a manifest row."
+        }
+      }
+    }
+  }
+}

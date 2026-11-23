@@ -238,6 +238,7 @@ describe("UserAPIServiceStack", () => {
       "feedback",
       "bill-stats",
       "congress-member-civic-profile",
+      "congress-member-record",
       "processed-congress-members",
       "district-verification",
     ].forEach((pathPart) => {
@@ -342,7 +343,7 @@ describe("UserAPIServiceStack", () => {
     const apiHandlers = functions.filter((properties) =>
       !WORKERS.includes(properties.FunctionName) && !COGNITO_TRIGGERS.includes(properties.FunctionName));
 
-    expect(apiHandlers).toHaveLength(22);
+    expect(apiHandlers).toHaveLength(23);
     apiHandlers.forEach(({ FunctionName, Timeout }) => {
       expect({ FunctionName, Timeout }).toEqual({ FunctionName, Timeout: expect.any(Number) });
       expect(Timeout).toBeGreaterThanOrEqual(10);
@@ -1531,6 +1532,63 @@ const templateChanges = (before: CfnTemplate, after: CfnTemplate) => {
     changed: Object.keys(right).filter((id) => id in left && left[id] !== right[id]).sort(),
   };
 };
+
+// UX-39d: GET /congress-member-record reads public facts about a member of Congress and nothing about any user.
+describe("UserAPIServiceStack, FetchCongressMemberRecord", () => {
+  test("is a 512 MB, 10 s API handler with the vote record, member stats and bills manifest names", () => {
+    templates.userApiTemplate.hasResourceProperties("AWS::Lambda::Function", {
+      FunctionName: "FetchCongressMemberRecord",
+      MemorySize: 512,
+      Timeout: 10,
+      Environment: {
+        Variables: {
+          VOTE_RECORD_TABLE_NAME: "CongressMemberVoteRecord",
+          VOTE_RECORD_PRIMARY_KEY: "bioguideId",
+          VOTE_RECORD_SORT_KEY: "recordKey",
+          STATS_TABLE_NAME: "CongressMembersStats",
+          STATS_PRIMARY_KEY: "bioguideId",
+          MANIFEST_TABLE_NAME: "BillsManifest",
+          MANIFEST_PRIMARY_KEY: "pk",
+          MANIFEST_SORT_KEY: "sk",
+          MANIFEST_PK_VALUE: "BILL",
+          MANIFEST_GUID_LOOKUP_PK: "BILL_GUID",
+        },
+      },
+    });
+  });
+
+  test("reads only: a Query of the record, a GetItem of the stats row, and the manifest's bill and lookup rows", () => {
+    const statements = roleStatementsOf(templates.userApiTemplate, "FetchCongressMemberRecord");
+    const unscoped = statements.filter((statement) => !JSON.stringify(statement.Condition ?? {}).includes("LeadingKeys"));
+    const access = storeActions(unscoped);
+    expect(access["table/CongressMemberVoteRecord"]).toEqual(["dynamodb:Query"]);
+    expect(access["table/CongressMembersStats"]).toEqual(["dynamodb:GetItem"]);
+    expect(Object.keys(access).filter((resource) => resource.startsWith("table/"))).toEqual([
+      "table/CongressMemberVoteRecord",
+      "table/CongressMembersStats",
+    ]);
+    expect(partitionScopedGrants(statements)).toEqual([
+      {
+        resource: "table/BillsManifest",
+        actions: ["dynamodb:BatchGetItem"],
+        condition: leadingKeysCondition("BILL", "BILL_GUID"),
+      },
+    ]);
+    expect(statements.flatMap((statement) => [statement.Action].flat()).filter(isDataWrite)).toEqual([]);
+  });
+
+  test("is a Cognito route", () => {
+    const resources = templates.userApiTemplate.findResources("AWS::ApiGateway::Resource", {
+      Properties: { PathPart: "congress-member-record" },
+    });
+    const [resourceId] = Object.keys(resources);
+    templates.userApiTemplate.hasResourceProperties("AWS::ApiGateway::Method", {
+      HttpMethod: "GET",
+      AuthorizationType: "COGNITO_USER_POOLS",
+      ResourceId: { Ref: resourceId },
+    });
+  });
+});
 
 describe("UserAPIServiceStack, account integrity", () => {
   const template = (): CfnTemplate => templates.userApiTemplate.toJSON() as CfnTemplate;

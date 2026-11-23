@@ -40,6 +40,9 @@ import {
   CONGRESS_MEMBER_LEGISLATIVE_PROFILE_TABLE_PRIMARY_KEY,
   CONGRESS_MEMBER_VOTE_PROFILE_TABLE_NAME,
   CONGRESS_MEMBER_VOTE_PROFILE_TABLE_PRIMARY_KEY,
+  CONGRESS_MEMBER_VOTE_RECORD_TABLE_NAME,
+  CONGRESS_MEMBER_VOTE_RECORD_TABLE_PRIMARY_KEY,
+  CONGRESS_MEMBER_VOTE_RECORD_TABLE_SORT_KEY,
 } from '../config/aggregate-data-store-constants';
 import {
   BILL_PRIORITY_ACTIVE_INDEX_NAME,
@@ -229,6 +232,8 @@ export class UserAPIServiceStack extends cdk.Stack {
   public readonly fetchCivicScore: lambda.IFunction;
   public readonly fetchCivicProfile: lambda.IFunction;
   public readonly fetchCongressMemberCivicProfile: lambda.IFunction;
+  /** UX-39d: GET /congress-member-record, a member's votes and sponsored bills. */
+  public readonly fetchCongressMemberRecord: lambda.IFunction;
   public readonly districtVerification: lambda.IFunction;
   public readonly adultAttestation: lambda.IFunction;
   public readonly fetchMe: lambda.IFunction;
@@ -475,6 +480,7 @@ export class UserAPIServiceStack extends cdk.Stack {
     const congressMemberStatsTable = storeTable(this, 'congressMemberStats');
     const voteProfilesTable = storeTable(this, 'congressMemberVoteProfiles');
     const legislativeProfilesTable = storeTable(this, 'congressMemberLegislativeProfiles');
+    const voteRecordTable = storeTable(this, 'congressMemberVoteRecord');
     const verifiedAddressClaimsTable = storeTable(this, 'verifiedAddressClaims');
     const signUpEmailClaimsTable = storeTable(this, 'signUpEmailClaims');
     const appAttestTable = storeTable(this, 'appAttest');
@@ -757,6 +763,40 @@ export class UserAPIServiceStack extends cdk.Stack {
     billsManifestTable.grantReadData(this.fetchCongressMemberCivicProfile);
     voteProfilesTable.grantReadData(this.fetchCongressMemberCivicProfile);
     legislativeProfilesTable.grantReadData(this.fetchCongressMemberCivicProfile);
+
+    // UX-39d: a member's public record. Their vote rows a page at a time (Query on the table), their sponsored-bill
+    // sets (GetItem of their stats row), and the titles, statuses and dates of those bills (BatchGetItem of the
+    // manifest's BILL_GUID lookup rows and BILL rows only). Nothing about any user is read.
+    this.fetchCongressMemberRecord = addProdFunction('FetchCongressMemberRecord', 'fetchCongressMemberRecord', {
+      environment: {
+        VOTE_RECORD_TABLE_NAME: CONGRESS_MEMBER_VOTE_RECORD_TABLE_NAME,
+        VOTE_RECORD_PRIMARY_KEY: CONGRESS_MEMBER_VOTE_RECORD_TABLE_PRIMARY_KEY,
+        VOTE_RECORD_SORT_KEY: CONGRESS_MEMBER_VOTE_RECORD_TABLE_SORT_KEY,
+        STATS_TABLE_NAME: CONGRESS_MEMBER_STATS_TABLE_NAME,
+        STATS_PRIMARY_KEY: CONGRESS_MEMBER_STATS_TABLE_PRIMARY_KEY,
+        MANIFEST_TABLE_NAME: BILLS_MANIFEST_TABLE_NAME,
+        MANIFEST_PRIMARY_KEY: BILLS_MANIFEST_TABLE_PRIMARY_KEY,
+        MANIFEST_SORT_KEY: BILLS_MANIFEST_TABLE_SORT_KEY,
+        MANIFEST_PK_VALUE: BILLS_MANIFEST_TABLE_PK_VALUE,
+        MANIFEST_GUID_LOOKUP_PK: BILLS_MANIFEST_GUID_LOOKUP_PK_VALUE,
+      },
+      memorySize: 512,
+      timeout: cdk.Duration.seconds(10),
+    }).alias;
+    iam.Grant.addToPrincipal({
+      grantee: this.fetchCongressMemberRecord,
+      actions: ['dynamodb:Query'],
+      resourceArns: [voteRecordTable.tableArn],
+    });
+    iam.Grant.addToPrincipal({
+      grantee: this.fetchCongressMemberRecord,
+      actions: ['dynamodb:GetItem'],
+      resourceArns: [congressMemberStatsTable.tableArn],
+    });
+    grantStoreTablePartitions(this.fetchCongressMemberRecord, billsManifestTable, ['BatchGetItem'], [
+      BILLS_MANIFEST_TABLE_PK_VALUE,
+      BILLS_MANIFEST_GUID_LOOKUP_PK_VALUE,
+    ]);
 
     // ── INT-03 vote re-stamp (C2 3.3.4, X8) ──────────────────────────────────
     //
@@ -1806,6 +1846,9 @@ export class UserAPIServiceStack extends cdk.Stack {
     const congressMemberCivicProfile =
       this.userApi.root.addResource('congress-member-civic-profile');
     gateway.addCognitoMethod(congressMemberCivicProfile, 'GET', this.fetchCongressMemberCivicProfile);
+
+    const congressMemberRecord = this.userApi.root.addResource('congress-member-record');
+    gateway.addCognitoMethod(congressMemberRecord, 'GET', this.fetchCongressMemberRecord);
 
     const districtVerification = this.userApi.root.addResource('district-verification');
     gateway.addCognitoMethod(districtVerification, 'GET', this.districtVerification);
