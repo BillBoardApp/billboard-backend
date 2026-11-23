@@ -21,6 +21,7 @@
         "repair:failed-status": "node -r ts-node/register/transpile-only scripts/repairFailedStatus.ts",
         "repair:finalized-status": "node -r ts-node/register/transpile-only scripts/repairFinalizedStatus.ts",
         "reconcile:processed-bills": "node -r ts-node/register/transpile-only scripts/reconcileProcessedBills.ts",
+        "backfill:sponsor-details": "node -r ts-node/register/transpile-only scripts/backfillSponsorDetails.ts",
         "backfill:congress-member-legislative-profiles": "node scripts/backfillCongressMemberLegislativeProfiles.cjs",
         "backfill:cosponsors": "node -r ts-node/register/transpile-only scripts/backfillCosponsors.ts",
         "benchmark:civic-profiles": "node -r ts-node/register/transpile-only scripts/benchmarkCongressMemberCivicProfiles.ts",
