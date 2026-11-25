@@ -14,7 +14,7 @@ import { billOutcomeTextForAction, deriveBillVetoedFromActions } from "../../sha
 import { addDays, daysBetween, easternDayKey } from "../../shared/civicDays";
 import { companionStatusLead } from "../../shared/companionStatusLead";
 import { usableOfficialVotes } from "../../shared/congressVotes";
-import { normalizeInlineText, pushActionPhrase } from "../userNotifier/pushCopy";
+import { normalizeInlineText, pushActionPhrase } from "../../shared/pushText";
 
 /*
  * UX-35: the Updates tab's list, built on the server from the caller's own data (GET /recent-actions). Pure: the

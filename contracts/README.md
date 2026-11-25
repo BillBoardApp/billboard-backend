@@ -410,7 +410,7 @@ gets `UserAPIContractsV1.RecentActions` with `./scripts/syncContracts.sh`):
   member whose manifest row changed later, then the primary. So a law or a veto is never hidden by a twin's later
   action. The vote is the primary's when both members have one, and `watched` is set when either member is watched.
 - An action dated in the last `windowDays` (30) Eastern days, the bill's latest there (for a group, from either
-  member) in a push's words (`handlers/userNotifier/pushCopy.ts` `pushActionPhrase`): a routine follow-up such as
+  member) in a push's words (`services/src/shared/pushText.ts` `pushActionPhrase`): a routine follow-up such as
   "Motion to reconsider laid on the table" only when the window has nothing else, and on the latest day the bill's own
   outcome ("Passed the House") before the other lines. Newest first, then by title, at most 50. Nothing to show is
   `200` with `items: []`.
