@@ -472,6 +472,7 @@ describe("sponsorDetails (REL-46 5.3)", () => {
   const STONE: BillSponsorDetail = {
     bioguideId: "S000001",
     name: "Sam Stone",
+    title: "Rep",
     party: "R",
     state: "TX",
     district: "07",

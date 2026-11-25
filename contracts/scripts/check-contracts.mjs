@@ -269,23 +269,35 @@ const MEMBER_MUST_ACCEPT = [
 // I or ID is left out, never sent as another letter.
 const withSponsorDetails = (details) => (bill) => ({ ...bill, sponsorDetails: details });
 const withoutSponsorDetails = ({ sponsorDetails, ...rest }) => rest;
-const SPONSOR = { bioguideId: "D000001", name: "Jane Doe", party: "D", state: "CA", district: "12" };
+const SPONSOR = { bioguideId: "D000001", name: "Jane Doe", title: "Rep", party: "D", state: "CA", district: "12" };
 const SPONSOR_MUST_ACCEPT = [
   [PROCESSED_BILL, "a bill without sponsorDetails", withoutSponsorDetails],
   [
     PROCESSED_BILL,
     "a senator sponsor (district null)",
-    withSponsorDetails([{ bioguideId: "S000001", name: "John Smith", party: "R", state: "NY", district: null }]),
+    withSponsorDetails([
+      { bioguideId: "S000001", name: "John Smith", title: "Sen", party: "R", state: "NY", district: null },
+    ]),
   ],
   [
     PROCESSED_BILL,
-    "a sponsor without a party, state or district",
+    "a delegate and a resident commissioner",
+    withSponsorDetails([
+      { ...SPONSOR, title: "Del", state: "DC", district: "00" },
+      { ...SPONSOR, bioguideId: "R000001", title: "ResComm", state: "PR", district: "00" },
+    ]),
+  ],
+  [
+    PROCESSED_BILL,
+    "a sponsor without a title, party, state or district",
     withSponsorDetails([{ bioguideId: "D000001", name: "Jane Doe" }]),
   ],
   [PROCESSED_BILL, "an at-large sponsor", withSponsorDetails([{ ...SPONSOR, state: "WY", district: "00" }])],
 ];
 const SPONSOR_MUST_REJECT = [
   [PROCESSED_BILL, "a sponsor party other than D, R or I", withSponsorDetails([{ ...SPONSOR, party: "L" }])],
+  [PROCESSED_BILL, "a sponsor title spelled out", withSponsorDetails([{ ...SPONSOR, title: "Representative" }])],
+  [PROCESSED_BILL, "a sponsor title with its dot", withSponsorDetails([{ ...SPONSOR, title: "Rep." }])],
   [PROCESSED_BILL, "a one-digit sponsor district", withSponsorDetails([{ ...SPONSOR, district: "7" }])],
   [PROCESSED_BILL, "a sponsor state name", withSponsorDetails([{ ...SPONSOR, state: "Texas" }])],
   [PROCESSED_BILL, "a sponsor without a name", withSponsorDetails([{ bioguideId: "D000001" }])],

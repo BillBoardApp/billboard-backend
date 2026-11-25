@@ -143,7 +143,9 @@ const seedBills = () => {
   store("BILLS-119hr2", CURRENT[0]);
   store("BILLS-119hr3", DEPARTED, {
     processed: {
-      sponsorDetails: [{ bioguideId: DEPARTED, name: "Gale Gone", party: "D", state: "OH", district: "09" }],
+      sponsorDetails: [
+        { bioguideId: DEPARTED, name: "Gale Gone", title: "Rep", party: "D", state: "OH", district: "09" },
+      ],
     },
   });
   store("BILLS-119hr4", DEPARTED, { newerActions: [PASSED, INTRODUCED] });

@@ -260,6 +260,11 @@
           "minLength": 1,
           "description": "First and last name, such as Jane Doe."
         },
+        "title": {
+          "type": "string",
+          "enum": ["Rep", "Sen", "Del", "ResComm"],
+          "description": "The title Congress.gov gives the sponsor on the bill: Rep (Representative), Sen (Senator), Del (Delegate) or ResComm (Resident Commissioner). Absent when Congress.gov gives none; the sponsor's chamber is then the bill's (a House bill type such as hr or hres has a House sponsor)."
+        },
         "party": {
           "type": "string",
           "enum": ["D", "R", "I"],
@@ -273,7 +278,7 @@
         "district": {
           "type": ["string", "null"],
           "pattern": "^[0-9]{2}$",
-          "description": "A House seat in two digits, as the members manifest writes it (00 for an at-large seat or a delegate); null for a senator."
+          "description": "A House seat in two digits, as the members manifest writes it (00 for an at-large seat or a delegate). Null for a senator, and for a House sponsor whose seat Congress.gov gives in no form read here, which clients treat as unknown, not as the Senate."
         }
       }
     },
