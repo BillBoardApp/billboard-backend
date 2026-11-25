@@ -222,11 +222,13 @@ table names nobody), so a bill only they back is not in the brief. UX-41 concept
 the reader voted on whose latest action is dated in the week, newest first (at most 20; left out when none), each with
 the reason "You voted on this" and never the vote itself. It is built from the votes, apart from the sections: a voted
 bill no section shows (one that passed, failed, became law or is new with no other match, a ceremonial resolution, a
-bill type the reader turned off) is listed too, and of the voted bills updated in the week the 40 most recent are
-loaded. App 1.3 shows it first; the sections are built as before, so 1.1 and 1.2 (which ignore the key) lose nothing,
-and 1.3 shows a bill that is also in a section once, under Your bills. Such a bill has the same `billGuid` in both
-lists, a companion pair included (the Your bills item takes the section item's guid), and the Sunday push names a bill
-once by `billGuid` or title. A brief can hold `yourBills` alone, which only 1.3 and later are served. Snapshots expire
+bill type the reader turned off) is listed too, and of the voted bills updated since the week began the 40 most recent
+are loaded. That includes a row rewritten after the week, before the build (weekend ingestion of a Friday or Saturday
+action): the bill's actions decide whether it moved in the week. App 1.3 shows it first; the sections are built as
+before, so 1.1 and 1.2 (which ignore the key) lose nothing, and 1.3 shows a bill that is also in a section once, under
+Your bills. Such a bill has the same `billGuid` in both lists, a companion pair included (the Your bills item takes the
+section item's guid), and the Sunday push names a bill once by `billGuid` or title. A brief can hold `yourBills` alone,
+which only 1.3 and later are served. Snapshots expire
 21 days after publication; only the current week's is read.
 
 **Companion bills (APPF-23).** Identical bills introduced in both chambers (H.R. 1285 and S. 570) are paired so the

@@ -74,11 +74,13 @@ interface BuildOptions {
   companions?: Array<[string, string]>;
   /** Collects the guids whose processed bills the builder loads. */
   loaded?: string[];
+  /** The brief's week; default: Mar 15-21, 2026. */
+  window?: Window;
 }
 
 async function build(options: BuildOptions): Promise<WeeklyDigest | null> {
   return buildWeeklyDigest({
-    window,
+    window: options.window ?? window,
     preferences: {
       trackedTopics: options.topics ?? ["Energy"],
       trackedLifeAreas: options.lifeAreas ?? [],
@@ -447,6 +449,8 @@ describe("your bills this week (yourBills)", () => {
         id: "bill|BILLS-119hr2",
         kind: "bill",
         billGuid: "BILLS-119hr2",
+        // Stored in the week: the eyebrow gives that day, as a section item's does.
+        eyebrow: "Passed Mar 18",
         summary: "Mar 20: Passed the House.",
         reason: "You voted on this",
         accent: "movement",
@@ -670,6 +674,35 @@ describe("your bills this week (yourBills)", () => {
       expect(weeklyBriefPushBody(digest)).toBe("Includes Lower Energy Costs Act.");
     },
   );
+
+  // Review of UX-41 concept 4: a row rewritten between Sunday 00:00 and the 10:00 build (weekend ingestion of a Friday or
+  // Saturday action) was after the week for this brief, and its action was before the week for the next one.
+  it("lists a voted bill whose row was rewritten on Sunday morning, before the build, in that week's brief only", async () => {
+    const options = {
+      items: [entry("BILLS-119hr5", { billStatus: "Passed" as const, updatedAt: "2026-03-22T12:00:00.000Z" })],
+      bills: { "BILLS-119hr5": acted("2026-03-19") },
+      votedOn: ["BILLS-119hr5"],
+    };
+
+    const digest = await build(options);
+    // Stored on Mar 22, after the week: the eyebrow gives the day of the week's action, as the summary does.
+    expect(digest!.yourBills).toEqual([
+      expect.objectContaining({
+        billGuid: "BILLS-119hr5",
+        eyebrow: "Passed Mar 19",
+        summary: "Mar 19: Passed the House.",
+      }),
+    ]);
+    // The sections still take only rows written in the week, as before: written on Friday, this bill on a followed
+    // topic would be under Moved.
+    expect(digest!.sections).toEqual([]);
+
+    // Next week the row is in the window but the action is not.
+    const nextWeek = require("../shared/weeklyDigestSchedule").latestPublishedWindow(
+      new Date("2026-03-29T14:00:00.000Z"),
+    );
+    expect((await build({ ...options, window: nextWeek }))?.yourBills).toBeUndefined();
+  });
 
   it("never writes the reader's vote", async () => {
     const digest = await buildWeeklyDigest({
