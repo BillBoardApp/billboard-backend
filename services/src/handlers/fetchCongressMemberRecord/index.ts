@@ -10,6 +10,7 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import {
   BILL_STATUS_VALUES_V1,
   type CongressMemberRecordBillV1,
+  type CongressMemberRecordCongressCountV1,
   type CongressMemberRecordPositionV1,
   type CongressMemberRecordV1,
   type CongressMemberRecordVoteV1,
@@ -27,8 +28,8 @@ import { sleep } from "../../shared/retry";
 // GET /congress-member-record (UX-39d): a member of Congress's public record. Their latest roll-call vote on each bill
 // in BillBoard, newest first, a page at a time (CongressMemberVoteRecord, written by congressMemberStats, read through
 // its VotedOnIndex), and on the first page the bills they sponsored (CongressMembersStats' counted-bill sets, each
-// Congress apart, REL-46). Titles, statuses and dates come from the bills manifest. Only public facts: no score, no
-// ranking, no BillBoard user's vote.
+// Congress apart, REL-46) that the bills manifest lists. Titles, statuses and dates come from the bills manifest. Only
+// public facts: no score, no ranking, no BillBoard user's vote.
 
 const VOTE_RECORD_TABLE_NAME = process.env.VOTE_RECORD_TABLE_NAME ?? "";
 const VOTE_RECORD_PRIMARY_KEY = process.env.VOTE_RECORD_PRIMARY_KEY ?? "bioguideId";
@@ -86,9 +87,14 @@ const billParts = (guid: string): { congress: string; billType: string; billNumb
 /** A bill's row in the bills manifest, as this record serves it. */
 type ManifestFacts = { title?: string; billStatus?: string; vetoed?: true; updatedAt?: string };
 
-/** BatchGetItem of every key, retrying unprocessed keys; the items found. */
-const batchGetAll = async (keys: Item[], projection: string, names: Record<string, string>): Promise<Item[]> => {
+/** BatchGetItem of every manifest key, retrying unprocessed keys; the items found, and whether every key was read. */
+const batchGetAll = async (
+  keys: Item[],
+  projection: string,
+  names: Record<string, string>,
+): Promise<{ items: Item[]; complete: boolean }> => {
   const items: Item[] = [];
+  let complete = true;
   for (let start = 0; start < keys.length; start += BATCH_GET_SIZE) {
     let pending = keys.slice(start, start + BATCH_GET_SIZE);
     for (let attempt = 1; pending.length > 0; attempt += 1) {
@@ -104,22 +110,27 @@ const batchGetAll = async (keys: Item[], projection: string, names: Record<strin
       if (pending.length > 0) {
         if (attempt >= BATCH_GET_MAX_ATTEMPTS) {
           console.warn("Bills manifest reads still unprocessed after retries", { unprocessed: pending.length });
+          complete = false;
           break;
         }
         await sleep(BATCH_GET_BACKOFF_MS * attempt);
       }
     }
   }
-  return items;
+  return { items, complete };
 };
 
 /**
- * Each guid's manifest facts: its BILL_GUID lookup row names its manifest row. A guid without a row (not published
- * yet) is left out, and so is every guid when the manifest cannot be read: the record is served without titles.
+ * Each guid's manifest facts: its BILL_GUID lookup row names its manifest row; a guid without both rows (a bill not
+ * published) has none. `complete` is false when the manifest could not be read in full, and the record is then served
+ * with the titles it has.
  */
-const readManifestFacts = async (guids: string[]): Promise<Map<string, ManifestFacts>> => {
+const readManifestFacts = async (
+  guids: string[],
+): Promise<{ facts: Map<string, ManifestFacts>; complete: boolean }> => {
   const facts = new Map<string, ManifestFacts>();
-  if (!MANIFEST_TABLE_NAME || guids.length === 0) return facts;
+  if (!MANIFEST_TABLE_NAME) return { facts, complete: false };
+  if (guids.length === 0) return { facts, complete: true };
   try {
     const lookups = await batchGetAll(
       guids.map((guid) => ({
@@ -130,7 +141,7 @@ const readManifestFacts = async (guids: string[]): Promise<Map<string, ManifestF
       { "#sk": MANIFEST_SORT_KEY },
     );
     const guidByManifestSk = new Map<string, string>();
-    for (const lookup of lookups) {
+    for (const lookup of lookups.items) {
       const guid = lookup[MANIFEST_SORT_KEY]?.S;
       const manifestSk = lookup.manifestSk?.S;
       if (guid && manifestSk) guidByManifestSk.set(manifestSk, guid);
@@ -143,7 +154,7 @@ const readManifestFacts = async (guids: string[]): Promise<Map<string, ManifestF
       "#sk, #title, billStatus, vetoed, updatedAt",
       { "#sk": MANIFEST_SORT_KEY, "#title": "title" },
     );
-    for (const row of rows) {
+    for (const row of rows.items) {
       const guid = guidByManifestSk.get(row[MANIFEST_SORT_KEY]?.S ?? "");
       if (!guid) continue;
       const title = row.title?.S?.trim();
@@ -156,10 +167,11 @@ const readManifestFacts = async (guids: string[]): Promise<Map<string, ManifestF
         ...(updatedAt && !Number.isNaN(Date.parse(updatedAt)) ? { updatedAt } : {}),
       });
     }
+    return { facts, complete: lookups.complete && rows.complete };
   } catch (error) {
     console.warn("Failed to read bill titles for a member record; serving it without them", { error });
+    return { facts, complete: false };
   }
-  return facts;
 };
 
 const VOTE_PROJECTION = "billGuid, #chamber, #position, votedOn, actionText";
@@ -271,6 +283,15 @@ const compareSponsored = (a: CongressMemberRecordBillV1, b: CongressMemberRecord
   (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "") ||
   b.billGuid.localeCompare(a.billGuid);
 
+/** How many of the bills each Congress has, newest Congress first. */
+const countByCongress = (bills: readonly CongressMemberRecordBillV1[]): CongressMemberRecordCongressCountV1[] => {
+  const counts = new Map<string, number>();
+  for (const bill of bills) counts.set(bill.congress, (counts.get(bill.congress) ?? 0) + 1);
+  return [...counts.entries()]
+    .sort(([a], [b]) => Number(b) - Number(a))
+    .map(([congress, count]) => ({ congress, count }));
+};
+
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   if (!getAuthenticatedUserId(event)) return jsonResponse(401, { error: "UNAUTHORIZED", message: "Sign in again." });
 
@@ -297,22 +318,26 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       firstPage ? readSponsoredGuids(bioguideId) : Promise.resolve([]),
     ]);
     const voteGuids = page.rows.map((row) => row.billGuid?.S ?? "").filter((guid) => PLAIN_GUID_PATTERN.test(guid));
-    const facts = await readManifestFacts([...new Set([...voteGuids, ...sponsoredGuids])]);
+    const { facts, complete } = await readManifestFacts([...new Set([...voteGuids, ...sponsoredGuids])]);
 
     const votes = page.rows
       .map((row) => toVote(row, facts))
       .filter((vote): vote is CongressMemberRecordVoteV1 => vote !== null);
+    // Only bills the manifest lists: a sponsored bill still waiting for its text is not in BillBoard yet. When the
+    // manifest could not be read in full, every counted bill is served, with the titles that were read.
+    const sponsoredBills = sponsoredGuids
+      .filter((guid) => !complete || facts.has(guid))
+      .map((guid) => toSponsoredBill(guid, facts))
+      .sort(compareSponsored);
     const record: CongressMemberRecordV1 = {
       bioguideId,
       votes,
       ...(page.next ? { nextCursor: encodeCursor(page.next) } : {}),
       ...(firstPage
         ? {
-            sponsoredBills: sponsoredGuids
-              .map((guid) => toSponsoredBill(guid, facts))
-              .sort(compareSponsored)
-              .slice(0, SPONSORED_BILLS_LIMIT),
-            sponsoredBillCount: sponsoredGuids.length,
+            sponsoredBills: sponsoredBills.slice(0, SPONSORED_BILLS_LIMIT),
+            sponsoredBillCount: sponsoredBills.length,
+            sponsoredBillCounts: countByCongress(sponsoredBills),
           }
         : {}),
     };

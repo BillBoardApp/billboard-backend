@@ -72,5 +72,9 @@
       "billNumber": "404"
     }
   ],
-  "sponsoredBillCount": 3
+  "sponsoredBillCount": 3,
+  "sponsoredBillCounts": [
+    { "congress": "120", "count": 1 },
+    { "congress": "119", "count": 2 }
+  ]
 }

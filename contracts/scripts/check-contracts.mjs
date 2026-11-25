@@ -321,7 +321,7 @@ const RECORD_MUST_ACCEPT = [
   [
     MEMBER_RECORD,
     "a later page (no sponsoredBills)",
-    ({ sponsoredBills, sponsoredBillCount, ...record }) => record,
+    ({ sponsoredBills, sponsoredBillCount, sponsoredBillCounts, ...record }) => record,
   ],
   [
     MEMBER_RECORD,
@@ -331,6 +331,7 @@ const RECORD_MUST_ACCEPT = [
       votes: [],
       sponsoredBills: [],
       sponsoredBillCount: 0,
+      sponsoredBillCounts: [],
     }),
   ],
   [MEMBER_RECORD, "a Senate vote", withRecordVote((vote) => ({ ...vote, chamber: "Senate" }))],
@@ -350,6 +351,16 @@ const RECORD_MUST_REJECT = [
     MEMBER_RECORD,
     "a vote dated with a time",
     withRecordVote((vote) => ({ ...vote, votedOn: "2026-03-04T00:00:00.000Z" })),
+  ],
+  [
+    MEMBER_RECORD,
+    "a Congress count of zero",
+    (record) => ({ ...record, sponsoredBillCounts: [{ congress: "120", count: 0 }] }),
+  ],
+  [
+    MEMBER_RECORD,
+    "a Congress count as a number",
+    (record) => ({ ...record, sponsoredBillCounts: [{ congress: 119, count: 2 }] }),
   ],
   [MEMBER_RECORD, "vetoed false on a sponsored bill", withRecordBill((bill) => ({ ...bill, vetoed: false }))],
   [MEMBER_RECORD, "a negative sponsoredBillCount", (record) => ({ ...record, sponsoredBillCount: -1 })],
