@@ -1088,6 +1088,34 @@ describe("UserAPIServiceStack", () => {
         .filter((action) => /^(cloudwatch|kms|secretsmanager|cognito-idp|sqs):/.test(action))
         .filter((action) => !["sqs:SendMessage", "sqs:GetQueueAttributes", "sqs:GetQueueUrl"].includes(action))).toEqual([]);
     });
+
+    // UX-28 review: table-wide grants let it read every PII attribute and rewrite any attribute of a snapshot or a
+    // device row. Each is held to the attributes its requests name (weeklyBriefPush.test.ts pins those requests).
+    test("holds each table grant to the attributes its requests name", () => {
+      const tableStatements = roleStatements("WeeklyBriefPush")
+        .filter((statement) => actionsOf(statement).some((action) => action.startsWith("dynamodb:")));
+      const grantOf = (action: string, table: string) => {
+        const matching = tableStatements.filter((statement) =>
+          actionsOf(statement).includes(action) && JSON.stringify(statement.Resource).includes(`table/${table}`));
+        expect(matching).toHaveLength(1);
+        expect(actionsOf(matching[0])).toEqual([action]);
+        return matching[0].Condition;
+      };
+      const only = (attributes: string[]) => ({
+        "ForAllValues:StringEquals": { "dynamodb:Attributes": attributes },
+        StringEqualsIfExists: { "dynamodb:Select": "SPECIFIC_ATTRIBUTES", "dynamodb:ReturnValues": "NONE" },
+      });
+
+      expect(grantOf("dynamodb:Scan", "UserPII")).toEqual(
+        only(["userId", "deletionStatus", "adultStatus", "resolvedState", "selfAttestedState"]));
+      expect(grantOf("dynamodb:GetItem", "UserWeeklyDigests")).toEqual(
+        only(["userId", "publishedAt", "payload", "pushClaimedAt"]));
+      expect(grantOf("dynamodb:UpdateItem", "UserWeeklyDigests")).toEqual(
+        only(["userId", "publishedAt", "pushClaimedAt"]));
+      expect(grantOf("dynamodb:UpdateItem", "UserDevices")).toEqual(only(["userId", "deviceId", "endpointArn"]));
+      // The device Query reads the user's own rows whole (the switches and the endpoint); it is keyed by the user.
+      expect(grantOf("dynamodb:Query", "UserDevices")).toBeUndefined();
+    });
   });
 
   // CQ-15: the store tables and buckets are granted here by their fixed names.

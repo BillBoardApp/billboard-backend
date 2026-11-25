@@ -497,6 +497,58 @@ describe("who gets it", () => {
   });
 });
 
+// UX-28 review: infra grants the function only these attributes (WEEKLY_BRIEF_PUSH_*_ATTRIBUTES in
+// infra/lib/config/weekly-digest-constants.ts, as dynamodb:Attributes conditions). Change both together.
+describe("the attributes it asks DynamoDB for", () => {
+  const GRANTED = {
+    Scan: ["userId", "deletionStatus", "adultStatus", "resolvedState", "selfAttestedState"],
+    [`GetItem ${DIGESTS_TABLE}`]: ["userId", "publishedAt", "payload", "pushClaimedAt"],
+    [`UpdateItem ${DIGESTS_TABLE}`]: ["userId", "publishedAt", "pushClaimedAt"],
+    [`UpdateItem ${DEVICES_TABLE}`]: ["userId", "deviceId", "endpointArn"],
+  } as Record<string, string[]>;
+  /** Every attribute a request names: its key, and the names in its expressions (#placeholders resolved). */
+  const attributesOf = ({ input }: Command): string[] => {
+    const names = (input.ExpressionAttributeNames ?? {}) as Record<string, string>;
+    const expressions = [input.ProjectionExpression, input.UpdateExpression, input.ConditionExpression]
+      .filter((expression): expression is string => typeof expression === "string")
+      .join(" ");
+    const words = (expressions.match(/[#:]?[A-Za-z_][A-Za-z0-9_]*/g) ?? [])
+      .filter((word) => !word.startsWith(":"))
+      .filter((word) => !/^(SET|REMOVE|AND|OR|NOT|attribute_exists|attribute_not_exists)$/.test(word))
+      .map((word) => (word.startsWith("#") ? names[word] : word));
+    return [...new Set([...Object.keys((input.Key ?? {}) as object), ...words])].sort();
+  };
+
+  it("names only granted attributes, selects no other and asks for no return values", async () => {
+    addUser("ny", { state: "NY" });
+    addUser("gone", { state: "NY" });
+    mockWorld.publishErrors.set(
+      arn("gone", "d1"),
+      Object.assign(new Error("Endpoint is disabled"), { name: "EndpointDisabledException" }),
+    );
+
+    await runAt(RUN_1030_ET);
+
+    const checked = mockWorld.commands.filter((command) => command.__type !== "Query");
+    expect(new Set(checked.map((command) => `${command.__type} ${String(command.input.TableName)}`))).toEqual(
+      new Set([
+        `Scan ${PII_TABLE}`,
+        `GetItem ${DIGESTS_TABLE}`,
+        `UpdateItem ${DIGESTS_TABLE}`,
+        `UpdateItem ${DEVICES_TABLE}`,
+      ]),
+    );
+    for (const command of checked) {
+      const granted =
+        GRANTED[command.__type === "Scan" ? "Scan" : `${command.__type} ${String(command.input.TableName)}`];
+      expect(granted).toEqual(expect.arrayContaining(attributesOf(command)));
+      expect(command.input.Select).toBeUndefined();
+      expect(command.input.ReturnValues).toBeUndefined();
+      if (command.__type !== "UpdateItem") expect(command.input.ProjectionExpression).toBeDefined();
+    }
+  });
+});
+
 describe("the switch and the 12-hour limit", () => {
   it.each([undefined, "off", "ON"])("sends nothing while WEEKLY_BRIEF_PUSH is %p", async (value) => {
     addUser("ny", { state: "NY" });
