@@ -546,7 +546,7 @@
       "get": {
         "operationId": "getCivicProfile",
         "summary": "Read the caller's civic profile",
-        "description": "Averages the civic-profile axes (themes) of the bills in the caller's 100 most recent Yea/Nay votes on bills with theme scores (a Nay flips the sign; a companion pair counts once), normalized from [-1, 1] to [0, 1]. A theme with fewer than 8 of those votes on bills scored on it is left out of axes (UX-32; a member's profile needs 3). The profile is ready (isReady) at 25 of those votes with at least 3 themes at 8, the 3 a chart needs to draw a shape (UX-32, project decision 2026-10-29): it stays locked until it can show one. While it is locked, lockedBy says what holds it and minVotesRequired - votesUsed (at least 1) is how many more votes apps 1.1 and 1.2 ask for. GET /civic-score's Civic Compass honor is earned by the same rule from the votes saved with their bill's themes, so it can come later than the profile and is not earned while it is locked, except by the read that seeds a user's Civic Score record (UX-31), which keeps it on the count before UX-32 (25 Yea/Nay votes); once earned it is kept.",
+        "description": "Averages the civic-profile axes (themes) of the bills in the caller's 100 most recent Yea/Nay votes on bills with theme scores (a Nay flips the sign; a companion pair counts once), normalized from [-1, 1] to [0, 1]. A theme with fewer than 8 of those votes on bills scored on it is left out of axes (UX-32; a member's profile needs 3). The profile is ready (isReady) at 25 of those votes with at least 3 themes at 8, the 3 a chart needs to draw a shape (UX-32, project decision 2026-10-29): it stays locked until it can show one. While it is locked, lockedBy says what holds it and minVotesRequired - votesUsed (at least 1) is how many more votes apps 1.1 and 1.2 ask for. themeVotes (UX-40 L4) gives every theme's count in the window, zeros included, for the count under each theme bar. GET /civic-score's Civic Compass honor is earned by the same rule from the votes saved with their bill's themes, so it can come later than the profile and is not earned while it is locked, except by the read that seeds a user's Civic Score record (UX-31), which keeps it on the count before UX-32 (25 Yea/Nay votes); once earned it is kept.",
         "tags": ["Civic profile"],
         "responses": {
           "200": {
@@ -1504,7 +1504,31 @@
             "type": "integer",
             "minimum": 1,
             "description": "UX-32, additive. Votes in the window on bills scored on a theme before the theme gets a score (8; a member's needs 3)."
+          },
+          "themeVotes": {
+            "$ref": "#/components/schemas/UserCivicProfileThemeVotes"
           }
+        }
+      },
+      "UserCivicProfileThemeVotes": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "UX-40 L4, additive (apps 1.1 and 1.2 ignore it; absent from a server before it, so decode it as optional). For each of the six themes, zeros included, the caller's Yea/Nay votes in the window (the same votes as votesUsed) on bills scored on that theme: the count under each theme bar of app 1.3. A theme is in axes exactly when its count is at least minThemeVotes, so the themes at minThemeVotes or more number themesReady. No count exceeds votesUsed, but a bill scored on several themes counts for each, so the counts can add up to more than votesUsed.",
+        "required": [
+          "individualVsCommunity",
+          "localVsFederal",
+          "freeMarketVsRegulated",
+          "traditionalVsProgressive",
+          "interventionistVsRestrained",
+          "privacyVsSecurity"
+        ],
+        "properties": {
+          "individualVsCommunity": { "type": "integer", "minimum": 0 },
+          "localVsFederal": { "type": "integer", "minimum": 0 },
+          "freeMarketVsRegulated": { "type": "integer", "minimum": 0 },
+          "traditionalVsProgressive": { "type": "integer", "minimum": 0 },
+          "interventionistVsRestrained": { "type": "integer", "minimum": 0 },
+          "privacyVsSecurity": { "type": "integer", "minimum": 0 }
         }
       },
       "DistrictVerificationRequest": {

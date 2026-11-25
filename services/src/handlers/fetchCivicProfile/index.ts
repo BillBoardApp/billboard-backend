@@ -27,7 +27,8 @@ const MANIFEST_GUID_LOOKUP_PK = process.env.MANIFEST_GUID_LOOKUP_PK ?? "BILL_GUI
 // (a theme's label never rests on a few AI-scored bills; members keep 3) and readiness (25 votes and 3 themes at 8,
 // project decision 2026-10-29, "Keep it locked") are shared/civicProfileReadiness.ts, which the Civic Compass honor follows too.
 // A theme under the floor is left out of `axes`, as before UX-32, and both apps show it as "No signal" or "Not
-// enough data".
+// enough data". UX-40 L4: `themeVotes` sends every theme's count in the window (readiness.themeVotes), so app 1.3 can
+// show "12 votes" under a bar, or "Not enough data · 5 of 8 votes".
 
 // APPF-23: a user's votes on the members of a companion group count once (the primary's row wins,
 // a vote on the other member alone still counts), as in fetchCivicScore. The groups are the ones
@@ -254,6 +255,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         themesReady: readiness.themesReady,
         minThemesRequired: CIVIC_PROFILE_MIN_READY_THEMES,
         minThemeVotes: CIVIC_PROFILE_MIN_THEME_VOTES,
+        // UX-40 L4, additive (apps 1.1 and 1.2 ignore it): for each of the six themes, zeros included, the votes in the
+        // window on bills scored on it, the count under each of app 1.3's theme bars. A theme is in axes exactly when
+        // its count is at least minThemeVotes. A bill scored on two themes counts for each, so the counts can add up to
+        // more than votesUsed.
+        themeVotes: readiness.themeVotes,
       }),
     };
   } catch (err) {

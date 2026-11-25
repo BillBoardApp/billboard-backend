@@ -10,5 +10,13 @@
   "lockedBy": "themes",
   "themesReady": 2,
   "minThemesRequired": 3,
-  "minThemeVotes": 8
+  "minThemeVotes": 8,
+  "themeVotes": {
+    "individualVsCommunity": 8,
+    "localVsFederal": 8,
+    "freeMarketVsRegulated": 7,
+    "traditionalVsProgressive": 5,
+    "interventionistVsRestrained": 3,
+    "privacyVsSecurity": 2
+  }
 }
