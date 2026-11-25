@@ -156,33 +156,34 @@ describe("the push body (the brief's bills, in page order)", () => {
     expect(body).toBe("Includes Farm Credit Act of 2026, Rural Broadband Access Act, and 1 more.");
   });
 
-  // Review of UX-41 concept 4: a companion pair under Your bills and in a section, each under its own bill's guid, was
-  // named twice ("Includes Lower Energy Costs Act and Lower Energy Costs Act.").
-  it("names a title once when Your bills and a section list it under different guids, as a companion pair can be", () => {
-    const body = weeklyBriefPushBody({
+  // Review of UX-41 concept 4: a title check, added to name a companion pair once, also merged two unrelated bills of one
+  // name, so "N more" left one of them out. A pair is named once by billGuid instead: the builder gives a companion group
+  // one billGuid in the whole brief (weeklyDigestBuilder.test.ts, "your bills this week").
+  it("counts two bills that only share a title, as app 1.3 lists both", () => {
+    const brief = {
       ...digest([
-        { kind: "needs_attention", items: [bill("Lower Energy Costs Act", "BILLS-119s570is")] },
-        { kind: "moved_this_week", items: [bill("Clean Water Act", "BILLS-119s3")] },
+        {
+          kind: "moved_this_week" as const,
+          items: [
+            bill("Small Business Relief Act", "BILLS-119s128is"),
+            bill("Rural Roads Act", "BILLS-119s9is"),
+            bill("Clean Water Act", "BILLS-119s3is"),
+          ],
+        },
       ]),
-      yourBills: [{ ...bill("Lower Energy Costs Act", "BILLS-119hr1285ih"), reason: "You voted on this" }],
-    });
-    expect(body).toBe("Includes Lower Energy Costs Act and Clean Water Act.");
-  });
-
-  it("treats titles that differ only in case or spacing as one", () => {
-    expect(
-      weeklyBriefBillTitles(
-        digest([
-          {
-            kind: "moved_this_week",
-            items: [
-              bill("Lower Energy Costs Act", "BILLS-119hr1285ih"),
-              bill(" Lower  energy costs ACT", "BILLS-119s570is"),
-            ],
-          },
-        ]),
-      ),
-    ).toEqual(["Lower Energy Costs Act"]);
+      yourBills: [
+        { ...bill("Small Business Relief Act", "BILLS-119hr22ih"), reason: "You voted on this" },
+        { ...bill("Farm Credit Act", "BILLS-119hr7ih"), reason: "You voted on this" },
+      ],
+    };
+    expect(weeklyBriefBillTitles(brief)).toEqual([
+      "Small Business Relief Act",
+      "Farm Credit Act",
+      "Small Business Relief Act",
+      "Rural Roads Act",
+      "Clean Water Act",
+    ]);
+    expect(weeklyBriefPushBody(brief)).toBe("Includes Small Business Relief Act, Farm Credit Act, and 3 more.");
   });
 
   it("says the brief's own headline when it has no bill item (only members you follow)", () => {
