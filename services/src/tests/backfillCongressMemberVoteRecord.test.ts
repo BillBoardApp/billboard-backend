@@ -159,9 +159,19 @@ describe("backfill:member-vote-record (UX-39d)", () => {
     ]);
   });
 
-  it("narrows the scan to one Congress", async () => {
+  it("narrows the scan to one Congress, not every Congress whose number starts with it", async () => {
     const { result } = await run({ congress: 120 });
     expect(result.scan.candidates.map((candidate) => candidate.guid)).toEqual(["BILLS-120hr5"]);
+
+    // The S3 prefix BILLS-12 lists the 120th's bills too; only the 12th's are read.
+    const bills = { ...BILLS, "processed-bills/BILLS-12hr9.json": votes("Yea") };
+    const twelfth = await run({ congress: 12 }, sqsClient(), bills);
+    expect(twelfth.result.scan.candidates.map((candidate) => candidate.guid)).toEqual(["BILLS-12hr9"]);
+    expect(twelfth.result.scan.scanned).toBe(1);
+    expect(twelfth.lines).toContain(
+      "Reading 1 processed bills of Congress 12 under s3://billboard-bill-store-bucket/processed-bills/BILLS-12",
+    );
+    expect((await run({ congress: 1 }, sqsClient(), bills)).result.scan.scanned).toBe(0);
   });
 
   it("a canary sends the first bills only, as S3 events without a versionId", async () => {

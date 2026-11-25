@@ -127,7 +127,7 @@ const USAGE = [
   "  npm run backfill:member-vote-record -- --apply --expect-bills <n>     Send every bill",
   "",
   "Options:",
-  "  --congress <n>       Only processed-bills/BILLS-<n>*",
+  "  --congress <n>       Only the bills of that Congress (processed-bills/BILLS-<n><type><number>)",
   "  --apply              Send the bills' S3 events to CongressMemberStatsQueue (needs --canary or --expect-bills)",
   "  --canary <n>         With --apply: the first n bills only",
   "  --expect-bills <n>   With --apply: the dry run's withVotes; any other count stops before a send (exit 2)",
@@ -220,8 +220,15 @@ export const scanProcessedBills = async (
   log: Log,
 ): Promise<VoteRecordScan> => {
   const prefix = `${config.processedPrefix}${options.congress ? `BILLS-${options.congress}` : ""}`;
-  const keys = await listKeys(s3, config.bucket, prefix);
-  log(`Reading ${keys.length} processed bills under s3://${config.bucket}/${prefix}`);
+  const listed = await listKeys(s3, config.bucket, prefix);
+  // The prefix BILLS-12 also lists the 120th to the 129th Congress: keep only the bills of the Congress named.
+  const keys = options.congress
+    ? listed.filter((key) => congressOfBillGuid(guidOfKey(key, config.processedPrefix)) === options.congress)
+    : listed;
+  log(
+    `Reading ${keys.length} processed bills${options.congress ? ` of Congress ${options.congress}` : ""} ` +
+      `under s3://${config.bucket}/${prefix}`,
+  );
   const scan: VoteRecordScan = { scanned: keys.length, candidates: [], memberRows: 0, unreadable: [], byCongress: {} };
   let next = 0;
   const worker = async () => {
