@@ -215,7 +215,8 @@ const YOUR_BILLS_MUST_REJECT = [
 // ── Recent actions (UX-35) ──
 // GET /recent-actions carries only the caller's own vote: an item never has a count, a tally or another user's vote,
 // and the list itself has no count. Rows are plain guids, at most 50, and the vote timing (UX-41 concept 2) is at least
-// one day. An item with only a watch, and an empty list, must validate.
+// one day. An item with only a watch, and an empty list, must validate. An action always names the bill it is on, which
+// for a companion group can be the member the row does not show.
 const RECENT_ACTIONS = "schemas/entities/recent-actions.v1.schema.json";
 const withRecentItems = (edit) => (list) => ({ ...list, items: list.items.map(edit) });
 const withoutVote = ({ yourVote, votedOn, voteTiming, ...item }) => item;
@@ -227,6 +228,16 @@ const RECENT_ACTIONS_MUST_ACCEPT = [
     RECENT_ACTIONS,
     "an action without actionCode",
     withRecentItems(({ action: { actionCode, ...action }, ...item }) => ({ ...item, action })),
+  ],
+  [
+    RECENT_ACTIONS,
+    "an action on the companion member the row does not show",
+    (list) => ({
+      ...list,
+      items: [
+        { ...list.items[0], action: { ...list.items[0].action, billGuid: "BILLS-119s50", officialNumber: "S. 50" } },
+      ],
+    }),
   ],
 ];
 const RECENT_ACTIONS_MUST_REJECT = [
@@ -252,7 +263,22 @@ const RECENT_ACTIONS_MUST_REJECT = [
   [
     RECENT_ACTIONS,
     "an action without text",
-    withRecentItems((item) => ({ ...item, action: { date: item.action.date } })),
+    withRecentItems(({ action: { text, ...action }, ...item }) => ({ ...item, action })),
+  ],
+  [
+    RECENT_ACTIONS,
+    "an action without billGuid",
+    withRecentItems(({ action: { billGuid, ...action }, ...item }) => ({ ...item, action })),
+  ],
+  [
+    RECENT_ACTIONS,
+    "an action without officialNumber",
+    withRecentItems(({ action: { officialNumber, ...action }, ...item }) => ({ ...item, action })),
+  ],
+  [
+    RECENT_ACTIONS,
+    "a suffixed action billGuid",
+    withRecentItems((item) => ({ ...item, action: { ...item.action, billGuid: `${item.action.billGuid}enr` } })),
   ],
   [
     RECENT_ACTIONS,

@@ -316,7 +316,13 @@ describe("buildRecentActionItems", () => {
         officialNumber: "H.R. 77",
         title: "Rural Broadband Access Act",
         billStatus: "Passed",
-        action: { date: "2026-11-19", text: "Passed the House", actionCode: "8000" },
+        action: {
+          date: "2026-11-19",
+          text: "Passed the House",
+          actionCode: "8000",
+          billGuid: HR77,
+          officialNumber: "H.R. 77",
+        },
         yourVote: "Yea",
         votedOn: "2026-10-26",
         voteTiming: { chamber: "House", rollCallDate: "2026-11-19", daysBefore: 24 },
@@ -376,7 +382,7 @@ describe("buildRecentActionItems", () => {
       officialNumber: "S. 50",
       title: "Senate headline",
       billStatus: "Passed",
-      action: { date: "2026-11-19", text: "Passed the Senate" },
+      action: { date: "2026-11-19", text: "Passed the Senate", billGuid: S50, officialNumber: "S. 50" },
       yourVote: "Nay",
       votedOn: "2026-10-28",
       voteTiming: { chamber: "Senate", rollCallDate: "2026-11-19", daysBefore: 22 },
@@ -442,7 +448,12 @@ describe("buildRecentActionItems", () => {
           officialNumber: "H.R. 77",
           title: "House law",
           billStatus: "Finalized",
-          action: { date: "2026-11-12", text: "Committee on Finance. Hearings held" },
+          action: {
+            date: "2026-11-12",
+            text: "Committee on Finance. Hearings held",
+            billGuid: S50,
+            officialNumber: "S. 50",
+          },
           watched: true,
         },
       ]);
@@ -481,6 +492,8 @@ describe("buildRecentActionItems", () => {
         action: {
           date: "2026-11-20",
           text: "Read twice and referred to the Committee on Commerce, Science, and Transportation",
+          billGuid: S50,
+          officialNumber: "S. 50",
         },
         yourVote: "Yea",
       });
@@ -506,7 +519,40 @@ describe("buildRecentActionItems", () => {
         billGuid: HR77,
         billStatus: "Passed",
         vetoed: true,
-        action: { date: "2026-11-18", text: "Passed the Senate" },
+        action: { date: "2026-11-18", text: "Passed the Senate", billGuid: S50, officialNumber: "S. 50" },
+      });
+    });
+
+    it("names the twin on its outcome line, so the row never says the member shown failed", () => {
+      const passedHouse = {
+        actionCode: "8000",
+        actionDate: "2026-11-10",
+        text: "Passed/agreed to in House: On passage Passed by recorded vote: 230 - 190 (Roll no. 412).",
+        type: "Floor",
+      };
+      const failedSenate = {
+        actionCode: "18000",
+        actionDate: "2026-11-18",
+        text: "Failed of passage in Senate by Yea-Nay Vote. 45 - 52. Record Vote Number: 301.",
+        type: "Floor",
+      };
+      const [item] = build({
+        groups: [[HR77, S50]],
+        bills: new Map([
+          [HR77, bill(HR77, "House bill", [passedHouse], { billStatus: "Passed" })],
+          [S50, bill(S50, "Senate twin", [failedSenate], { billStatus: "Failed" })],
+        ]),
+        movedAt: new Map([
+          [HR77, "2026-11-10T18:00:00.000Z"],
+          [S50, "2026-11-18T18:00:00.000Z"],
+        ]),
+        watched: new Set([HR77]),
+      });
+      expect(item).toMatchObject({
+        billGuid: HR77,
+        officialNumber: "H.R. 77",
+        billStatus: "Passed",
+        action: { date: "2026-11-18", text: "Failed in the Senate", billGuid: S50, officialNumber: "S. 50" },
       });
     });
 
@@ -585,6 +631,8 @@ describe("buildRecentActionItems", () => {
         date: "2026-11-19",
         text: "Reported by the Committee on Energy and Commerce. H. Rept. 119-876",
         actionCode: "H12200",
+        billGuid: HR77,
+        officialNumber: "H.R. 77",
       });
     });
   });

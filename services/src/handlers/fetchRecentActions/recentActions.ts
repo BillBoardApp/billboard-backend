@@ -8,7 +8,7 @@ import type {
 } from "../../contracts";
 import { BILL_STATUS_VALUES_V1 } from "../../contracts";
 import { isRoutineFollowUpText } from "../../shared/billActions";
-import { parseBillGuid } from "../../shared/billCompanions";
+import { parseBillGuid, type ParsedBillGuid } from "../../shared/billCompanions";
 import { officialBillNumber } from "../../shared/billNumbers";
 import { billOutcomeTextForAction, deriveBillVetoedFromActions } from "../../shared/billOutcomes";
 import { addDays, daysBetween, easternDayKey } from "../../shared/civicDays";
@@ -30,7 +30,9 @@ import { normalizeInlineText, pushActionPhrase } from "../../shared/pushText";
  *   references. A routine follow-up ("Motion to reconsider laid on the table", billActions.ts) counts only when the
  *   window has nothing else, across a group's members too, as in the Weekly Brief, and on the latest day an outcome line
  *   comes before the other lines of that day, which otherwise keep congress.gov's order (newest first, UX-43), the
- *   primary's lines before its twin's.
+ *   primary's lines before its twin's. The action names the bill it is on (its billGuid and officialNumber): for a
+ *   group that can be a different member from the one the row shows, as in a row for H.R. 77 (Passed) whose action is
+ *   S. 50's "Failed in the Senate". A push names the bill whose action it is in the same way.
  * - The vote is the caller's own and nobody else's (INT-11): there is no count or tally anywhere in a row.
  * - UX-41 concept 2: voteTiming says how many days before a chamber's roll call the vote shown was saved. The roll
  *   call is the latest House or Senate vote on the bill (How Congress voted's, officialVotes) in the window. The vote's
@@ -104,6 +106,9 @@ const clip = (text: string): string => {
   return `${atWord.replace(/[\s,;:.-]+$/, "")}${ELLIPSIS}`;
 };
 
+/** An action's day, words and code, without the bill it is on. */
+type ActionLine = Omit<RecentActionV1, "billGuid" | "officialNumber">;
+
 /** One action dated in the window that a push can word, before the latest is picked. */
 interface ActionCandidate {
   day: string;
@@ -143,24 +148,28 @@ const actionCandidates = (actions: unknown, windowStart: string): ActionCandidat
  * The latest of `candidates`, or null when there are none: a routine follow-up only when nothing else is there, and of
  * one day's lines an outcome first, else the first given.
  */
-const pickLatestAction = (candidates: readonly ActionCandidate[]): RecentActionV1 | null => {
+const pickLatestAction = <T extends ActionCandidate>(candidates: readonly T[]): T | null => {
   const pool = candidates.some((action) => !action.routine)
     ? candidates.filter((action) => !action.routine)
     : candidates;
   if (pool.length === 0) return null;
   const latestDay = pool.reduce((latest, action) => (action.day > latest ? action.day : latest), pool[0].day);
   const ofDay = pool.filter((action) => action.day === latestDay);
-  const chosen = ofDay.find((action) => action.outcome) ?? ofDay[0];
-  return {
-    date: chosen.day,
-    text: clip(chosen.phrase),
-    ...(chosen.actionCode ? { actionCode: chosen.actionCode } : {}),
-  };
+  return ofDay.find((action) => action.outcome) ?? ofDay[0];
 };
 
+/** A picked action's day, its words cut to the schema's length, and its code. */
+const actionLineOf = (chosen: ActionCandidate): ActionLine => ({
+  date: chosen.day,
+  text: clip(chosen.phrase),
+  ...(chosen.actionCode ? { actionCode: chosen.actionCode } : {}),
+});
+
 /** The bill's latest action dated on or after `windowStart`, in a push's words, or null when it has none there. */
-export const latestRecentAction = (actions: unknown, windowStart: string): RecentActionV1 | null =>
-  pickLatestAction(actionCandidates(actions, windowStart));
+export const latestRecentAction = (actions: unknown, windowStart: string): ActionLine | null => {
+  const chosen = pickLatestAction(actionCandidates(actions, windowStart));
+  return chosen ? actionLineOf(chosen) : null;
+};
 
 /** A chamber's recorded vote on a bill, as How Congress voted shows it. */
 export interface ChamberRollCall {
@@ -225,6 +234,11 @@ const billStatusOf = (document: Record<string, unknown> | undefined): BillStatus
 const actionsOf = (document: Record<string, unknown>): unknown[] =>
   Array.isArray(document.actions) ? document.actions : [];
 
+/** A bill's number as the apps show it ("H.R. 77"), else its plain guid. */
+const officialNumberOf = (parsed: ParsedBillGuid): string =>
+  officialBillNumber({ billType: parsed.billType, billNumber: parsed.billNumber, guid: parsed.plainGuid }) ??
+  parsed.plainGuid;
+
 /** An ISO time in epoch ms, or 0 when it is missing or not a time. */
 const timeMs = (iso: string | undefined): number => {
   const ms = iso ? Date.parse(iso) : Number.NaN;
@@ -247,8 +261,18 @@ const rowForGroup = (
   });
   // The group's latest action: every member's lines together, so one member's routine follow-up never stands over
   // the other's news, and the primary's lines come first on a day both have.
-  const action = pickLatestAction(loaded.flatMap((member) => actionCandidates(member.document.actions, windowStart)));
-  if (!action) return null;
+  const chosen = pickLatestAction(
+    loaded.flatMap((member) =>
+      actionCandidates(member.document.actions, windowStart).map((candidate) => ({ ...candidate, guid: member.guid })),
+    ),
+  );
+  const actionBill = chosen ? parseBillGuid(chosen.guid) : null;
+  if (!chosen || !actionBill) return null;
+  const action: RecentActionV1 = {
+    ...actionLineOf(chosen),
+    billGuid: actionBill.plainGuid,
+    officialNumber: officialNumberOf(actionBill),
+  };
   // The member that stands for the group, as on the Bills card (for a single bill, the bill).
   const lead = companionStatusLead(loaded, (member) => ({
     status: member.status,
@@ -262,8 +286,7 @@ const rowForGroup = (
   // (an equal-rank pair goes to the member whose manifest row moved later, and a text version moves a row).
   const groupKey = parseBillGuid(members[0])?.plainGuid ?? members[0];
 
-  const officialNumber =
-    officialBillNumber({ billType: parsed.billType, billNumber: parsed.billNumber, guid: lead.guid }) ?? lead.guid;
+  const officialNumber = officialNumberOf(parsed);
   const title = normalizeInlineText(trimmed(lead.document.title)) || officialNumber;
   const vote = members.map((guid) => input.votes.get(guid)).find((value) => value !== undefined);
   const votedOn = vote ? easternDayOfTime(vote.votedAt) : null;

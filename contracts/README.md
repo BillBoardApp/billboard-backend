@@ -414,6 +414,9 @@ gets `UserAPIContractsV1.RecentActions` with `./scripts/syncContracts.sh`):
   "Motion to reconsider laid on the table" only when the window has nothing else, and on the latest day the bill's own
   outcome ("Passed the House") before the other lines. Newest first, then by title, at most 50. Nothing to show is
   `200` with `items: []`.
+- `action.billGuid` and `action.officialNumber` name the bill the action is on. For a group that can be the member the
+  row does not show: a row for H.R. 77 (Passed) can carry S. 50's "Failed in the Senate". The app names that member
+  beside the action when it differs from the row's `billGuid`, as a push names the bill whose action it is.
 - `id` is the bill's key (a group's primary guid, as the app keys the group's card), the day and the wording, so only a
   newer action gives a new id, never a change in which member the row shows. `billStatus` and `vetoed` are the bill's
   as everywhere else (for a group, the member the row shows).
@@ -425,8 +428,9 @@ gets `UserAPIContractsV1.RecentActions` with `./scripts/syncContracts.sh`):
   from `votedOn` to it, only when that is at least 1: a vote changed or saved again on or after the roll call's day has
   none.
 - Privacy: only the caller's own vote, never a count. The `RECENT_ACTIONS_*` cases reject `voteCount`, a tally,
-  another user's vote and a top-level count, as well as a vote other than the three, a suffixed guid, a timing of 0
-  days and more than 50 items; they accept an empty list and items with only a watch.
+  another user's vote and a top-level count, as well as a vote other than the three, a suffixed guid, an action that
+  does not name its bill, a timing of 0 days and more than 50 items; they accept an empty list, items with only a
+  watch and an action on the member the row does not show.
 
 ## Versioning
 

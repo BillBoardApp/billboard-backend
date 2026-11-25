@@ -646,7 +646,8 @@ nonisolated enum UserAPIContractsV1 {
         /// The plain guid of the bill the row shows. For a companion group (one row), the member whose status the Bills
         /// card shows for the group: a law first, then a veto, a passage, a failure, an update, then the member whose
         /// manifest row changed later, then the primary (CompanionGroupIndex.statusLead). The row's number, title,
-        /// billStatus and vetoed are that member's; its action is the group's latest, from either member.
+        /// billStatus and vetoed are that member's; its action is the group's latest, from either member, and
+        /// action.billGuid names the member it is on.
         let billGuid: String
         let congress: String
         let billType: String
@@ -681,6 +682,12 @@ nonisolated enum UserAPIContractsV1 {
         let text: String
         /// The Library of Congress or chamber code of the action, when it has one.
         let actionCode: String?
+        /// The plain guid of the bill the action is on. For a companion group it can be the other member, not the one
+        /// the row shows: a row for H.R. 77 (Passed) can carry S. 50's "Failed in the Senate". A client names that
+        /// member beside the action when it differs from the row's billGuid, as a push does.
+        let billGuid: String
+        /// The number of the bill the action is on, as the apps show it: "S. 50".
+        let officialNumber: String
     }
 
     /// UX-41 concept 2: how long before a chamber's roll call the caller voted. Present only when the bill (either

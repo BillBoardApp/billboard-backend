@@ -11,7 +11,13 @@
       "officialNumber": "H.R. 77",
       "title": "Rural Broadband Access Act",
       "billStatus": "Passed",
-      "action": { "date": "2026-11-19", "text": "Passed the House", "actionCode": "8000" },
+      "action": {
+        "date": "2026-11-19",
+        "text": "Passed the House",
+        "actionCode": "8000",
+        "billGuid": "BILLS-119hr77",
+        "officialNumber": "H.R. 77"
+      },
       "yourVote": "Yea",
       "votedOn": "2026-10-26",
       "voteTiming": { "chamber": "House", "rollCallDate": "2026-11-19", "daysBefore": 24 },
@@ -28,7 +34,9 @@
       "billStatus": "New",
       "action": {
         "date": "2026-11-12",
-        "text": "Committee on Homeland Security and Governmental Affairs. Hearings held"
+        "text": "Committee on Homeland Security and Governmental Affairs. Hearings held",
+        "billGuid": "BILLS-119s570",
+        "officialNumber": "S. 570"
       },
       "watched": true
     },
@@ -42,7 +50,13 @@
       "title": "Ends a Federal Rule on Water Permits",
       "billStatus": "Passed",
       "vetoed": true,
-      "action": { "date": "2026-11-05", "text": "Vetoed by President", "actionCode": "31000" },
+      "action": {
+        "date": "2026-11-05",
+        "text": "Vetoed by President",
+        "actionCode": "31000",
+        "billGuid": "BILLS-119hjres140",
+        "officialNumber": "H.J.Res. 140"
+      },
       "yourVote": "Abstain",
       "votedOn": "2026-10-30",
       "watched": false
