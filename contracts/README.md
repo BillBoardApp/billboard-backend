@@ -80,7 +80,7 @@ How the schemas map to code:
   `VERIFICATION_*` and `APP_ATTEST_*` in the script) and UX-32's `CIVIC_PROFILE_*` must be accepted or rejected as
   listed there: both spellings of each renamed sub-category and the near-miss spellings; `BillStats` with and without
   `comparison`, a withheld verified split, and the `weighted*` fields old builds need; `limitReason`;
-  `UserCivicProfile` with and without the theme lock's fields; the App Attest bodies, header grammar, `clientData`,
+  `UserCivicProfile` with and without the theme lock's fields and `themeVotes`; the App Attest bodies, header grammar, `clientData`,
   version, ClientMetadata and `Retry-After`. A case may also be a literal value (for a schema with no fixture, such
   as a header). The script prints how many cases ran.
 - Rules a schema cannot express: manifest `count` equals the array length; release artifact names are unique;
@@ -91,7 +91,8 @@ How the schemas map to code:
   groups also list only the manifest's bills, sorted by `primaryGuid`; a processed bill is a member of its own group);
   the `BillStats` sample has `weighted*` equal to the plain counts in every bucket and a `comparison` derived from
   `totals` and `segments.verified`; the ClientMetadata sample's assertion carries a 32-byte key ID and sign-up
-  `clientData`.
+  `clientData`; the `UserCivicProfile` sample's `themeVotes` has no count above `votesUsed`, and its themes at
+  `minThemeVotes` or more are exactly the themes in `axes`, `themesReady` of them.
 - `openapi/user-api.v1.json` validates as OpenAPI 3.1 with its `$ref`s into `schemas/`, and documents exactly the
   routes (method, path and auth) declared in `infra/lib/stacks/user-api-service.ts`. `stackRoutes()` parses that file:
   one `const` per resource from `parent.addResource('segment')`, then `addCognitoMethod`, `addPublicMethod` or
@@ -214,6 +215,21 @@ Builds 1.1 and 1.2 keep decoding `GET /civic-profile`: their `CivicProfileRespon
 - `fixtures/openapi/UserCivicProfile.valid.json` is a theme-locked sample; the `CIVIC_PROFILE_*` cases accept a body
   without the new fields, a ready one, one locked on its votes and one under 25 votes locked on its themes, and reject
   an unknown `lockedBy`. Not generated (only `ApiError` is), so services and the app type it by hand.
+
+### Theme vote counts (UX-40 L4)
+
+App 1.3 draws the profile as six theme bars, each with the count of votes its score rests on ("12 votes", or "Not
+enough data · 5 of 8 votes"). Builds 1.1 and 1.2 ignore the new field.
+
+- Optional, additive: `themeVotes` (component `UserCivicProfileThemeVotes`), an object with all six themes, zeros
+  included, each a whole number of 0 or more: the caller's Yea/Nay votes in the window (the same votes as
+  `votesUsed`) on bills scored on that theme. A theme is in `axes` exactly when its count is at least `minThemeVotes`.
+  A bill scored on several themes counts for each, so the counts can add up to more than `votesUsed`; none exceeds it.
+- Absent from a server before it: decode it as optional and hide the count line. Members need no change (their
+  counts are `diagnostics.axisCoverage[theme].evidenceCount` on `GET /congress-member-civic-profile`).
+- The sample carries it; the `CIVIC_PROFILE_*` cases accept a body without it and one with every count 0, and reject
+  a missing or unknown theme, a negative, fractional or string count, and `null`. Not generated, so services and the
+  app type it by hand.
 
 ## App Attest (INT-04)
 
