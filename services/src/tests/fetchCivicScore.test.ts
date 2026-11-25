@@ -1432,6 +1432,18 @@ describe("fetchCivicScore companion groups (APPF-23)", () => {
     });
   });
 
+  it("counts a pair voted on in two weeks once, in the week of the vote it keeps, like its day (UX-41)", async () => {
+    // The Senate member on Monday Feb 2 (the week of Feb 1), the House member, the primary, on Friday Feb 20 (the week
+    // of Feb 15). The House row stands for the pair, so its week and its day are Feb 20's, and Feb 2 marks nothing.
+    const body = await scoreFor([vote("BILLS-119s570", "Yea", 2), vote("BILLS-119hr1285", "Nay", 20)]);
+
+    expect(body.totalVotes).toBe(1);
+    expect(body.lastVotedAt).toBe("2026-02-20T09:00:00.000Z");
+    expect(body.recentVoteWeeks.filter((week) => week.count > 0)).toEqual([{ weekStart: "2026-02-15", count: 1 }]);
+    expect(body.weeksVotedRecent).toBe(1);
+    expect(body.recentVoteDays.filter((day) => day.count > 0)).toEqual([{ date: "2026-02-20", count: 1 }]);
+  });
+
   it("lets the primary's Abstain stand for the pair over a Yea on the other member, and counts it (UX-31)", async () => {
     const body = await scoreFor([vote("BILLS-119hr3000", "Abstain", 1), vote("BILLS-119s3000", "Yea", 2)]);
 

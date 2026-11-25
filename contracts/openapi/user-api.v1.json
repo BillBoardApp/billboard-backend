@@ -1643,7 +1643,7 @@
             "type": "array",
             "minItems": 8,
             "maxItems": 8,
-            "description": "UX-41 concept 3, additive (apps 1.1 and 1.2 ignore it; absent from a server before it, so decode it as optional). The last 8 weeks, Sunday to Saturday in America/New_York (the Weekly Brief's week, also before a user's switch to Eastern days), oldest first, the current week last; count is the bills first voted on that week (firstVotedAt, so a changed vote never moves its week), Yea, Nay and Abstain alike, a companion pair once. Weeks earn no points.",
+            "description": "UX-41 concept 3, additive (apps 1.1 and 1.2 ignore it; absent from a server before it, so decode it as optional). The last 8 weeks, Sunday to Saturday in America/New_York (the Weekly Brief's week, also before a user's switch to Eastern days), oldest first, the current week last; count is the bills first voted on that week (firstVotedAt, so a changed vote never moves its week), Yea, Nay and Abstain alike. A companion pair counts once, in the week of the vote the score keeps for it (the vote on the House bill, the group's primary, when there is one, else the first), the vote its day also comes from. Weeks earn no points.",
             "items": {
               "type": "object",
               "additionalProperties": false,

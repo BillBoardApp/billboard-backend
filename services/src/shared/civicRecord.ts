@@ -96,9 +96,10 @@ export const RECENT_VOTE_DAYS = 30;
 /**
  * UX-41 concept 3 ("Weeks you voted: 6 of the last 8", app 1.3): the weeks, Sunday to Saturday in America/New_York
  * (the Weekly Brief's week), the current one last. A week counts the bills first voted on in it (firstVotedAt, so a
- * changed vote never moves its week), Yea, Nay and Abstain alike, a companion pair once. One vote fills a week, so more
- * votes earn nothing, and a missed week is never a "broken" anything. Weeks earn no points (project decision
- * 2026-11-23, D85 (a), which also freezes the day-streak bonus: module comment).
+ * changed vote never moves its week), Yea, Nay and Abstain alike. A companion pair counts once, in the week of the
+ * vote the score keeps for it (the primary's, else the first: fetchCivicScore), which also gives its day. One vote
+ * fills a week, so more votes earn nothing, and a missed week is never a "broken" anything. Weeks earn no points
+ * (project decision 2026-11-23, D85 (a), which also freezes the day-streak bonus: module comment).
  */
 export const RECENT_VOTE_WEEKS = 8;
 
