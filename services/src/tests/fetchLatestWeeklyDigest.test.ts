@@ -66,7 +66,22 @@ describe("fetchLatestWeeklyDigest handler", () => {
       publishedAt: "2026-03-22T14:00:00.000Z",
       isRead: false,
       stats: [],
-      sections: [],
+      sections: [
+        {
+          kind: "needs_attention",
+          title: "Needs Your Attention",
+          items: [
+            {
+              id: "bill|BILLS-119hr22ih",
+              kind: "bill",
+              title: "Tracked Passed Bill",
+              summary: "Mar 19: Passed the House.",
+              accent: "attention",
+              billGuid: "BILLS-119hr22ih",
+            },
+          ],
+        },
+      ],
     };
 
     mockDynamoSend.mockResolvedValue({
@@ -152,20 +167,22 @@ describe("fetchLatestWeeklyDigest handler", () => {
   });
 
   // UX-41 concept 4: the snapshot is served as stored, so app 1.3 gets Your bills this week, and 1.1 and 1.2 ignore it.
+  const yourBills = [
+    {
+      id: "bill|BILLS-119hr22ih",
+      kind: "bill",
+      title: "Tracked Passed Bill",
+      summary: "Mar 19: Passed the House.",
+      reason: "You voted on this",
+      accent: "movement",
+      billState: "passed",
+      billGuid: "BILLS-119hr22ih",
+    },
+  ];
+  const app13 = { ...event, headers: { "X-Billboard-App-Version": "1.3" } };
+
   test("serves Your bills this week as stored, and never the push claim", async () => {
     jest.setSystemTime(new Date("2026-03-22T14:00:00.000Z"));
-    const yourBills = [
-      {
-        id: "bill|BILLS-119hr22ih",
-        kind: "bill",
-        title: "Tracked Passed Bill",
-        summary: "Mar 19: Passed the House.",
-        reason: "You voted on this",
-        accent: "movement",
-        billState: "passed",
-        billGuid: "BILLS-119hr22ih",
-      },
-    ];
     const storedDigest = {
       id: "2026-03-22T14:00:00.000Z",
       title: "Your Week in Congress | Mar 15-21, 2026",
@@ -183,11 +200,74 @@ describe("fetchLatestWeeklyDigest handler", () => {
     });
 
     const { handler } = require("../handlers/fetchLatestWeeklyDigest");
-    const response = await handler(event);
+    const response = await handler(app13);
 
     expect(JSON.parse(response.body)).toEqual(storedDigest);
     expect(response.body).not.toContain("pushClaimedAt");
     expect(mockDynamoSend.mock.calls[0][0].input.ProjectionExpression).toBe("payload");
+  });
+
+  // UX-28 review: a brief can hold Your bills alone (a voted bill no section shows). 1.1 and 1.2 never read yourBills
+  // and would show it empty, so they get no brief, as before Your bills.
+  describe("a brief with Your bills and no section", () => {
+    const yourBillsOnly = {
+      id: "2026-03-22T14:00:00.000Z",
+      title: "Your Week in Congress | Mar 15-21, 2026",
+      summary: "Here is your week in Congress.",
+      weekStart: "2026-03-15T04:00:00.000Z",
+      weekEnd: "2026-03-21T04:00:00.000Z",
+      publishedAt: "2026-03-22T14:00:00.000Z",
+      isRead: false,
+      stats: [],
+      sections: [],
+      yourBills,
+    };
+
+    beforeEach(() => {
+      jest.setSystemTime(new Date("2026-03-22T14:00:00.000Z"));
+      mockDynamoSend.mockResolvedValue({ Item: { payload: { S: JSON.stringify(yourBillsOnly) } } });
+    });
+
+    test.each([
+      ["app 1.3", { "X-Billboard-App-Version": "1.3" }],
+      ["app 1.3.1, header in lower case", { "x-billboard-app-version": "1.3.1" }],
+      ["app 1.4", { "X-Billboard-App-Version": "1.4" }],
+    ])("is served to %s", async (_label, headers) => {
+      const { handler } = require("../handlers/fetchLatestWeeklyDigest");
+
+      const response = await handler({ ...event, headers });
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body)).toEqual(yourBillsOnly);
+    });
+
+    test.each([
+      ["app 1.2", { "X-Billboard-App-Version": "1.2" }],
+      ["app 1.2.1", { "X-Billboard-App-Version": "1.2.1" }],
+      ["an unreadable version", { "X-Billboard-App-Version": "next" }],
+      ["apps 1.0 and 1.1 (no version)", undefined],
+    ])("is not served to %s, which gets no brief", async (_label, headers) => {
+      const { handler } = require("../handlers/fetchLatestWeeklyDigest");
+
+      const response = await handler({ ...event, headers });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.body).toBe("");
+    });
+
+    test("is served to app 1.2 once a section is there, Your bills included (it ignores the key)", async () => {
+      const withSection = {
+        ...yourBillsOnly,
+        sections: [{ kind: "moved_this_week", title: "What Moved This Week", items: yourBills }],
+      };
+      mockDynamoSend.mockResolvedValue({ Item: { payload: { S: JSON.stringify(withSection) } } });
+      const { handler } = require("../handlers/fetchLatestWeeklyDigest");
+
+      const response = await handler({ ...event, headers: { "X-Billboard-App-Version": "1.2" } });
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body)).toEqual(withSection);
+    });
   });
 
   test("uses the previous release window before Sunday 10am Eastern", async () => {
