@@ -15,8 +15,13 @@ import { isBulkMessage, listingTimeOfCorrelationId } from "./retryLadder";
  * - "on" (as shipped): also sends the message back to UpdatedBillsQueue OLDER_COPY_RECHECK_DELAY_SECONDS later, at
  *   most OLDER_COPY_MAX_RECHECKS times (olderCopyRecheck in the body). A re-check reads the bill's own answer only (one
  *   call) and fetches the bill in full only when that answer is newer than the stored copy (RawBillOlderCopyRecheck,
- *   Outcome).
+ *   Outcome). It makes no call when a later listing of the bill was stored since (isRecheckSuperseded).
  * The fetched copy is stored and sent on as before either way: it is never worse than the stored one.
+ *
+ * 2026-11-25: two re-checks (30 minutes) were too few. Over 11-23 to 11-25, 43 bills listed once gave up, and each of
+ * the 8 read again later was missing an update congress.gov's answer then had. About half the re-check calls went to
+ * the few bills congress.gov re-stamps every few minutes, whose later listings fetch them anyway. So a re-check now
+ * stops when a later listing was stored, and the default is 5 re-checks (75 minutes).
  */
 export type OlderCopyRecheckMode = "off" | "watch" | "on";
 
@@ -80,6 +85,25 @@ export const storedCopyUpdateMs = (rawBill: unknown): number | null =>
   billAnswerUpdateMs(asRecord(asRecord(rawBill)?.content)?.bill);
 
 /**
+ * The listing a stored raw bill records: its metadata.listedAt (FetchRawBill writes it under FETCH_RETRY_BACKOFF
+ * "on", retryLadder.ts), in ms, or null. Not the fallbacks storedListingTimeMs takes (the correlation id's run start,
+ * fetchedAt): a bulk copy's id or a fetch time is no listing.
+ */
+export const storedCopyListedAtMs = (rawBill: unknown): number | null =>
+  isoTimeMs(asRecord(asRecord(rawBill)?.metadata)?.listedAt);
+
+/**
+ * Before a re-check calls congress.gov: whether the stored copy holds a later listing than the one this re-check
+ * follows. That listing's own fetch compared the bill's answer again and, still older, sent its own re-checks, so this
+ * one stops with no call ("superseded"). A bill congress.gov re-stamps is listed every few minutes, and each listing
+ * used to run its own re-checks of the same answer. The re-check's own listing (the copy its first fetch stored, or a
+ * "newer" re-check's) is not later; nor is a bulk copy's, which keeps the stored listing. No recorded listing: the
+ * re-check goes on.
+ */
+export const isRecheckSuperseded = (storedListedAtMs: number | null, listedAtMs: number): boolean =>
+  storedListedAtMs !== null && storedListedAtMs > listedAtMs;
+
+/**
  * Whether a bill answer is older than its listing: its update time is before the start of the window that listed it.
  * The fetcher does not know that start; the poller's window starts at the run before (SCHEDULE: 5 minutes) less its
  * 120-second overlap, so `windowSeconds` (480: those 7 minutes and one more for a late run) before the listing is
@@ -91,7 +115,8 @@ export const isOlderThanListing = (updateMs: number | null, listedAtMs: number, 
   updateMs !== null && updateMs < Math.floor(listedAtMs / 1000) * 1000 - windowSeconds * 1000;
 
 /**
- * What a re-check does with the bill's answer, read again:
+ * What a re-check does: superseded (isRecheckSuperseded: a later listing was stored, no call), or with the bill's
+ * answer, read again:
  * - newer: it is newer than the stored copy, so the bill is fetched in full and stored (and checked again if it is
  *   still older than its listing and re-checks remain);
  * - caught_up: no newer than the stored copy, which is already as new as the listing (another message stored it);
@@ -99,7 +124,7 @@ export const isOlderThanListing = (updateMs: number | null, listedAtMs: number, 
  * - gave_up: the same on the last re-check: the stored copy stays.
  * The answer without an update time counts as newer, so the bill is fetched as before.
  */
-export type OlderCopyRecheckOutcome = "newer" | "caught_up" | "still_older" | "gave_up";
+export type OlderCopyRecheckOutcome = "superseded" | "newer" | "caught_up" | "still_older" | "gave_up";
 
 export const decideOlderCopyRecheck = (input: {
   answerUpdateMs: number | null;
@@ -109,7 +134,7 @@ export const decideOlderCopyRecheck = (input: {
   windowSeconds: number;
   attempt: number;
   maxRechecks: number;
-}): OlderCopyRecheckOutcome => {
+}): Exclude<OlderCopyRecheckOutcome, "superseded"> => {
   const { answerUpdateMs, storedUpdateMs, listedAtMs, windowSeconds, attempt, maxRechecks } = input;
   if (answerUpdateMs === null || storedUpdateMs === null || answerUpdateMs > storedUpdateMs) return "newer";
   if (!isOlderThanListing(storedUpdateMs, listedAtMs, windowSeconds)) return "caught_up";

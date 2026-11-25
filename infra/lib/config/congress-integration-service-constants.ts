@@ -203,9 +203,10 @@ export const REFETCH_UNCHANGED_MODE: 'off' | 'watch' | 'on' = 'watch';
 // REL-56 (2026-11-21): congress.gov's bill answer can be older than its list. The poller lists a bill in the window
 // that holds its update, and the fetch a minute later gets the bill as it was before it: 739 of about 3,070 poller
 // fetches from 11-14 to 11-21, up to 48 minutes after the update, and 721 bills were left stored without it. 'on' sends
-// such a poller message back to UpdatedBillsQueue 15 minutes later, twice at most (TEXT_RETRY_QUEUE_URL and its send
-// grant, as the text retry): each re-check reads the bill's own answer (one call) and fetches the bill in full only when
-// it is newer than the stored copy (RawBillOlderThanListing, RawBillOlderCopyRecheck by Outcome). 'watch' only logs and
+// such a poller message back to UpdatedBillsQueue 15 minutes later, 5 times at most since 2026-11-25 (75 minutes; it
+// was twice; TEXT_RETRY_QUEUE_URL and its send grant, as the text retry): each re-check reads the bill's own answer (one
+// call) and fetches the bill in full only when it is newer than the stored copy, and stops with no call once a later
+// listing of the bill was stored (RawBillOlderThanListing, RawBillOlderCopyRecheck by Outcome). 'watch' only logs and
 // counts; 'off' compares nothing (the rollback, docs/RUNBOOK.md 6.6).
 export const OLDER_COPY_RECHECK: 'off' | 'watch' | 'on' = 'on';
 

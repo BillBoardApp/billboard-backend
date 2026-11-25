@@ -7,9 +7,11 @@ import {
   billAnswerUpdateMs,
   decideOlderCopyRecheck,
   isOlderThanListing,
+  isRecheckSuperseded,
   olderCopyRecheckOf,
   parseOlderCopyRecheckMode,
   pollerListingTimeMs,
+  storedCopyListedAtMs,
   storedCopyUpdateMs,
 } from "../handlers/fetchRawBill/olderCopy";
 
@@ -34,6 +36,7 @@ const LISTED_UPDATE = "2026-11-19T19:11:35Z";
 const OLD_UPDATE = "2026-07-28T08:06:33Z";
 const BETWEEN_UPDATE = "2026-11-19T18:40:02Z";
 const LATER_ID = "2026-11-19T19:18:39.702Z:BILLS-119hr77";
+const LATER_LISTED_AT = "2026-11-19T19:18:39.702Z";
 
 const mockS3Send = jest.fn();
 const mockSecretsManagerSend = jest.fn();
@@ -305,6 +308,8 @@ const runLastRecheck = (handler: Handler): Promise<SQSBatchResponse> => {
 };
 
 const OLDER_THAN_LISTING = "congress.gov's bill answer is older than its listing; it is checked again later";
+const SUPERSEDED = "A later listing of the bill was stored since; it checks the bill itself, so this re-check stops";
+const storedListedAt = () => fake.json<{ metadata: { listedAt?: string } }>(RAW_KEY)?.metadata.listedAt;
 
 describe("olderCopy: the rules", () => {
   it.each([
@@ -385,6 +390,21 @@ describe("olderCopy: the rules", () => {
     expect(decideOlderCopyRecheck({ ...base, answerUpdateMs: old, storedUpdateMs: old })).toBe("still_older");
     expect(decideOlderCopyRecheck({ ...base, attempt: 2, answerUpdateMs: old, storedUpdateMs: old })).toBe("gave_up");
   });
+
+  it("calls a re-check superseded only when the stored copy records a later listing than its own", () => {
+    const listed = Date.parse(LISTED_AT);
+    expect(storedCopyListedAtMs({ metadata: { listedAt: LATER_LISTED_AT } })).toBe(Date.parse(LATER_LISTED_AT));
+    // A copy without metadata.listedAt (stored under FETCH_RETRY_BACKOFF off, or before it) records no listing: its
+    // fetchedAt is no listing time.
+    for (const rawBill of [{ metadata: { fetchedAt: LATER_LISTED_AT } }, { metadata: {} }, {}, null, undefined]) {
+      expect(storedCopyListedAtMs(rawBill)).toBeNull();
+    }
+    expect(isRecheckSuperseded(Date.parse(LATER_LISTED_AT), listed)).toBe(true);
+    // Its own listing (the copy its first fetch, or a newer re-check, stored) and an earlier one are not later.
+    expect(isRecheckSuperseded(listed, listed)).toBe(false);
+    expect(isRecheckSuperseded(listed - 300_000, listed)).toBe(false);
+    expect(isRecheckSuperseded(null, listed)).toBe(false);
+  });
 });
 
 describe('OLDER_COPY_RECHECK "on" (as shipped)', () => {
@@ -414,7 +434,7 @@ describe('OLDER_COPY_RECHECK "on" (as shipped)', () => {
       listingWindowSeconds: 480,
       recheckAttempt: 0,
       nextRecheckAttempt: 1,
-      maxRechecks: 2,
+      maxRechecks: 5,
       delaySeconds: 900,
     });
   });
@@ -463,11 +483,24 @@ describe('OLDER_COPY_RECHECK "on" (as shipped)', () => {
     expect(lineWith("Successfully processed bill")).toMatchObject({ callBudgetUsed: 8 });
   });
 
-  it("gives up after its last re-check: the stored copy stays and nothing more is sent", async () => {
+  it("re-checks 5 times by default, 15 minutes apart, one call each, then gives up: the stored copy stays", async () => {
     const handler = loadHandler("on");
     congress.billUpdates = [OLD_UPDATE];
     await handler(event());
-    await runLastRecheck(handler);
+    // The first fetch stored its own listing; that is not a later one.
+    expect(storedListedAt()).toBe(LISTED_AT);
+
+    for (const attempt of [1, 2, 3, 4]) {
+      expect((await runLastRecheck(handler)).batchItemFailures).toEqual([]);
+      expect(congress.requests).toEqual(["/v3/bill/119/hr/77"]);
+      expect(recheckOutcomes()).toEqual(["still_older"]);
+      const [next] = rechecksSent();
+      expect(next.DelaySeconds).toBe(900);
+      expect(JSON.parse(next.MessageBody).olderCopyRecheck).toEqual({
+        attempt: attempt + 1,
+        updateDate: "2026-07-28T08:06:33.000Z",
+      });
+    }
 
     const result = await runLastRecheck(handler);
 
@@ -481,12 +514,13 @@ describe('OLDER_COPY_RECHECK "on" (as shipped)', () => {
     ).toMatchObject({
       level: "WARN",
       outcome: "gave_up",
-      recheckAttempt: 2,
+      recheckAttempt: 5,
+      maxRechecks: 5,
       storedUpdatedAt: "2026-07-28T08:06:33.000Z",
     });
   });
 
-  it("stops when a later listing stored the update in the meantime (caught_up)", async () => {
+  it("stops with no call when a later listing was stored since (superseded)", async () => {
     const handler = loadHandler("on");
     congress.billUpdates = [OLD_UPDATE, LISTED_UPDATE];
     await handler(event());
@@ -495,24 +529,77 @@ describe('OLDER_COPY_RECHECK "on" (as shipped)', () => {
     nextInvocation();
     await handler(event(BODY, LATER_ID));
     expect(storedUpdate()).toBe(LISTED_UPDATE);
+    expect(storedListedAt()).toBe(LATER_LISTED_AT);
     const versions = fake.contentVersions(RAW_KEY).length;
 
     nextInvocation();
     expect((await handler(recheck)).batchItemFailures).toEqual([]);
 
-    expect(congress.requests).toEqual(["/v3/bill/119/hr/77"]);
+    expect(congress.requests).toEqual([]);
     expect(fake.contentVersions(RAW_KEY)).toHaveLength(versions);
+    expect(mockSqsSend).not.toHaveBeenCalled();
+    expect(recheckOutcomes()).toEqual(["superseded"]);
+    expect(metricDatums("CongressApiCallsCore")).toEqual([]);
+    expect(lineWith(SUPERSEDED)).toMatchObject({
+      level: "INFO",
+      event: "older_copy_recheck",
+      outcome: "superseded",
+      recheckAttempt: 1,
+      listedAt: LISTED_AT,
+      storedListedAt: LATER_LISTED_AT,
+    });
+  });
+
+  it("leaves a bill congress.gov re-stamps to its latest listing's re-checks: the earlier ones make no call", async () => {
+    const handler = loadHandler("on");
+    // Listed again 5 minutes later, its answer still the July copy: each listing finds it older.
+    congress.billUpdates = [OLD_UPDATE];
+    await handler(event());
+    const first = deliverLastRecheck();
+    nextInvocation();
+    await handler(event(BODY, LATER_ID));
+    const later = deliverLastRecheck();
+    expect(later.Records[0].messageAttributes.correlationId.stringValue).toBe(LATER_ID);
+
+    nextInvocation();
+    await handler(first);
+    expect(congress.requests).toEqual([]);
+    expect(recheckOutcomes()).toEqual(["superseded"]);
+
+    nextInvocation();
+    await handler(later);
+    expect(congress.requests).toEqual(["/v3/bill/119/hr/77"]);
+    expect(recheckOutcomes()).toEqual(["still_older"]);
+  });
+
+  it("calls as before when the stored copy records no listing (stored under FETCH_RETRY_BACKOFF off)", async () => {
+    congress.billUpdates = [OLD_UPDATE, LISTED_UPDATE];
+    await loadHandler("on")(event());
+    const recheck = deliverLastRecheck();
+    // A later listing stored without metadata.listedAt: it gets the update, but records no listing.
+    nextInvocation();
+    await loadHandler("on", { FETCH_RETRY_BACKOFF: "off" })(event(BODY, LATER_ID));
+    expect(storedUpdate()).toBe(LISTED_UPDATE);
+    expect(storedListedAt()).toBeUndefined();
+
+    const handler = loadHandler("on");
+    nextInvocation();
+    expect((await handler(recheck)).batchItemFailures).toEqual([]);
+
+    expect(congress.requests).toEqual(["/v3/bill/119/hr/77"]);
     expect(mockSqsSend).not.toHaveBeenCalled();
     expect(recheckOutcomes()).toEqual(["caught_up"]);
   });
 
   it("fetches a newer answer that is still older than its listing, and checks it once more", async () => {
-    const handler = loadHandler("on");
+    const handler = loadHandler("on", { OLDER_COPY_MAX_RECHECKS: "2" });
     congress.billUpdates = [OLD_UPDATE, BETWEEN_UPDATE];
     await handler(event());
 
     await runLastRecheck(handler);
     expect(storedUpdate()).toBe(BETWEEN_UPDATE);
+    // The re-check's own store keeps its listing: no later one, so the next re-check calls.
+    expect(storedListedAt()).toBe(LISTED_AT);
     expect(sentTo(DIFFER_QUEUE)).toHaveLength(1);
     expect(recheckOutcomes()).toEqual(["newer"]);
     expect(JSON.parse(rechecksSent()[0].MessageBody).olderCopyRecheck).toEqual({
@@ -523,6 +610,7 @@ describe('OLDER_COPY_RECHECK "on" (as shipped)', () => {
     expect(metricDatums("RawBillOlderThanListing")).toEqual([]);
 
     await runLastRecheck(handler);
+    expect(congress.requests).toEqual(["/v3/bill/119/hr/77"]);
     expect(recheckOutcomes()).toEqual(["gave_up"]);
     expect(storedUpdate()).toBe(BETWEEN_UPDATE);
   });

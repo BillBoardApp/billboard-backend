@@ -1782,7 +1782,8 @@ export class MonitoringStack extends cdk.Stack {
         width: 8,
       }),
       // REL-56 (2026-11-21): poller fetches whose bill answer was older than its listing (left), and what each delayed
-      // re-check found (right): newer (fetched and stored), caught_up, still_older (checked again), gave_up.
+      // re-check found (right): superseded (a later listing stored, no call), newer (fetched and stored), caught_up,
+      // still_older (checked again), gave_up.
       new cloudwatch.GraphWidget({
         title: 'Bill answers older than their listing (left), re-checks by outcome (right)',
         left: [this.ingestionMetric('RawBillOlderThanListing'), this.ingestionMetric('RawBillOlderCopyRecheck')],
