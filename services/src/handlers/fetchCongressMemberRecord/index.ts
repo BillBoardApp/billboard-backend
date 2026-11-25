@@ -28,8 +28,9 @@ import { sleep } from "../../shared/retry";
 // GET /congress-member-record (UX-39d): a member of Congress's public record. Their latest roll-call vote on each bill
 // in BillBoard, newest first, a page at a time (CongressMemberVoteRecord, written by congressMemberStats, read through
 // its VotedOnIndex), and on the first page the bills they sponsored (CongressMembersStats' counted-bill sets, each
-// Congress apart, REL-46) that the bills manifest lists. Titles, statuses and dates come from the bills manifest. Only
-// public facts: no score, no ranking, no BillBoard user's vote.
+// Congress apart, REL-46) that the bills manifest lists. Titles, statuses and dates come from the bills manifest. With
+// billGuids, only the member's votes on those bills (for "You and <member> voted alike", worked out on the device).
+// Only public facts: no score, no ranking, no BillBoard user's vote.
 
 const VOTE_RECORD_TABLE_NAME = process.env.VOTE_RECORD_TABLE_NAME ?? "";
 const VOTE_RECORD_PRIMARY_KEY = process.env.VOTE_RECORD_PRIMARY_KEY ?? "bioguideId";
@@ -47,6 +48,7 @@ const MANIFEST_GUID_LOOKUP_PK = process.env.MANIFEST_GUID_LOOKUP_PK ?? `${MANIFE
 export const DEFAULT_LIMIT = 25;
 export const MAX_LIMIT = 100;
 export const SPONSORED_BILLS_LIMIT = 250;
+export const MAX_BILL_GUIDS = 100;
 const BATCH_GET_SIZE = 100;
 const BATCH_GET_MAX_ATTEMPTS = 4;
 const BATCH_GET_BACKOFF_MS = 100;
@@ -56,6 +58,7 @@ const PLAIN_GUID_PATTERN = /^BILLS-(\d+)([a-z]+)(\d+)$/;
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 // What a cursor carries: the last vote served, "<votedOn>#<plain guid>#<chamber>".
 const CURSOR_PATTERN = /^(\d{4}-\d{2}-\d{2})#(BILLS-\d+[a-z]+\d+)#(House|Senate)$/;
+const CHAMBERS: readonly VoteRecordChamber[] = ["House", "Senate"];
 const POSITIONS: ReadonlySet<string> = new Set<CongressMemberRecordPositionV1>(VOTE_RECORD_POSITIONS);
 const BILL_STATUSES: ReadonlySet<string> = new Set(BILL_STATUS_VALUES_V1);
 
@@ -78,6 +81,13 @@ const decodeCursor = (cursor: string): CursorPosition | null => {
   return match ? { votedOn: match[1], billGuid: match[2], chamber: match[3] as VoteRecordChamber } : null;
 };
 
+/** The billGuids parameter: 1 to MAX_BILL_GUIDS plain guids, comma-separated, repeats dropped; null when malformed. */
+const parseBillGuids = (raw: string): string[] | null => {
+  const guids = [...new Set(raw.split(",").map((guid) => guid.trim()))];
+  if (guids.length === 0 || guids.length > MAX_BILL_GUIDS) return null;
+  return guids.every((guid) => PLAIN_GUID_PATTERN.test(guid)) ? guids : null;
+};
+
 /** BILLS-119hr1234 -> its congress, type and number, as the bills manifest writes them. */
 const billParts = (guid: string): { congress: string; billType: string; billNumber: string } | null => {
   const match = guid.match(PLAIN_GUID_PATTERN);
@@ -87,8 +97,9 @@ const billParts = (guid: string): { congress: string; billType: string; billNumb
 /** A bill's row in the bills manifest, as this record serves it. */
 type ManifestFacts = { title?: string; billStatus?: string; vetoed?: true; updatedAt?: string };
 
-/** BatchGetItem of every manifest key, retrying unprocessed keys; the items found, and whether every key was read. */
+/** BatchGetItem of every key, retrying unprocessed keys; the items found, and whether every key was read. */
 const batchGetAll = async (
+  tableName: string,
   keys: Item[],
   projection: string,
   names: Record<string, string>,
@@ -101,15 +112,15 @@ const batchGetAll = async (
       const response = await ddb.send(
         new BatchGetItemCommand({
           RequestItems: {
-            [MANIFEST_TABLE_NAME]: { Keys: pending, ProjectionExpression: projection, ExpressionAttributeNames: names },
+            [tableName]: { Keys: pending, ProjectionExpression: projection, ExpressionAttributeNames: names },
           },
         }),
       );
-      items.push(...(response.Responses?.[MANIFEST_TABLE_NAME] ?? []));
-      pending = response.UnprocessedKeys?.[MANIFEST_TABLE_NAME]?.Keys ?? [];
+      items.push(...(response.Responses?.[tableName] ?? []));
+      pending = response.UnprocessedKeys?.[tableName]?.Keys ?? [];
       if (pending.length > 0) {
         if (attempt >= BATCH_GET_MAX_ATTEMPTS) {
-          console.warn("Bills manifest reads still unprocessed after retries", { unprocessed: pending.length });
+          console.warn("Reads still unprocessed after retries", { tableName, unprocessed: pending.length });
           complete = false;
           break;
         }
@@ -133,6 +144,7 @@ const readManifestFacts = async (
   if (guids.length === 0) return { facts, complete: true };
   try {
     const lookups = await batchGetAll(
+      MANIFEST_TABLE_NAME,
       guids.map((guid) => ({
         [MANIFEST_PRIMARY_KEY]: { S: MANIFEST_GUID_LOOKUP_PK },
         [MANIFEST_SORT_KEY]: { S: guid },
@@ -147,6 +159,7 @@ const readManifestFacts = async (
       if (guid && manifestSk) guidByManifestSk.set(manifestSk, guid);
     }
     const rows = await batchGetAll(
+      MANIFEST_TABLE_NAME,
       [...guidByManifestSk.keys()].map((manifestSk) => ({
         [MANIFEST_PRIMARY_KEY]: { S: MANIFEST_PK_VALUE },
         [MANIFEST_SORT_KEY]: { S: manifestSk },
@@ -219,6 +232,27 @@ const readVotePage = async (
   const rows = items.slice(0, limit);
   const next = items.length > limit && rows.length > 0 ? cursorPositionOf(rows[rows.length - 1]) : null;
   return { rows, next };
+};
+
+/** Newest first, as the VotedOnIndex reads: by day, then guid, then chamber, each descending. */
+const compareVoteRows = (a: Item, b: Item): number =>
+  (b.votedOn?.S ?? "").localeCompare(a.votedOn?.S ?? "") ||
+  (b.billGuid?.S ?? "").localeCompare(a.billGuid?.S ?? "") ||
+  (b.chamber?.S ?? "").localeCompare(a.chamber?.S ?? "");
+
+/** The member's vote rows on these bills, both chambers, newest first; one BatchGetItem per 50 bills. */
+const readVotesOnBills = async (bioguideId: string, guids: string[]): Promise<Item[]> => {
+  if (!VOTE_RECORD_TABLE_NAME) return [];
+  const keys = guids.flatMap((guid) =>
+    CHAMBERS.map((chamber) => ({
+      [VOTE_RECORD_PRIMARY_KEY]: { S: bioguideId },
+      [VOTE_RECORD_SORT_KEY]: { S: voteRecordBillKey(guid, chamber) },
+    })),
+  );
+  const { items, complete } = await batchGetAll(VOTE_RECORD_TABLE_NAME, keys, VOTE_PROJECTION, VOTE_PROJECTION_NAMES);
+  // A partial answer would undercount "voted alike": fail instead, and the app tries again.
+  if (!complete) throw new Error("Vote record reads still unprocessed after retries");
+  return items.sort(compareVoteRows);
 };
 
 /** The member's sponsored bill guids, each Congress BillBoard counts, newest Congress first. */
@@ -310,8 +344,25 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   if (cursorRaw !== undefined && cursorRaw !== null && !after) {
     return badRequest("INVALID_CURSOR", "cursor must be a nextCursor this route sent.");
   }
+  const billGuidsRaw = query.billGuids;
+  const billGuids = billGuidsRaw === undefined || billGuidsRaw === null ? null : parseBillGuids(billGuidsRaw);
+  if (billGuidsRaw !== undefined && billGuidsRaw !== null && (!billGuids || limitRaw !== "" || after)) {
+    return badRequest(
+      "INVALID_BILL_GUIDS",
+      `billGuids must be 1 to ${MAX_BILL_GUIDS} bill guids such as BILLS-119hr1234, comma-separated, without limit or cursor.`,
+    );
+  }
 
   try {
+    if (billGuids) {
+      const rows = await readVotesOnBills(bioguideId, billGuids);
+      const { facts } = await readManifestFacts([...new Set(rows.map((row) => row.billGuid?.S ?? ""))]);
+      const votes = rows
+        .map((row) => toVote(row, facts))
+        .filter((vote): vote is CongressMemberRecordVoteV1 => vote !== null);
+      return jsonResponse(200, { bioguideId, votes } satisfies CongressMemberRecordV1);
+    }
+
     const firstPage = after === null;
     const [page, sponsoredGuids] = await Promise.all([
       readVotePage(bioguideId, limit, after),

@@ -192,8 +192,8 @@ A bill keeps naming its sponsor after the sponsor leaves the members manifest (t
 ## A member's votes and bills (UX-39d)
 
 `GET /congress-member-record?bioguideId=&limit=&cursor=` (Cognito) serves `congress-member-record.v1` (title
-`CongressMemberRecordV1`), the member page's "How they voted" and "Their bills". New and additive: no older build reads
-it.
+`CongressMemberRecordV1`), the member page's "How they voted" and "Their bills"; with `&billGuids=` (instead of `limit`
+and `cursor`) it serves only the member's votes on those bills. New and additive: no older build reads it.
 
 - `votes` (`CongressMemberRecordVoteV1`): the member's latest roll-call vote on each bill in BillBoard, newest first, at
   most `limit` (1 to 100, default 25): `billGuid` (plain), `congress`, `billType` and `billNumber` (from the guid, as the
@@ -203,6 +203,10 @@ it.
   `YYYY-MM-DD` with no time or zone: shown as it is, never converted to the device's zone) and `actionText` (what the
   roll call was on, a passage or a procedural vote). `nextCursor` is present while more follow; send it back as
   `cursor`.
+- `billGuids` (1 to 100 plain guids, comma-separated): `votes` holds only the member's votes on those bills, both
+  chambers, newest first, with no `nextCursor` and no sponsored bills, so a client can set them beside its own user's
+  votes on the device (the UX-18 "You and <member> voted alike on <n> of <m> bills" line) without paging the whole
+  record. `INVALID_BILL_GUIDS` (400) for a malformed list or one sent with `limit` or `cursor`.
 - `sponsoredBills` (`CongressMemberRecordBillV1`), `sponsoredBillCount` and `sponsoredBillCounts`
   (`CongressMemberRecordCongressCountV1`: `congress` as each bill writes it, and `count`), on the first page only: the
   bills the member sponsored (not cosponsored) that the bills manifest lists, each Congress counted apart (REL-46),
@@ -211,12 +215,12 @@ it.
   when the manifest could not be read, when every counted bill is sent and some lack a title. From 2027-01-03 they span
   more than one Congress: label them by each bill's `congress` or by `sponsoredBillCounts` (D78), not as the 119th.
 - Public facts only: no score, no ranking and no BillBoard user's vote. Clients add "You voted ..." from the caller's own
-  votes. An unknown member gets empty lists; 400s are `ApiError` with `INVALID_BIOGUIDE_ID`, `INVALID_LIMIT` and
-  `INVALID_CURSOR`.
-- `check-contracts.mjs` accepts a last page, a later page, a member with no record and a Senate vote, and rejects a
-  judging word or `Abstain` as a position, a lower-case chamber, a suffixed guid, an extra key on a vote, a vote without
-  `votedOn` or dated with a time, `vetoed: false`, a negative `sponsoredBillCount`, a Congress count of zero or with a
-  numeric `congress`, and a record without `votes`.
+  votes. An unknown member gets empty lists; 400s are `ApiError` with `INVALID_BIOGUIDE_ID`, `INVALID_LIMIT`,
+  `INVALID_CURSOR` and `INVALID_BILL_GUIDS`.
+- `check-contracts.mjs` accepts a last page, a later page or `billGuids` answer, a member with no record and a Senate
+  vote, and rejects a judging word or `Abstain` as a position, a lower-case chamber, a suffixed guid, an extra key on a
+  vote, a vote without `votedOn` or dated with a time, `vetoed: false`, a negative `sponsoredBillCount`, a Congress count
+  of zero or with a numeric `congress`, and a record without `votes`.
 - Generated: the five types above in TypeScript; `UserAPIContractsV1.CongressMemberRecord`,
   `CongressMemberRecordVote`, `CongressMemberRecordBill` and `CongressMemberRecordCongressCount` in Swift (`position` and
   `chamber` are `String`).

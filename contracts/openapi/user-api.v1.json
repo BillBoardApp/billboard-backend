@@ -637,7 +637,7 @@
       "get": {
         "operationId": "getCongressMemberRecord",
         "summary": "Read a Congress member's votes and bills",
-        "description": "UX-39d. The member's latest roll-call vote on each bill in BillBoard (Yea, Nay, Present or Not Voting, as Congress records it), newest first, a page at a time, and on the first page the bills they sponsored. Public facts only: no score, no ranking and no BillBoard user's vote. A member with no record gets empty lists, not a 404. Errors carry ApiError codes INVALID_BIOGUIDE_ID, INVALID_LIMIT and INVALID_CURSOR (400).",
+        "description": "UX-39d. The member's latest roll-call vote on each bill in BillBoard (Yea, Nay, Present or Not Voting, as Congress records it), newest first, a page at a time, and on the first page the bills they sponsored. With billGuids, only their votes on those bills, so a client can compare them with its own user's votes on the device (the UX-18 'voted alike' line). Public facts only: no score, no ranking and no BillBoard user's vote. A member with no record gets empty lists, not a 404. Errors carry ApiError codes INVALID_BIOGUIDE_ID, INVALID_LIMIT, INVALID_CURSOR and INVALID_BILL_GUIDS (400).",
         "tags": ["Congress members"],
         "parameters": [
           { "$ref": "#/components/parameters/bioguideIdQuery" },
@@ -654,6 +654,13 @@
             "required": false,
             "description": "The previous page's nextCursor, as it was sent. Without it, the first page (with sponsoredBills).",
             "schema": { "type": "string", "minLength": 1, "maxLength": 200 }
+          },
+          {
+            "name": "billGuids",
+            "in": "query",
+            "required": false,
+            "description": "1 to 100 plain bill guids, comma-separated, such as BILLS-119hr1234,BILLS-119s5. The answer then holds the member's votes on those bills only (both chambers, newest first, no nextCursor, no sponsoredBills). Not with limit or cursor.",
+            "schema": { "type": "string", "minLength": 1 }
           }
         ],
         "responses": {

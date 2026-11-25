@@ -556,27 +556,32 @@ export interface CongressMemberRecordCongressCountV1 {
 
 /**
  * A member of Congress's public record in BillBoard (UX-39d), from GET /congress-member-record: their latest roll-call
- * vote on each bill in BillBoard, newest first, a page at a time, and the bills they sponsored. Facts only, as Congress
- * records them: no score, no ranking, no judging words, and no BillBoard user's vote.
+ * vote on each bill in BillBoard, newest first, a page at a time, and the bills they sponsored; or, asked with
+ * billGuids, only their votes on those bills. Facts only, as Congress records them: no score, no ranking, no judging
+ * words, and no BillBoard user's vote.
  */
 export interface CongressMemberRecordV1 {
   /** A Congress.gov bioguide ID: one capital letter and six digits, such as D000001. */
   bioguideId: string;
   /**
    * The member's latest roll-call vote on each bill in BillBoard that has one, newest first (by votedOn, then bill
-   * guid), at most the request's limit. A member in both chambers' latest roll calls of a bill (who moved chambers) has
-   * one entry for each. Empty for a member with no recorded vote, or past the last page.
+   * guid), at most the request's limit. Asked with billGuids: their votes on those bills only, in the same order, every
+   * one. A member in both chambers' latest roll calls of a bill (who moved chambers) has one entry for each. Empty for
+   * a member with no recorded vote, or past the last page.
    */
   votes: CongressMemberRecordVoteV1[];
-  /** Present when more votes follow: send it as cursor to read the next page. Absent on the last page. */
+  /**
+   * Present when more votes follow: send it as cursor to read the next page. Absent on the last page, and with
+   * billGuids.
+   */
   nextCursor?: string;
   /**
    * The bills in BillBoard the member sponsored (not cosponsored), from BillBoard's member stats: the 119th Congress
    * and each later Congress counted apart (REL-46), newest Congress first, then by updatedAt, newest first. Only bills
    * the bills manifest lists (a bill still waiting for its text is left out), except when the manifest could not be
    * read, when every counted bill is sent and some lack a title. At most 250 (sponsoredBillCount is the whole number).
-   * Sent on the first page only (no cursor). Label them by each bill's congress (D78): from 2027-01-03 they span more
-   * than one Congress.
+   * Sent on the first page only (no cursor, no billGuids). Label them by each bill's congress (D78): from 2027-01-03
+   * they span more than one Congress.
    */
   sponsoredBills?: CongressMemberRecordBillV1[];
   /**
