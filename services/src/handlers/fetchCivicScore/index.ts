@@ -178,8 +178,8 @@ async function readRecord(table: CivicRecordTable, userId: string): Promise<Civi
 }
 
 /**
- * Stores the record when this read changed it: a user's first read after UX-31 (the seed), the first read after D85
- * (a), which freezes the day-streak bonus, a new vote, votes counted that fell, a longer best streak, a new honor.
+ * Stores the record when this read changed it: a user's first read after UX-31 (the seed), the first read of a record
+ * without a frozen day-streak bonus (D85 (a)), a new vote, votes counted that fell, a longer best streak, a new honor.
  * Never on a row that is missing or being deleted. A concurrent read that raised the record first, or froze the bonus
  * first, makes the write fail its condition: the standing is then recomputed from the record it stored and written
  * again once. A failure leaves the record as it was; the answer is still the standing, which is never below it.

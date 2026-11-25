@@ -13,8 +13,9 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { conditionalCheckFailed, evaluateCondition, type ConditionInput } from "./fixtures/dynamoCondition";
 import { applyTestEnv } from "./fixtures/env";
+import { computeStreaks, easternDayKey, nextEasternMidnight, utcDayKey } from "../shared/civicDays";
 import type { CivicRankDefinition } from "../shared/civicProgression";
-import type { CivicScoreBody } from "../shared/civicRecord";
+import { STREAK_BONUS_FROZEN_AT, type CivicScoreBody } from "../shared/civicRecord";
 import { logLines } from "./logLines";
 
 type Item = Record<string, AttributeValue>;
@@ -656,8 +657,22 @@ describe("D85 (a): the day-streak bonus is frozen", () => {
     ...(honors.length ? { civicHonors: { SS: honors } } : {}),
   });
   const timedVote = (billId: string, feedback: string, time: string) => row(billId, feedback, null, firstVotedAt(time));
+  /** A vote row as written since UX-31, cast at `time` and not changed since (votedAt and firstVotedAt both). */
+  const castVote = (billId: string, feedback: string, time: string) => row(billId, feedback, time, firstVotedAt(time));
+  const DAY_MS = 86_400_000;
+  /** `count` instants a day apart, from `first` on. */
+  const daily = (first: string, count: number) =>
+    Array.from({ length: count }, (_, index) => new Date(Date.parse(first) + index * DAY_MS).toISOString());
 
-  it("freezes it at the first read after D85, at what the stored record gave; a longer day streak adds nothing", async () => {
+  it("freezes at Monday 2026-11-23, 00:00 Eastern, which has passed, so every deploy of this code comes after it", () => {
+    const frozenAtMs = Date.parse(STREAK_BONUS_FROZEN_AT);
+    expect(frozenAtMs).toBeLessThanOrEqual(jest.getRealSystemTime());
+    expect(nextEasternMidnight(frozenAtMs - 1)).toBe(frozenAtMs);
+    expect(easternDayKey(frozenAtMs)).toBe("2026-11-23");
+    expect(easternDayKey(frozenAtMs - 1)).toBe("2026-11-22");
+  });
+
+  it("freezes a record stored before D85 at its stored best streak; a longer day streak adds nothing", async () => {
     seedPii(recordBeforeD85(5, 3, ["first-voice", "steady"]));
     const rows = [
       timedVote("bill-1", "Yea", "2026-11-22T15:00:00.000Z"),
@@ -702,48 +717,151 @@ describe("D85 (a): the day-streak bonus is frozen", () => {
     expect(recordOf()).toMatchObject({ civicStreakBonus: { N: "25" }, civicBestStreak: { N: "6" } });
   });
 
-  it("freezes it at the seed of a user still on UTC days; the switch day and the days after add no points", async () => {
-    seedPii();
-    // Rows written before UX-31 (votedAt only), on the UTC days Nov 22, 23 and 24.
-    const rows = [
-      row("bill-1", "Yea", "2026-11-22T15:00:00.000Z"),
-      row("bill-2", "Nay", "2026-11-23T15:00:00.000Z"),
-      row("bill-3", "Yea", "2026-11-24T15:00:00.000Z"),
-    ];
-    setVotes(rows);
+  it("counts a vote at 11:59 PM Sunday Eastern toward the bonus, and none from Monday 00:00 on", async () => {
+    const friday = timedVote("bill-1", "Yea", "2026-11-20T15:00:00.000Z");
+    const saturday = timedVote("bill-2", "Nay", "2026-11-21T15:00:00.000Z");
+    // Records last stored on Friday, with a best streak of 1, by the code before D85.
+    seedPii(recordBeforeD85(1, 1, ["first-voice"]), "user-sunday");
+    seedPii(recordBeforeD85(1, 1, ["first-voice"]), "user-monday");
+    // Sunday Nov 22, 11:59 PM EST: the last minute before the freeze, still the day Nov 22.
+    setVotes([friday, saturday, timedVote("bill-3", "Yea", "2026-11-23T04:59:00.000Z")], "user-sunday");
+    // Sunday afternoon, then Monday Nov 23, 00:00 EST: the freeze itself, the day Nov 23.
+    setVotes(
+      [
+        friday,
+        saturday,
+        timedVote("bill-3", "Yea", "2026-11-22T20:00:00.000Z"),
+        timedVote("bill-4", "Nay", "2026-11-23T05:00:00.000Z"),
+      ],
+      "user-monday",
+    );
 
-    // The first read seeds the record, switches the days at the next Eastern midnight and freezes the bonus.
-    const seeded = await scoreAt("2026-11-24T15:30:00.000Z");
-    expect(seeded.civicScore).toBe(oldRuleScore(rows, "2026-11-24T15:30:00.000Z"));
-    expect(seeded.streakBonus).toBe(15);
-    expect(recordOf()).toMatchObject({
+    const sunday = await scoreAt("2026-11-25T16:00:00.000Z", "user-sunday");
+    const monday = await scoreAt("2026-11-25T16:00:00.000Z", "user-monday");
+
+    // Nov 20, 21 and 22: the vote at 11:59 PM makes the 3rd day before the freeze.
+    expect([sunday.longestStreak, sunday.streakBonus]).toEqual([3, 15]);
+    // Nov 20 to 23 is a 4-day streak, which 1.1 and 1.2 show, but Monday Nov 23 is after the freeze.
+    expect([monday.longestStreak, monday.streakBonus]).toEqual([4, 15]);
+    expect(recordOf("user-sunday")?.civicStreakBonus).toEqual({ N: "15" });
+    expect(recordOf("user-monday")).toMatchObject({ civicBestStreak: { N: "4" }, civicStreakBonus: { N: "15" } });
+  });
+
+  it("draws the line at the same instant for a user still on UTC days; the switch day and later days add no points", async () => {
+    // No record yet (a seed): the days stay UTC days until the Eastern midnight after the first read.
+    const before = [
+      castVote("bill-1", "Yea", "2026-11-21T15:00:00.000Z"),
+      castVote("bill-2", "Nay", "2026-11-22T15:00:00.000Z"),
+    ];
+    const tuesday = castVote("bill-4", "Yea", "2026-11-24T14:00:00.000Z");
+    seedPii({}, "user-sunday");
+    seedPii({}, "user-monday");
+    // 11:30 PM EST Sunday: the UTC day Nov 23, before the freeze.
+    const rows = [...before, castVote("bill-3", "Yea", "2026-11-23T04:30:00.000Z"), tuesday];
+    setVotes(rows, "user-sunday");
+    // 12:30 AM EST Monday: the same UTC day, after the freeze.
+    setVotes([...before, castVote("bill-3", "Yea", "2026-11-23T05:30:00.000Z"), tuesday], "user-monday");
+
+    // Tuesday Nov 24, 10 AM EST: both voted on the UTC days Nov 21 to 24.
+    const sunday = await scoreAt("2026-11-24T15:00:00.000Z", "user-sunday");
+    const monday = await scoreAt("2026-11-24T15:00:00.000Z", "user-monday");
+    expect([sunday.longestStreak, sunday.currentStreak, sunday.streakBonus]).toEqual([4, 4, 15]);
+    expect([monday.longestStreak, monday.currentStreak, monday.streakBonus]).toEqual([4, 4, 10]);
+    expect(recordOf("user-sunday")).toMatchObject({
       civicEasternFrom: { S: "2026-11-25T05:00:00.000Z" },
-      civicBestStreak: { N: "3" },
+      civicBestStreak: { N: "4" },
       civicStreakBonus: { N: "15" },
     });
+    expect(recordOf("user-monday")?.civicStreakBonus).toEqual({ N: "10" });
 
-    // 10 PM EST Tuesday, before the switch: the UTC day Nov 25, the 4th day.
-    rows.push(row("bill-4", "Abstain", null, firstVotedAt("2026-11-25T03:00:00.000Z")));
-    setVotes(rows);
-    const beforeSwitch = await scoreAt("2026-11-25T03:30:00.000Z");
-    expect([beforeSwitch.currentStreak, beforeSwitch.longestStreak, beforeSwitch.streakBonus]).toEqual([4, 4, 15]);
+    // 10 PM EST Tuesday, before the user's switch to Eastern days: the UTC day Nov 25, the 5th day.
+    rows.push(row("bill-5", "Abstain", null, firstVotedAt("2026-11-25T03:00:00.000Z")));
+    setVotes(rows, "user-sunday");
+    const beforeSwitch = await scoreAt("2026-11-25T03:30:00.000Z", "user-sunday");
+    expect([beforeSwitch.currentStreak, beforeSwitch.longestStreak, beforeSwitch.streakBonus]).toEqual([5, 5, 15]);
 
     // 11:30 PM EST Wednesday, after the switch: still Nov 25, which runs 29 hours from its UTC start.
-    rows.push(row("bill-5", "Yea", null, firstVotedAt("2026-11-26T04:30:00.000Z")));
-    setVotes(rows);
-    expect((await scoreAt("2026-11-26T04:45:00.000Z")).currentStreak).toBe(4);
+    rows.push(row("bill-6", "Yea", null, firstVotedAt("2026-11-26T04:30:00.000Z")));
+    setVotes(rows, "user-sunday");
+    expect((await scoreAt("2026-11-26T04:45:00.000Z", "user-sunday")).currentStreak).toBe(5);
 
-    // 12:30 AM EST Thursday Nov 26: the 5th day.
-    rows.push(row("bill-6", "Nay", null, firstVotedAt("2026-11-26T05:30:00.000Z")));
-    setVotes(rows);
-    const after = await scoreAt("2026-11-26T06:00:00.000Z");
+    // 12:30 AM EST Thursday Nov 26: the 6th day.
+    rows.push(row("bill-7", "Nay", null, firstVotedAt("2026-11-26T05:30:00.000Z")));
+    setVotes(rows, "user-sunday");
+    const after = await scoreAt("2026-11-26T06:00:00.000Z", "user-sunday");
     expect(after.recentVoteDays.slice(-2)).toEqual([
       { date: "2026-11-25", count: 2 },
       { date: "2026-11-26", count: 1 },
     ]);
-    expect([after.currentStreak, after.longestStreak, after.streakBonus]).toEqual([5, 5, 15]);
-    expect(after.civicScore).toBe(seeded.civicScore + 30);
-    expect(recordOf()).toMatchObject({ civicBestStreak: { N: "5" }, civicStreakBonus: { N: "15" } });
+    expect([after.currentStreak, after.longestStreak, after.streakBonus]).toEqual([6, 6, 15]);
+    expect(after.civicScore).toBe(sunday.civicScore + 30);
+    expect(recordOf("user-sunday")).toMatchObject({ civicBestStreak: { N: "6" }, civicStreakBonus: { N: "15" } });
+  });
+
+  it("gives a user who first votes after the freeze 0, however early, late or often the app reads", async () => {
+    // Ten days in a row, Tuesday Nov 24 to Thursday Dec 3, at 10 AM EST: the same votes for three users.
+    const days = daily("2026-11-24T15:00:00.000Z", 10);
+    const votesUntil = (now: string) =>
+      days.filter((time) => time <= now).map((time, index) => castVote(`bill-${index}`, "Yea", time));
+    const users = ["user-every-vote", "user-once", "user-week-later"];
+    for (const userId of users) seedPii({}, userId);
+
+    // One app reads right after each vote; its first read comes before the vote reaches the Query (a replica behind).
+    setVotes([], "user-every-vote");
+    expect((await scoreAt("2026-11-24T15:00:05.000Z", "user-every-vote")).civicScore).toBe(0);
+    for (const time of days) {
+      setVotes(votesUntil(time), "user-every-vote");
+      const body = await scoreAt(new Date(Date.parse(time) + 60_000).toISOString(), "user-every-vote");
+      expect(body.streakBonus).toBe(0);
+    }
+    // One reads once, at the end of the streak, and one a week after it ended.
+    setVotes(votesUntil(days[9]), "user-once");
+    setVotes(votesUntil(days[9]), "user-week-later");
+    const everyVote = await scoreAt("2026-12-03T16:00:00.000Z", "user-every-vote");
+    const once = await scoreAt("2026-12-03T16:00:00.000Z", "user-once");
+    const weekLater = await scoreAt("2026-12-10T16:00:00.000Z", "user-week-later");
+
+    for (const body of [everyVote, once, weekLater]) {
+      expect([body.longestStreak, body.streakBonus, body.voteScore]).toEqual([10, 0, 100]);
+      expect(body.civicScore).toBe(everyVote.civicScore);
+    }
+    for (const userId of users) expect(recordOf(userId)?.civicStreakBonus).toEqual({ N: "0" });
+  });
+
+  it("freezes a record the code before D85 stored after the freeze at its stored best streak, so its score holds", async () => {
+    // Before the deploy (or during its canary shift, or after a rollback), the code before D85 stored a 6-day streak,
+    // Tuesday Nov 24 to Sunday Nov 29, all after the freeze, and answered 60 + 5 x 6 + First Voice and Steady.
+    seedPii(recordBeforeD85(6, 6, ["first-voice", "steady"]));
+    const rows = daily("2026-11-24T15:00:00.000Z", 6).map((time, index) => timedVote(`bill-${index}`, "Yea", time));
+    setVotes(rows);
+
+    const first = await scoreAt("2026-11-29T16:00:00.000Z");
+    expect([first.longestStreak, first.streakBonus, first.civicScore]).toEqual([6, 30, 60 + 30 + 50]);
+    expect(recordOf()?.civicStreakBonus).toEqual({ N: "30" });
+
+    // The 7th day earns Steady Hand (the streak honors are unchanged) and a vote, but no bonus.
+    rows.push(timedVote("bill-6", "Yea", "2026-11-30T15:00:00.000Z"));
+    setVotes(rows);
+    const next = await scoreAt("2026-11-30T16:00:00.000Z");
+    expect([next.longestStreak, next.streakBonus, next.civicScore]).toEqual([7, 30, 70 + 30 + 100]);
+  });
+
+  it("takes a seed's legacy streak only from the votes last written before the freeze", async () => {
+    seedPii();
+    // Bills first voted on Nov 1, 3, 5 and 7 (no two days in a row), the votes changed on Nov 20, 21 and 22, and the
+    // last one on Monday Nov 23, after the freeze. The legacy streak (UTC days of votedAt) runs Nov 20 to 23.
+    setVotes([
+      row("bill-1", "Yea", "2026-11-20T15:00:00.000Z", firstVotedAt("2026-11-01T15:00:00.000Z")),
+      row("bill-2", "Nay", "2026-11-21T15:00:00.000Z", firstVotedAt("2026-11-03T15:00:00.000Z")),
+      row("bill-3", "Yea", "2026-11-22T15:00:00.000Z", firstVotedAt("2026-11-05T15:00:00.000Z")),
+      row("bill-4", "Nay", "2026-11-23T15:00:00.000Z", firstVotedAt("2026-11-07T15:00:00.000Z")),
+    ]);
+
+    const body = await scoreAt("2026-11-24T16:00:00.000Z");
+
+    // The seed keeps the 4-day legacy streak as the best streak (UX-31); the bonus counts its 3 days before the freeze.
+    expect([body.longestStreak, body.streakBonus]).toEqual([4, 15]);
+    expect(recordOf()).toMatchObject({ civicBestStreak: { N: "4" }, civicStreakBonus: { N: "15" } });
   });
 
   it("keeps a bonus frozen at 0 at 0: a stored 0 is a frozen bonus, not a missing one", async () => {
@@ -770,10 +888,10 @@ describe("D85 (a): the day-streak bonus is frozen", () => {
     expect(recordOf()).toMatchObject({ civicStreakBonus: { N: "0" }, civicBestStreak: { N: "3" } });
   });
 
-  it("never changes a stored bonus: a concurrent read that froze it first wins", async () => {
+  it("never replaces a stored bonus: when another read stored one first, that value stands", async () => {
     seedPii(recordBeforeD85(3, 3, ["first-voice", "steady"]));
     setVotes(
-      ["2026-11-22", "2026-11-23", "2026-11-24", "2026-11-25"].map((day, index) =>
+      ["2026-11-20", "2026-11-21", "2026-11-22", "2026-11-24"].map((day, index) =>
         timedVote(`bill-${index}`, "Yea", `${day}T15:00:00.000Z`),
       ),
     );
@@ -781,66 +899,76 @@ describe("D85 (a): the day-streak bonus is frozen", () => {
     beforeCommand = (op) => {
       if (op !== "UpdateItemCommand" || raced) return;
       raced = true;
-      // A read that had not seen the 4th day froze the bonus at 15 first.
-      piiRows.set(USER, { ...piiRows.get(USER)!, civicStreakBonus: { N: "15" } });
+      // Another read stored a bonus of 20 first. Nothing else differs from this read's record, so only the write
+      // condition on civicStreakBonus can refuse this read's 15 (5 x the 3 days before the freeze).
+      piiRows.set(USER, { ...piiRows.get(USER)!, civicStreakBonus: { N: "20" } });
     };
 
     const body = await scoreAt("2026-11-25T16:00:00.000Z");
 
-    expect([body.longestStreak, body.streakBonus, body.civicScore]).toEqual([4, 15, 40 + 15 + 50]);
+    expect([body.longestStreak, body.streakBonus, body.civicScore]).toEqual([3, 20, 40 + 20 + 50]);
     expect(calls().filter((call) => call.startsWith("UpdateItemCommand"))).toHaveLength(2);
     expect(recordOf()).toMatchObject({
       civicVotes: { N: "4" },
-      civicBestStreak: { N: "4" },
-      civicStreakBonus: { N: "15" },
+      civicBestStreak: { N: "3" },
+      civicStreakBonus: { N: "20" },
     });
   });
 
-  // Random histories over 30 days, read again and again from a record before D85 or none: no read answers less than
-  // the one before it, the first stored read freezes the bonus at the rule before D85, and it never moves after.
+  // Random histories from Nov 1 to Dec 7, from a record before D85 or none, each read on two schedules after the
+  // freeze: 12 reads at random times, and a single read at the end. On both, every read answers the same bonus, 5 x the
+  // larger of the stored best streak and the longest run of days with a bill first voted on before the freeze, and no
+  // read answers less than the one before it.
   it.each(Array.from({ length: 20 }, (_, index) => index + 1))(
-    "never drops across the freeze: history %i",
+    "freezes the same bonus whenever the app reads: history %i",
     async (seed) => {
       const next = random(seed);
       const start = Date.parse("2026-11-01T05:00:00.000Z");
-      const dayMs = 86_400_000;
+      const frozenAtMs = Date.parse(STREAK_BONUS_FROZEN_AT);
+      const end = frozenAtMs + 14 * DAY_MS;
       const history = Array.from({ length: 5 + Math.floor(next() * 40) }, (_, index) => {
-        const time = new Date(start + Math.floor(next() * 30 * dayMs)).toISOString();
+        const time = new Date(start + Math.floor(next() * (end - start))).toISOString();
         const feedback = ["Yea", "Nay", "Abstain"][Math.floor(next() * 3)];
         return { time, vote: row(`bill-${index}`, feedback, time, firstVotedAt(time)) };
       });
-      const readTimes = Array.from({ length: 12 }, () => start + Math.floor(next() * 31 * dayMs)).sort((a, b) => a - b);
       const storedBest = Math.floor(next() * 7);
       const fromRecord = next() < 0.5;
-      seedPii(fromRecord ? recordBeforeD85(storedBest, 0, []) : {});
+      // A record before D85 has Eastern days. A seed's days stay UTC days until the Eastern midnight after its first
+      // read, which comes after the freeze.
+      const dayOf = fromRecord ? easternDayKey : utcDayKey;
+      const daysBeforeFreeze = history
+        .map((entry) => Date.parse(entry.time))
+        .filter((ms) => ms < frozenAtMs)
+        .map((ms) => dayOf(ms));
+      const bestAtFreeze = computeStreaks(daysBeforeFreeze, "2026-11-23").longestStreak;
+      const expected = 5 * Math.max(fromRecord ? storedBest : 0, bestAtFreeze);
 
-      let previous: ScoreBody | undefined;
-      let frozen: number | undefined;
-      let frozenAtRead: number | undefined;
-      for (const [read, readMs] of readTimes.entries()) {
-        const now = new Date(readMs).toISOString();
-        setVotes(history.filter((entry) => entry.time <= now).map((entry) => entry.vote));
-        const body = await scoreAt(now);
+      const schedules: [string, number[]][] = [
+        [
+          "user-often",
+          Array.from({ length: 12 }, () => frozenAtMs + Math.floor(next() * (end - frozenAtMs))).sort((a, b) => a - b),
+        ],
+        ["user-once", [end]],
+      ];
+      for (const [userId, readTimes] of schedules) {
+        seedPii(fromRecord ? recordBeforeD85(storedBest, 0, []) : {}, userId);
+        let previous: ScoreBody | undefined;
+        for (const readMs of readTimes) {
+          const now = new Date(readMs).toISOString();
+          setVotes(
+            history.filter((entry) => entry.time <= now).map((entry) => entry.vote),
+            userId,
+          );
+          const body = await scoreAt(now, userId);
 
-        expect(body.civicScore).toBe(body.voteScore + body.streakBonus + body.honorBonus);
-        expect(body.streakBonus).toBeLessThanOrEqual(5 * body.longestStreak);
-        if (previous) expect(body.civicScore).toBeGreaterThanOrEqual(previous.civicScore);
-        if (frozen === undefined) {
-          // Not frozen yet: the rule before D85, 5 x the best streak kept; the read that stores the record freezes it.
-          expect(body.streakBonus).toBe(5 * body.longestStreak);
-          const stored = recordOf()?.civicStreakBonus?.N;
-          if (stored !== undefined) [frozen, frozenAtRead] = [Number(stored), read];
-          if (frozen !== undefined) expect(body.streakBonus).toBe(frozen);
-        } else {
-          expect(body.streakBonus).toBe(frozen);
-          expect(recordOf()?.civicStreakBonus).toEqual({ N: String(frozen) });
+          expect(body.streakBonus).toBe(expected);
+          expect(body.civicScore).toBe(body.voteScore + body.streakBonus + body.honorBonus);
+          expect(body.streakBonus).toBeLessThanOrEqual(5 * body.longestStreak);
+          if (previous) expect(body.civicScore).toBeGreaterThanOrEqual(previous.civicScore);
+          previous = body;
         }
-        previous = body;
-      }
-      // A record before D85 freezes at its first read after D85, at no less than 5 x its stored best streak.
-      if (fromRecord) {
-        expect(frozenAtRead).toBe(0);
-        expect(frozen).toBeGreaterThanOrEqual(5 * storedBest);
+        const stored = recordOf(userId)?.civicStreakBonus;
+        if (stored !== undefined || fromRecord) expect(stored).toEqual({ N: String(expected) });
       }
     },
   );
@@ -871,7 +999,7 @@ describe("UX-31: the score, the rank, the best streak and the honors never drop"
       civicVoteRows: { N: "11" },
       civicCountedVotes: { N: "11" },
       civicBestStreak: { N: "7" },
-      // D85 (a): the seed freezes the day-streak bonus at what it gave.
+      // D85 (a): this read is in March, before the freeze, so every day of the seed counts toward the bonus it stores.
       civicStreakBonus: { N: "35" },
       civicHonors: { SS: ["first-voice", "steady", "steady-hand"] },
       civicUpdatedAt: { S: "2026-03-03T12:00:00.000Z" },
@@ -1118,7 +1246,7 @@ describe("UX-31: the record on the UserPII row", () => {
       if (op !== "UpdateItemCommand" || raced) return;
       raced = true;
       // Another read stored a higher best streak in between (and an honor this read cannot see), and froze the
-      // day-streak bonus at it (D85 (a)).
+      // day-streak bonus at it (D85 (a); in March, before the freeze, every day counts).
       piiRows.set(USER, {
         ...piiRows.get(USER)!,
         civicVotes: { N: "2" },

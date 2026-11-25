@@ -17,7 +17,7 @@ import {
  *
  *   civicScore = voteScore + streakBonus + honorBonus
  *   voteScore   = 10 x the votes the record holds: each new vote adds one, and a vote that leaves the count keeps it
- *   streakBonus = the day-streak bonus, frozen (D85 (a), below): 5 x the best streak (days) when it froze
+ *   streakBonus = the day-streak bonus, frozen (D85 (a), below): 5 x the best streak (days) at the freeze
  *   honorBonus  = the bonuses of every honor ever earned, kept when its condition stops holding
  *
  * Each part only rises or stays, so the score and the rank (a function of the score) never drop. What has to be
@@ -33,15 +33,23 @@ import {
  * Account deletion removes it with the row (the tombstone replaces the row whole; CleanupOrphanedUsers deletes it).
  *
  * The frozen day-streak bonus (UX-41 concept 3, project decision 2026-11-23, D85 (a)). App 1.3 counts weeks, not
- * days, and shows "Best streak +N" as a bonus that no longer grows; weeks earn no points. A record without
- * civicStreakBonus (every record written before D85) freezes it at the first read after D85 that stores the record,
- * at the bonus the rule before D85 gave on that read: 5 x the best streak the read keeps, which is at least 5 x the
- * stored civicBestStreak. So the score does not drop across the switch. From then on streakBonus is the stored value:
- * a longer day streak adds no points. longestStreak (civicBestStreak) and currentStreak still follow the days, because
- * apps 1.1 and 1.2 show them, so after the freeze streakBonus can be below 5 x longestStreak. The streak honors
- * (Steady, Steady Hand) are earned as before. A user whose first record is written after D85 freezes the bonus the
- * same way, at the first read that stores it (usually the read right after their first vote: 5, for one day). A write
- * never changes a stored civicStreakBonus (writeCivicRecord); a concurrent read that froze it first wins.
+ * days, and shows "Best streak +N" as a bonus that no longer grows; weeks earn no points. The bonus stops growing at
+ * the freeze (STREAK_BONUS_FROZEN_AT), for every user, old and new, and its value does not depend on when the app
+ * reads the score:
+ *   - A record without civicStreakBonus freezes it at its first read by this code, at 5 x the larger of two streaks:
+ *     the stored civicBestStreak, and the longest run of days with a bill first voted on before the freeze. Only the
+ *     code before D85 writes a record without civicStreakBonus (writeCivicRecord always sets it), so the stored best
+ *     streak is the one the score last showed, and no score drops across the deploy.
+ *   - A read with no stored record (a seed, below) takes the legacy streak of the votes last written before the
+ *     freeze in place of the stored best streak. So a user who first votes after the freeze has no day before it, and
+ *     their bonus is 0, however early, late or often the app reads.
+ *   - From then on streakBonus is the stored value, and a write never changes it (writeCivicRecord); a concurrent read
+ *     that froze it first wins.
+ * longestStreak (civicBestStreak) and currentStreak still follow the days, because apps 1.1 and 1.2 show them, so
+ * streakBonus can be below 5 x longestStreak. The streak honors (Steady, Steady Hand) are earned as before. Only two
+ * things can still change the value a record freezes at, and only before its first read by this code: the code before
+ * D85 raising civicBestStreak (before the deploy, during the deploy's canary shift, or after a rollback), and a vote
+ * cast before the freeze leaving the count (a dismissal written over it, a companion pair published over it).
  *
  * Why three vote counters (feature review follow-up F1). The votes counted can fall: a companion pair published over
  * two of the user's votes counts once from then on, and 1.1 can write a dismissal over a vote on a decided bill. A
@@ -93,6 +101,15 @@ export const RECENT_VOTE_DAYS = 30;
  * 2026-11-23, D85 (a), which also freezes the day-streak bonus: module comment).
  */
 export const RECENT_VOTE_WEEKS = 8;
+
+/**
+ * D85 (a): the freeze, the instant the day-streak bonus stops growing (module comment). Monday 2026-11-23, 00:00 in
+ * America/New_York, the start of the day the project decided D85. It is earlier than any deploy of this code (a test
+ * checks that it has passed), so every read by this code comes after it, and only the days before it can count toward
+ * a bonus that is not stored yet.
+ */
+export const STREAK_BONUS_FROZEN_AT = "2026-11-23T05:00:00.000Z";
+const STREAK_BONUS_FROZEN_AT_MS = Date.parse(STREAK_BONUS_FROZEN_AT);
 
 /**
  * Weeks are always America/New_York weeks, unlike the days, which stay UTC days before a user's switch so that no day
@@ -226,6 +243,28 @@ function legacyCivicProfileUnlocked(votes: readonly CountedVote[]): boolean {
 }
 
 /**
+ * D85 (a): the best streak a record without a frozen day-streak bonus freezes it at (module comment): the larger of the
+ * stored best streak and the longest run of `daysBeforeFreeze`, the user's days with a bill first voted on before the
+ * freeze. With no stored record (a seed) the legacy streak of the votes last written before the freeze stands in for
+ * the stored one. A vote from the freeze on adds nothing here, so every read after the freeze gives the same result
+ * (the stored best streak, which only the code before D85 wrote, may include later days: module comment).
+ */
+function bestStreakAtFreeze(
+  votes: readonly CountedVote[],
+  stored: CivicRecord | null,
+  daysBeforeFreeze: ReadonlySet<string>,
+  today: string,
+  nowMs: number,
+): number {
+  const writtenBeforeFreeze = (vote: CountedVote) => {
+    const votedAtMs = parseInstant(vote.votedAt);
+    return votedAtMs !== null && votedAtMs < STREAK_BONUS_FROZEN_AT_MS;
+  };
+  const storedStreak = stored ? stored.bestStreak : legacyLongestStreak(votes.filter(writtenBeforeFreeze), nowMs);
+  return Math.max(storedStreak, computeStreaks(daysBeforeFreeze, today).longestStreak);
+}
+
+/**
  * The votes the record holds after this read, and its two vote counters (module comment). Without counters (no record
  * yet, or one without them) the record starts from the votes counted now, and from at least the votes it holds.
  */
@@ -261,6 +300,7 @@ export function civicStanding(
   const today = dayOf(nowMs);
 
   const dayCounts = new Map<string, number>();
+  const daysBeforeFreeze = new Set<string>();
   const easternDayCounts = new Map<string, number>();
   let lastFirstVoteMs: number | null = null;
   for (const vote of votes) {
@@ -268,6 +308,7 @@ export function civicStanding(
     if (firstMs === null) continue;
     const day = dayOf(firstMs);
     dayCounts.set(day, (dayCounts.get(day) ?? 0) + 1);
+    if (firstMs < STREAK_BONUS_FROZEN_AT_MS) daysBeforeFreeze.add(day);
     const easternDay = easternDayOf(firstMs);
     easternDayCounts.set(easternDay, (easternDayCounts.get(easternDay) ?? 0) + 1);
     if (lastFirstVoteMs === null || firstMs > lastFirstVoteMs) lastFirstVoteMs = firstMs;
@@ -296,8 +337,9 @@ export function civicStanding(
   const honorIds = [...new Set([...(stored?.honorIds ?? []), ...honors.map((honor) => honor.id)])];
 
   const voteScore = keptVotes * VOTE_POINTS;
-  // D85 (a): the bonus the record froze; a record without one freezes it at what the rule before D85 gives now.
-  const streakBonus = stored?.streakBonus ?? keptBestStreak * STREAK_DAY_POINTS;
+  // D85 (a): the bonus the record froze; a record without one takes its value at the freeze, whenever this read is.
+  const streakBonus =
+    stored?.streakBonus ?? STREAK_DAY_POINTS * bestStreakAtFreeze(votes, stored, daysBeforeFreeze, today, nowMs);
   const honorBonus = sumHonorBonus(honors);
 
   return {
