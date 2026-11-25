@@ -182,8 +182,12 @@ describe("AnalyticsServiceStack", () => {
       "table/CongressMemberVoteRecord",
       "table/CongressMembersStats",
     ]);
-    // UX-39d: the member vote record only as the writer uses it: batch puts and deletes, and the bill guid index.
-    expect(access("CongressMemberStats")["table/CongressMemberVoteRecord"]).toEqual(["dynamodb:BatchWriteItem"]);
+    // UX-39d: the member vote record only as the writer uses it: batch puts and deletes, batch reads of the rows the
+    // index shows unchanged, and the bill guid index.
+    expect(access("CongressMemberStats")["table/CongressMemberVoteRecord"]).toEqual([
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+    ]);
     expect(access("CongressMemberStats")["table/CongressMemberVoteRecord/index/BillGuidIndex"]).toEqual([
       "dynamodb:Query",
     ]);

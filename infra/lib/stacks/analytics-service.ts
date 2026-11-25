@@ -153,12 +153,13 @@ export class AnalyticsServiceStack extends cdk.Stack {
     storeTable(this, 'congressMemberStats').grantReadWriteData(congressMemberStatsFn);
     storeTable(this, 'congressMemberVoteProfiles').grantReadWriteData(congressMemberStatsFn);
     storeTable(this, 'congressMemberLegislativeProfiles').grantReadWriteData(congressMemberStatsFn);
-    // UX-39d: puts and deletes a bill's record rows (BatchWriteItem), found through the bill guid index (Query), and
-    // nothing else: it never reads a member's record or scans the table.
+    // UX-39d: puts and deletes a bill's record rows (BatchWriteItem), finds them through the bill guid index (Query),
+    // and reads the rows the index shows unchanged from the table with strongly consistent reads (BatchGetItem).
+    // Nothing else: it never queries a member's record or scans the table.
     const voteRecordTable = storeTable(this, 'congressMemberVoteRecord');
     iam.Grant.addToPrincipal({
       grantee: congressMemberStatsFn,
-      actions: ['dynamodb:BatchWriteItem'],
+      actions: ['dynamodb:BatchGetItem', 'dynamodb:BatchWriteItem'],
       resourceArns: [voteRecordTable.tableArn],
     });
     iam.Grant.addToPrincipal({

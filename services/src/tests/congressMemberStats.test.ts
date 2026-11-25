@@ -60,6 +60,7 @@ jest.mock("@aws-sdk/client-dynamodb", () => {
     DynamoDBClient: jest.fn(() => ({ send: mockDdbSend })),
     UpdateItemCommand: jest.fn().mockImplementation((input) => ({ input })),
     BatchWriteItemCommand: jest.fn().mockImplementation((input) => ({ input })),
+    BatchGetItemCommand: jest.fn().mockImplementation((input) => ({ input })),
     QueryCommand: jest.fn().mockImplementation((input) => ({ input })),
     ScanCommand: jest.fn().mockImplementation((input) => ({ input })),
   };
@@ -1893,16 +1894,37 @@ describe("the members' roll-call record (UX-39d)", () => {
   type Row = Record<string, AttributeValue>;
   const rowId = (row: Row) => `${row.bioguideId.S}|${row.billKey.S}`;
 
+  /** A BatchGetItem's request for the record table. */
+  interface RecordRead {
+    Keys: Row[];
+    ConsistentRead?: boolean;
+  }
+  const recordReadOf = (input: FakeDdbInput): RecordRead | undefined => {
+    const requested = (input.RequestItems as Record<string, unknown> | undefined)?.CongressMemberVoteRecord;
+    return requested && !Array.isArray(requested) ? (requested as RecordRead) : undefined;
+  };
+
   /**
    * CongressMemberVoteRecord in memory. The BillGuidIndex answers from `index`, which follows the table only when
-   * `indexLags` is false: an eventually consistent index that has not yet seen this message's writes.
+   * `indexLags` is false: an eventually consistent index that has not yet seen the latest writes. A strongly consistent
+   * BatchGetItem answers from the table; any other read answers as the index does.
    */
-  const recordTable = () => {
-    const state = { rows: new Map<string, Row>(), index: new Map<string, Row>(), indexLags: false };
+  const recordTable = (unprocessedReads = 0) => {
+    const state = { rows: new Map<string, Row>(), index: new Map<string, Row>(), indexLags: false, unprocessedReads };
     mockDdbSend.mockImplementation(async (cmd: FakeDdbCommand) => {
       const input = cmd.input ?? {};
       if (input.TableName === "CongressMemberVoteRecord" && input.IndexName) {
         return { Items: [...state.index.values()].filter((row) => row.billGuid.S === "BILLS-119hr2312") };
+      }
+      const read = recordReadOf(input);
+      if (read) {
+        if (state.unprocessedReads > 0) {
+          state.unprocessedReads -= 1;
+          return { Responses: { CongressMemberVoteRecord: [] }, UnprocessedKeys: { CongressMemberVoteRecord: read } };
+        }
+        const source = read.ConsistentRead ? state.rows : state.index;
+        const found = read.Keys.map((readKey) => source.get(rowId(readKey))).filter((row): row is Row => !!row);
+        return { Responses: { CongressMemberVoteRecord: found } };
       }
       const requests = input.RequestItems?.CongressMemberVoteRecord;
       if (requests) {
@@ -1927,9 +1949,12 @@ describe("the members' roll-call record (UX-39d)", () => {
   };
 
   const recordWrites = () =>
-    mockDdbSend.mock.calls.flatMap(
-      (call: unknown[]) => (call[0] as FakeDdbCommand).input.RequestItems?.CongressMemberVoteRecord ?? [],
-    );
+    mockDdbSend.mock.calls.flatMap((call: unknown[]) => {
+      const requests = (call[0] as FakeDdbCommand).input.RequestItems?.CongressMemberVoteRecord;
+      return Array.isArray(requests) ? requests : [];
+    });
+  const recordReads = () =>
+    mockDdbSend.mock.calls.flatMap((call: unknown[]) => recordReadOf((call[0] as FakeDdbCommand).input) ?? []);
   const puts = () => recordWrites().flatMap((request) => (request.PutRequest ? [request.PutRequest.Item] : []));
   const deletes = () => recordWrites().flatMap((request) => (request.DeleteRequest ? [request.DeleteRequest] : []));
 
@@ -1964,6 +1989,11 @@ describe("the members' roll-call record (UX-39d)", () => {
     ...Object.fromEntries(Object.entries(values).map(([name, value]) => [name, { S: value }])),
   });
   const SAME_HOUSE = { position: "Yea", votedOn: "2026-02-01", actionText: HOUSE_TEXT, actionCode: "8000" };
+  /** Rows already stored, in the table and in the index alike. */
+  const store = (table: ReturnType<typeof recordTable>, rows: Row[]) => {
+    table.rows = new Map(rows.map((row) => [rowId(row), row]));
+    table.index = new Map(table.rows);
+  };
 
   beforeEach(() => {
     restoreEnv?.();
@@ -2009,6 +2039,8 @@ describe("the members' roll-call record (UX-39d)", () => {
       senateRow,
     ]);
     expect(deletes()).toEqual([]);
+    // The index shows none of the bill's rows yet, so no row is read from the table.
+    expect(recordReads()).toEqual([]);
     const queried = mockDdbSend.mock.calls
       .map((call: unknown[]) => (call[0] as FakeDdbCommand).input)
       .find((input: FakeDdbInput) => input.TableName === "CongressMemberVoteRecord" && input.IndexName);
@@ -2033,13 +2065,11 @@ describe("the members' roll-call record (UX-39d)", () => {
   it("overwrites a member's row when a newer roll call replaces it, and deletes only rows the bill no longer gives", async () => {
     const table = recordTable();
     // An older roll call's rows (another day and text), a member the newer one does not list, and a Senate row.
-    table.index = new Map(
-      [
-        indexed("A000001", "House", { position: "Nay", votedOn: "2025-12-01", actionText: "On motion to recommit" }),
-        indexed("Z000009", "House", { position: "Yea", votedOn: "2025-12-01" }),
-        indexed("S000148", "Senate", { position: "Nay", votedOn: "2026-03-05" }),
-      ].map((row) => [rowId(row), row]),
-    );
+    store(table, [
+      indexed("A000001", "House", { position: "Nay", votedOn: "2025-12-01", actionText: "On motion to recommit" }),
+      indexed("Z000009", "House", { position: "Yea", votedOn: "2025-12-01" }),
+      indexed("S000148", "Senate", { position: "Nay", votedOn: "2026-03-05" }),
+    ]);
 
     await apply(bill());
 
@@ -2051,6 +2081,13 @@ describe("the members' roll-call record (UX-39d)", () => {
       "D000004|BILLS-119hr2312#House",
     ]);
     expect(deletes()).toEqual([{ Key: { bioguideId: { S: "Z000009" }, billKey: { S: "BILLS-119hr2312#House" } } }]);
+    // Only the row the index shows unchanged is read again, from the table.
+    expect(recordReads()).toEqual([
+      expect.objectContaining({
+        ConsistentRead: true,
+        Keys: [{ bioguideId: { S: "S000148" }, billKey: { S: "BILLS-119hr2312#Senate" } }],
+      }),
+    ]);
   });
 
   it("deletes every row of a bill whose official votes are gone", async () => {
@@ -2073,6 +2110,50 @@ describe("the members' roll-call record (UX-39d)", () => {
 
     expect(puts()).toEqual([]);
     expect(deletes()).toEqual([]);
+    expect(recordReads()).toEqual([expect.objectContaining({ ConsistentRead: true })]);
+    expect(recordReads()[0].Keys).toHaveLength(5);
+  });
+
+  it("writes rows back to their earlier values while the index still shows those values from before the last message", async () => {
+    const table = recordTable();
+    await apply(bill());
+    // From here the index lags the table: it keeps showing the rows as the first message wrote them.
+    table.indexLags = true;
+    const v1 = bill();
+    v1.officialVotes.house.members[0] = { bioguideId: "A000001", displayName: "One", votePosition: "Nay" };
+    v1.officialVotes.house.members = v1.officialVotes.house.members.filter((member) => member.bioguideId !== "B000002");
+    await apply(v1);
+    expect(table.rows.get("A000001|BILLS-119hr2312#House")?.position.S).toBe("Nay");
+    expect(table.rows.has("B000002|BILLS-119hr2312#House")).toBe(false);
+    mockDdbSend.mockClear();
+
+    // A newer version, a separate message, puts A000001's Yea and B000002's row back: the index shows both as they are
+    // in this version, and only the table's consistent read shows they are not.
+    await apply(bill());
+
+    expect(puts()).toEqual([houseRow("A000001", "Yea"), houseRow("B000002", "Nay")]);
+    expect(deletes()).toEqual([]);
+    expect(table.rows.get("A000001|BILLS-119hr2312#House")?.position.S).toBe("Yea");
+    expect(table.rows.get("B000002|BILLS-119hr2312#House")?.position.S).toBe("Nay");
+    expect(console.log).toHaveBeenCalledWith(
+      "Wrote member vote record rows the bill guid index showed unchanged but the table did not",
+      { key, billGuid: "BILLS-119hr2312", rows: 2 },
+    );
+  });
+
+  it("writes a row the table did not return after the retries, rather than leave it unchecked", async () => {
+    const table = recordTable();
+    await apply(bill());
+    mockDdbSend.mockClear();
+    table.unprocessedReads = 5;
+    const retry = require("../shared/retry");
+    const sleep = jest.spyOn(retry, "sleep").mockResolvedValue(undefined);
+
+    await apply(bill());
+
+    expect(recordReads()).toHaveLength(5);
+    expect(sleep.mock.calls).toEqual([[200], [400], [600], [800]]);
+    expect(puts()).toHaveLength(5);
   });
 
   it("writes a row again when only its position or its action text changed", async () => {
