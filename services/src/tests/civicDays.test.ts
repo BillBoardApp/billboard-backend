@@ -7,7 +7,9 @@ import {
   easternDayKey,
   nextEasternMidnight,
   recentDays,
+  recentWeeks,
   utcDayKey,
+  weekStartOf,
 } from "../shared/civicDays";
 
 const at = (iso: string) => Date.parse(iso);
@@ -108,5 +110,64 @@ describe("civic days (UX-31)", () => {
     expect(days[0]).toEqual({ date: "2026-10-01", count: 1 });
     expect(days[28]).toEqual({ date: "2026-10-29", count: 2 });
     expect(days[29]).toEqual({ date: "2026-10-30", count: 0 });
+  });
+});
+
+describe("civic weeks (UX-41 concept 3)", () => {
+  it("starts a week on Sunday and ends it on Saturday, the Weekly Brief's week", () => {
+    // Sunday Nov 22, 2026 through Saturday Nov 28.
+    for (const day of ["2026-11-22", "2026-11-23", "2026-11-25", "2026-11-28"]) {
+      expect(weekStartOf(day)).toBe("2026-11-22");
+    }
+    expect(weekStartOf("2026-11-21")).toBe("2026-11-15");
+    expect(weekStartOf("2026-11-29")).toBe("2026-11-29");
+    // Across a month, a year and a leap day.
+    expect(weekStartOf("2026-12-02")).toBe("2026-11-29");
+    expect(weekStartOf("2027-01-01")).toBe("2026-12-27");
+    expect(weekStartOf("2028-02-29")).toBe("2028-02-27");
+    // Before 1970 too (day numbers below 0).
+    expect(weekStartOf("1969-12-31")).toBe("1969-12-28");
+  });
+
+  it("keeps the weeks of both clock changes 7 days long", () => {
+    // Clocks spring forward on Sunday Mar 8, 2026 and fall back on Sunday Nov 1, 2026.
+    expect(weekStartOf("2026-03-08")).toBe("2026-03-08");
+    expect(weekStartOf("2026-03-07")).toBe("2026-03-01");
+    expect(weekStartOf("2026-11-01")).toBe("2026-11-01");
+    expect(weekStartOf("2026-10-31")).toBe("2026-10-25");
+    // The Eastern day decides: 11:59 PM EDT Saturday Oct 31 and 12:30 AM EDT Sunday Nov 1 are in different weeks.
+    expect(weekStartOf(easternDayKey(at("2026-11-01T03:59:00.000Z")))).toBe("2026-10-25");
+    expect(weekStartOf(easternDayKey(at("2026-11-01T04:30:00.000Z")))).toBe("2026-11-01");
+    // 11:59 PM EST Saturday Mar 7 and midnight EST Sunday Mar 8.
+    expect(weekStartOf(easternDayKey(at("2026-03-08T04:59:00.000Z")))).toBe("2026-03-01");
+    expect(weekStartOf(easternDayKey(at("2026-03-08T05:00:00.000Z")))).toBe("2026-03-08");
+  });
+
+  it("lists the last weeks, oldest first, ending with the week still running, with each week's total", () => {
+    const counts = new Map([
+      ["2026-11-24", 2],
+      ["2026-11-22", 1],
+      ["2026-11-21", 4],
+      ["2026-10-04", 3],
+      // Eight weeks back from the week of Nov 22 is outside the list.
+      ["2026-09-27", 9],
+      // A day after today (a clock elsewhere) falls in no listed week.
+      ["2026-11-29", 5],
+    ]);
+
+    expect(recentWeeks(counts, "2026-11-25", 8)).toEqual([
+      { weekStart: "2026-10-04", count: 3 },
+      { weekStart: "2026-10-11", count: 0 },
+      { weekStart: "2026-10-18", count: 0 },
+      { weekStart: "2026-10-25", count: 0 },
+      { weekStart: "2026-11-01", count: 0 },
+      { weekStart: "2026-11-08", count: 0 },
+      { weekStart: "2026-11-15", count: 4 },
+      { weekStart: "2026-11-22", count: 3 },
+    ]);
+    expect(recentWeeks(new Map(), "2026-11-22", 2)).toEqual([
+      { weekStart: "2026-11-15", count: 0 },
+      { weekStart: "2026-11-22", count: 0 },
+    ]);
   });
 });

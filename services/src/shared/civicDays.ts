@@ -112,6 +112,33 @@ export function computeStreaks(days: Iterable<string>, today: string): Streaks {
   return { currentStreak, longestStreak };
 }
 
+/**
+ * UX-41 (concept 3, "Weeks you voted"): a day's week, Sunday to Saturday, the Weekly Brief's week: the day key of its
+ * Sunday. Calendar arithmetic, so the week of a clock change is still 7 days.
+ */
+export const weekStartOf = (key: string): string => {
+  // Day 0 (1970-01-01) was a Thursday, weekday 4 with Sunday as 0.
+  const weekday = (((dayNumber(key) + 4) % 7) + 7) % 7;
+  return addDays(key, -weekday);
+};
+
+/**
+ * The `count` weeks that end with the week of `today`, oldest first, each by its Sunday with the sum of its days'
+ * numbers from `counts` (0 for a week with none). The current week is the last, still running.
+ */
+export function recentWeeks(counts: ReadonlyMap<string, number>, today: string, count: number) {
+  const totals = new Map<string, number>();
+  for (const [day, number] of counts) {
+    const weekStart = weekStartOf(day);
+    totals.set(weekStart, (totals.get(weekStart) ?? 0) + number);
+  }
+  const currentWeek = weekStartOf(today);
+  return Array.from({ length: count }, (_, index) => {
+    const weekStart = addDays(currentWeek, 7 * (index - (count - 1)));
+    return { weekStart, count: totals.get(weekStart) ?? 0 };
+  });
+}
+
 /** The `count` days that end today, oldest first, each with its number from `counts` (0 when absent). */
 export function recentDays(counts: ReadonlyMap<string, number>, today: string, count: number) {
   return Array.from({ length: count }, (_, index) => {
