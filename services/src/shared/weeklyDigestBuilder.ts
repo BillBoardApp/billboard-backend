@@ -49,8 +49,10 @@ import {
  *   sections are built exactly as before, so 1.1 and 1.2, which never read the list, keep every item they showed: a
  *   bill listed here can also be in a section, and app 1.3 shows it once, here. It has the same billGuid in both lists,
  *   a companion group included: the item here takes the guid of the section's item, which can be the group's other
- *   bill. The field is left out in a week with no such bill. A brief can hold Your bills alone, with no section;
- *   fetchLatestWeeklyDigest serves that one only to app 1.3 and later, since 1.1 and 1.2 would show it empty.
+ *   bill. A voted bill's row rewritten after the week, before the build, still counts here, though no section takes
+ *   it: its actions say whether it moved in the week. The field is left out in a week with no such bill. A brief can
+ *   hold Your bills alone, with no section; fetchLatestWeeklyDigest serves that one only to app 1.3 and later, since
+ *   1.1 and 1.2 would show it empty.
  * - A member is named only by the name the members table stores (REL-46 A4). One who is not there, such as a member
  *   who left Congress, gets no member item and no "Backed by" reason: the brief never shows a bioguide id as a name.
  *   Nor do they count toward a bill's rank, so a bill that only such a member backs is not in the brief unless
@@ -593,17 +595,29 @@ function billItemText(
   return detail ? { summary, detail } : { summary };
 }
 
+/**
+ * A bill's item. The eyebrow dates it by when the bill was stored, except that a Your bills item passes
+ * `weekActionDay`, the day of the bill's latest action in the week, which dates it instead when the bill was stored
+ * after the week (a row rewritten before the build), so the item shows no date outside the brief's week.
+ */
 function makeBillItem(
   candidate: RankedCandidate,
   window: WeeklyDigestPublicationWindow,
   memberNameById: Map<string, string>,
   accent: WeeklyDigestAccent,
+  weekActionDay?: string,
 ): WeeklyDigestItem {
   const bill = candidate.bill;
   const status = normalizeBillStatus(bill.billStatus ?? candidate.status);
   const guid = bill.guid ?? candidate.manifest.guid;
   const updatedAt = parseDate(bill.storedAt) ?? candidate.updatedAt;
-  const eyebrow = [statusLabel(status), updatedAt ? formatWeeklyDigestShortDate(updatedAt) : undefined]
+  const storedAfterWeek = weekActionDay !== undefined && weeklyDigestDayKey(updatedAt) > weeklyDigestDayKey(window.end);
+  const eyebrowDate = storedAfterWeek
+    ? formatWeeklyDigestDay(weekActionDay)
+    : updatedAt
+      ? formatWeeklyDigestShortDate(updatedAt)
+      : undefined;
+  const eyebrow = [statusLabel(status), eyebrowDate]
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .join(" ");
   const title = firstNonEmpty(bill.title, candidate.manifest.title, guid) ?? guid;
@@ -1013,8 +1027,8 @@ async function buildYourBills(voted: Candidate[], input: WeeklyDigestBuildInput)
         right.action.day.localeCompare(left.action.day) || compareCandidates(left.candidate, right.candidate),
     )
     .slice(0, YOUR_BILLS_MAX)
-    .map(({ candidate }) => ({
-      ...makeBillItem(candidate, input.window, input.memberNameById, "movement"),
+    .map(({ candidate, action }) => ({
+      ...makeBillItem(candidate, input.window, input.memberNameById, "movement", action.day),
       reason: YOUR_BILLS_REASON,
     }));
 }
@@ -1049,10 +1063,14 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
       .map((memberId) => memberId.toUpperCase())
       .filter(countsAsFollowed);
 
-  /** A manifest row updated in the week, before its matches count; null for any other row. */
-  const factsOf = (item: BillManifestEntry): CandidateFacts | null => {
+  /**
+   * The facts of a manifest row updated since the week began (and before `before`, when given), before its matches
+   * count; null for any other row. Without `before`, every row the manifest query read counts: that query stops at the
+   * time of the build.
+   */
+  const factsOf = (item: BillManifestEntry, before?: Date): CandidateFacts | null => {
     const updatedAt = parseDate(item.updatedAt);
-    if (!updatedAt || updatedAt < input.window.start || updatedAt >= dayAfterWeekEnd) {
+    if (!updatedAt || updatedAt < input.window.start || (before !== undefined && updatedAt >= before)) {
       return null;
     }
 
@@ -1080,17 +1098,20 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
   const candidates = input.manifestItems
     .filter((item) => billTypeMatchesContentPreferences(item.billType, allowedContentTypes))
     .map((item) => {
-      const facts = factsOf(item);
+      const facts = factsOf(item, dayAfterWeekEnd);
       return facts ? classify(facts) : null;
     })
     .filter((value): value is Candidate => value !== null);
   const rankedCandidates = collapseCompanionCandidates(candidates, companions).sort(compareCandidates);
 
   // UX-41 concept 4: Your bills this week is built apart from the sections, from every bill the reader voted on that
-  // was updated in the week, whatever the ranking makes of it: a voted bill that passed, failed, became law or is new
-  // has no bucket of its own unless it is watched or matches a member, topic or life area. Nor does the content-type
-  // choice or a ceremonial verdict leave it out: the reader voted on it. Companion groups are one bill, as in the
-  // sections; the most recently updated are loaded first (YOUR_BILLS_HYDRATED).
+  // was updated since the week began, whatever the ranking makes of it: a voted bill that passed, failed, became law or
+  // is new has no bucket of its own unless it is watched or matches a member, topic or life area. Nor does the
+  // content-type choice or a ceremonial verdict leave it out: the reader voted on it. Companion groups are one bill, as
+  // in the sections; the most recently updated are loaded first (YOUR_BILLS_HYDRATED). Unlike a section candidate, a
+  // row rewritten after the week ended, between Sunday 00:00 and the build (weekend ingestion of a Friday or Saturday
+  // action), still counts: the loaded bill's actions decide whether it moved in the week (latestActionInWeek). Left out
+  // here, that bill would never be listed, since next week its row is in the window but its action is not.
   const votedCandidates = collapseCompanionCandidates(
     input.manifestItems
       .map((item) => (votedBillKeys.has(billKey(item.guid)) ? factsOf(item) : null))
