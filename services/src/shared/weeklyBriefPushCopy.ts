@@ -8,8 +8,10 @@ import { formatWeeklyDigestShortRange } from "./weeklyDigestSchedule";
  * - Title: "Weekly Brief · Nov 15–21", the week as app 1.3's front page docket gives it ("Oct 25–Nov 1" across months).
  * - Body: "Includes {bill}." for one bill, "Includes {bill 1} and {bill 2}." for two, "Includes {bill 1}, {bill 2}, and
  *   {N} more." for three or more, the bills in app 1.3's page order (Your bills this week first, then the sections)
- *   with member items skipped and each bill once. Listed titles are cut to 36 bytes with "...", as userNotifier's
- *   example titles are; a lone title gets the whole body. The body stays within 160 bytes, as a bill push's does.
+ *   with member items skipped and each bill once. So a brief with Your bills names the reader's own bills first; the
+ *   proposed count of them ("2 bills you voted on moved this week.") is not used (project decision 2026-11-25). Listed
+ *   titles are cut to 36 bytes with "...", as userNotifier's example titles are; a lone title gets the whole body. The
+ *   body stays within 160 bytes, as a bill push's does.
  * - A brief with no bill item (only members you follow) says its own headline instead.
  * The words come only from the user's own brief: bill titles and the headline. Nothing here reads anyone's vote.
  */
@@ -27,10 +29,10 @@ export interface WeeklyBriefPushCopy {
 
 /**
  * The brief's bill titles in app 1.3's page order: Your bills this week (UX-41 concept 4), then each section's items,
- * member items skipped, each bill once. A bill is a repeat when its billGuid or its title (ignoring case and spacing)
- * was already listed: the builder gives a companion group the same billGuid in both lists, and the title also catches
- * two bills of one name, such as a House and Senate pair under different guids, which "Includes X and X." would name
- * twice.
+ * member items skipped, each bill once. A bill is a repeat when its billGuid was already listed. That names a companion
+ * group once: the builder gives a group one billGuid in the whole brief (a Your bills item takes its section item's
+ * guid), and this module has no companion index to match a group by. Two bills that only share a title, not paired as
+ * companions, are two bills, as app 1.3 lists them, so both count toward "N more".
  */
 export const weeklyBriefBillTitles = (digest: Pick<WeeklyDigest, "sections" | "yourBills">): string[] => {
   const seen = new Set<string>();
@@ -38,10 +40,10 @@ export const weeklyBriefBillTitles = (digest: Pick<WeeklyDigest, "sections" | "y
   for (const list of [digest.yourBills ?? [], ...(digest.sections ?? []).map((section) => section.items ?? [])]) {
     for (const item of list) {
       if (item.kind !== "bill") continue;
+      const key = item.billGuid ?? item.id;
       const title = normalizeInlineText(item.title);
-      const keys = [`guid|${item.billGuid ?? item.id}`, `title|${title.toLowerCase()}`];
-      if (!title || keys.some((key) => seen.has(key))) continue;
-      keys.forEach((key) => seen.add(key));
+      if (!title || seen.has(key)) continue;
+      seen.add(key);
       titles.push(title);
     }
   }
