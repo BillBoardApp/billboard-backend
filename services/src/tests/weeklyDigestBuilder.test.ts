@@ -622,7 +622,54 @@ describe("your bills this week (yourBills)", () => {
     });
 
     expect(digest!.yourBills).toHaveLength(1);
+    expect(items(digest).map((item) => item.billGuid)).toEqual([digest!.yourBills![0].billGuid]);
   });
+
+  // Review of UX-41 concept 4: a section ranks only the members of a companion group that have a bucket, and Your bills
+  // every voted member, so the two stood for the pair by different bills. App 1.3, which matches the lists by billGuid,
+  // and the push ("Includes Lower Energy Costs Act and Lower Energy Costs Act.") then named it twice.
+  it.each([["the House bill"], ["the Senate bill"]])(
+    "gives a companion pair in a section the section's billGuid, so it is named once (voted on %s)",
+    async (votedBill) => {
+      const HOUSE = "BILLS-119hr1285ih";
+      const SENATE = "BILLS-119s570is";
+      const title = "Lower Energy Costs Act";
+      const passed = "Passed/agreed to in House: On passage Passed by the Yeas and Nays.";
+      const digest = await build({
+        // The House bill passed and nothing but the vote makes it the reader's; the Senate bill changed.
+        items: [
+          entry(HOUSE, { billStatus: "Passed", subCategories: [], title }),
+          entry(SENATE, { billStatus: "Updated", subCategories: [], title }),
+        ],
+        bills: {
+          [HOUSE]: acted("2026-03-19", passed),
+          [SENATE]: acted("2026-03-18", "Read twice and referred to the Committee on Energy."),
+        },
+        topics: [],
+        companions: [[HOUSE, SENATE]],
+        votedOn: [votedBill === "the House bill" ? HOUSE : SENATE],
+      });
+
+      // The sections are as before: the Senate bill needs attention again.
+      expect(digest!.sections.map((candidate) => candidate.kind)).toEqual(["needs_attention"]);
+      expect(section(digest, "needs_attention")).toEqual([
+        expect.objectContaining({ billGuid: SENATE, reason: "You voted on this before" }),
+      ]);
+      // Your bills still says the group's news of the week, the House passage, under the section's billGuid.
+      expect(digest!.yourBills).toEqual([
+        expect.objectContaining({
+          id: `bill|${SENATE}`,
+          billGuid: SENATE,
+          title,
+          summary: `Mar 19: ${passed}`,
+          billState: "passed",
+          reason: "You voted on this",
+        }),
+      ]);
+      const { weeklyBriefPushBody } = require("../shared/weeklyBriefPushCopy");
+      expect(weeklyBriefPushBody(digest)).toBe("Includes Lower Energy Costs Act.");
+    },
+  );
 
   it("never writes the reader's vote", async () => {
     const digest = await buildWeeklyDigest({

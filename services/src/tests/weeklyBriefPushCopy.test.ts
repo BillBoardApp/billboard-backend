@@ -156,6 +156,35 @@ describe("the push body (the brief's bills, in page order)", () => {
     expect(body).toBe("Includes Farm Credit Act of 2026, Rural Broadband Access Act, and 1 more.");
   });
 
+  // Review of UX-41 concept 4: a companion pair under Your bills and in a section, each under its own bill's guid, was
+  // named twice ("Includes Lower Energy Costs Act and Lower Energy Costs Act.").
+  it("names a title once when Your bills and a section list it under different guids, as a companion pair can be", () => {
+    const body = weeklyBriefPushBody({
+      ...digest([
+        { kind: "needs_attention", items: [bill("Lower Energy Costs Act", "BILLS-119s570is")] },
+        { kind: "moved_this_week", items: [bill("Clean Water Act", "BILLS-119s3")] },
+      ]),
+      yourBills: [{ ...bill("Lower Energy Costs Act", "BILLS-119hr1285ih"), reason: "You voted on this" }],
+    });
+    expect(body).toBe("Includes Lower Energy Costs Act and Clean Water Act.");
+  });
+
+  it("treats titles that differ only in case or spacing as one", () => {
+    expect(
+      weeklyBriefBillTitles(
+        digest([
+          {
+            kind: "moved_this_week",
+            items: [
+              bill("Lower Energy Costs Act", "BILLS-119hr1285ih"),
+              bill(" Lower  energy costs ACT", "BILLS-119s570is"),
+            ],
+          },
+        ]),
+      ),
+    ).toEqual(["Lower Energy Costs Act"]);
+  });
+
   it("says the brief's own headline when it has no bill item (only members you follow)", () => {
     const body = weeklyBriefPushBody(
       digest(

@@ -646,7 +646,8 @@ export interface WeeklyDigestV1 {
    * "You voted on this"; no item carries the vote itself. It is built from the reader's votes, not from the sections,
    * so it can list a bill no section shows, and a brief can hold it with no section (GET /weekly-digests/latest serves
    * that brief only to app 1.3 and later). The sections are unchanged for apps 1.1 and 1.2, so a bill listed here can
-   * also be in a section; app 1.3 shows it once, here.
+   * also be in a section; app 1.3 shows it once, here. Such a bill has the same billGuid in both places, a companion
+   * pair included: the item here then takes the billGuid of the section's item, which can be the pair's other bill.
    */
   yourBills?: WeeklyDigestItemV1[];
 }

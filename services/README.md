@@ -224,8 +224,9 @@ the reason "You voted on this" and never the vote itself. It is built from the v
 bill no section shows (one that passed, failed, became law or is new with no other match, a ceremonial resolution, a
 bill type the reader turned off) is listed too, and of the voted bills updated in the week the 40 most recent are
 loaded. App 1.3 shows it first; the sections are built as before, so 1.1 and 1.2 (which ignore the key) lose nothing,
-and 1.3 shows a bill that is also in a section once, under Your bills. A brief can hold `yourBills` alone, which only
-1.3 and later are served. Snapshots expire
+and 1.3 shows a bill that is also in a section once, under Your bills. Such a bill has the same `billGuid` in both
+lists, a companion pair included (the Your bills item takes the section item's guid), and the Sunday push names a bill
+once by `billGuid` or title. A brief can hold `yourBills` alone, which only 1.3 and later are served. Snapshots expire
 21 days after publication; only the current week's is read.
 
 **Companion bills (APPF-23).** Identical bills introduced in both chambers (H.R. 1285 and S. 570) are paired so the
