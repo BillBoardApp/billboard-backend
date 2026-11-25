@@ -217,7 +217,8 @@ bills, a decided bill the reader voted on is not in "Needs attention", and cerem
 matches (RUNBOOK 11.4 has the rules). A vetoed bill's item adds `vetoed: true` and keeps its `billState`, and a
 companion group shows its vetoed member over a partner that only passed (project decision 2026-11-19). A followed
 member is named only by the name in the members table: one who is not there (who left Congress, REL-46 A4) gets no
-member item and no "Backed by" reason, never their bioguide id. Snapshots expire
+member item and no "Backed by" reason, never their bioguide id, and does not count toward a bill's rank (unless the
+table names nobody), so a bill only they back is not in the brief. Snapshots expire
 21 days after publication; only the current week's is read.
 
 **Companion bills (APPF-23).** Identical bills introduced in both chambers (H.R. 1285 and S. 570) are paired so the

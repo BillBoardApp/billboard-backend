@@ -42,6 +42,9 @@ import {
  *   (vetoNews). A companion group shows its vetoed member over a partner that only passed (COMPANION_STATUS_RANK).
  * - A member is named only by the name the members table stores (REL-46 A4). One who is not there, such as a member
  *   who left Congress, gets no member item and no "Backed by" reason: the brief never shows a bioguide id as a name.
+ *   Nor do they count toward a bill's rank, so a bill that only such a member backs is not in the brief unless
+ *   something else makes it the reader's, rather than taking a slot with no reason line. With no names at all (an
+ *   empty or unconfigured table) every followed member still counts, unnamed.
  * Nothing here reads other users' votes (INT-11): the only votes in the input are the user's own.
  */
 
@@ -978,10 +981,15 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
   const isFollowed = (memberId: string): boolean =>
     followedMembers.has(normalize(memberId)) ||
     followedMembers.has(deterministicUuidFromString(memberId).toLowerCase());
+  // REL-46 A4: a followed member the members table does not name (one who left Congress) does not count, unless the
+  // table named nobody (see the module comment).
+  const countsAsFollowed = (memberId: string): boolean =>
+    input.memberNameById.size === 0 || input.memberNameById.has(memberId);
   const followedIds = (memberIds: readonly string[] | undefined): string[] =>
     Array.from(new Set((memberIds ?? []).map((memberId) => memberId.trim())))
       .filter((memberId) => memberId.length > 0 && isFollowed(memberId))
-      .map((memberId) => memberId.toUpperCase());
+      .map((memberId) => memberId.toUpperCase())
+      .filter(countsAsFollowed);
 
   const candidates = input.manifestItems
     .map((item): Candidate | null => {
