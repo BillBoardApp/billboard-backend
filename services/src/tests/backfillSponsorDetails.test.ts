@@ -265,6 +265,27 @@ describe("backfill:sponsor-details (REL-46 5.3)", () => {
     expect(mockS3.commands("PutObject")).toEqual([]);
   });
 
+  it("does not send a bill whose raw bill moved on between the count and the send", async () => {
+    seedBills();
+    const lines: string[] = [];
+    const { promise, sqs } = await run({ apply: true, expectBills: 1 }, CURRENT, {
+      log: (...args: unknown[]) => {
+        const line = args.map(String).join(" ");
+        lines.push(line);
+        // After the count, before reconcile plans again: BILLS-119hr1 gains a passage.
+        if (line.startsWith("Sponsor details plan:")) {
+          mockS3.put("raw-bills/BILLS-119hr1.json", raw("BILLS-119hr1", DEPARTED, [PASSED, INTRODUCED]));
+        }
+      },
+    });
+    const result = await promise;
+
+    expect(sqs.sent).toEqual([]);
+    expect(result.reconcile?.refused).toEqual(["BILLS-119hr1"]);
+    expect(lines).toContain("Not sent, their plan changed since they were counted (1): BILLS-119hr1");
+    expect(lines.at(-1)).toBe("Reconcile complete sent=0 failed=0 unreadable=0");
+  });
+
   it("refuses --apply when the count moved since the dry run, sending nothing", async () => {
     seedBills();
     const { promise, sqs } = await run({ apply: true, expectBills: 3 });

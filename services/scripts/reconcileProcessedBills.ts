@@ -372,6 +372,11 @@ export interface RunOptions {
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
   readFile?: (path: string) => string;
+  /**
+   * A last check on each bill about to be sent, against this run's own plan (backfill:sponsor-details keeps the
+   * patches of sponsorDetails alone). The bills it refuses are listed and not sent.
+   */
+  accept?: (bill: PlannedBill) => boolean;
 }
 
 export interface RunResult {
@@ -379,6 +384,8 @@ export interface RunResult {
   queueUrl: string;
   sent: number;
   failed: string[];
+  /** The guids `accept` refused. */
+  refused: string[];
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -394,6 +401,7 @@ export const runReconcile = async ({
   now = () => new Date(),
   sleep = defaultSleep,
   readFile,
+  accept,
 }: RunOptions): Promise<RunResult> => {
   // Before anything else, so a missing queue stops the run before any read or send.
   const queueUrl = await resolveBillDifferQueueUrl(sqs, config);
@@ -409,7 +417,12 @@ export const runReconcile = async ({
     (bill) => isActionablePlan(bill.plan.kind) && (!options.plans || options.plans.includes(bill.plan.kind)),
   );
   const addedLeftOut = options.addedFields ? 0 : kindSent.filter((bill) => bill.addedFieldsOnly).length;
-  const actionable = options.addedFields ? kindSent : kindSent.filter((bill) => !bill.addedFieldsOnly);
+  const wanted = options.addedFields ? kindSent : kindSent.filter((bill) => !bill.addedFieldsOnly);
+  const actionable = accept ? wanted.filter(accept) : wanted;
+  const refused = accept ? wanted.filter((bill) => !accept(bill)).map((bill) => bill.guid) : [];
+  if (refused.length > 0) {
+    log(`Not sent, their plan changed since they were counted (${refused.length}): ${refused.join(", ")}`);
+  }
   const sending =
     (options.plans ? `${options.plans.join(", ")} plans only` : "patch and summarize plans") +
     (addedLeftOut > 0 ? `; ${addedLeftOut} patches that only add a field left out, see --added-fields` : "");
@@ -417,7 +430,7 @@ export const runReconcile = async ({
   if (!options.apply) {
     log(`Dry run: would send ${actionable.length} guids (${sending}) to ${queueUrl}.`);
     log(planSummaryLine(scan));
-    return { scan, queueUrl, sent: 0, failed: [] };
+    return { scan, queueUrl, sent: 0, failed: [], refused };
   }
 
   log(`Sending ${actionable.length} guids (${sending}) to ${queueUrl}.`);
@@ -443,7 +456,7 @@ export const runReconcile = async ({
   }
   if (failed.length > 0) log(`Not sent (re-run --apply, or send {"guid":"<guid>"} by hand): ${failed.join(", ")}`);
   log(`Reconcile complete sent=${sent} failed=${failed.length} unreadable=${scan.unreadable.length}`);
-  return { scan, queueUrl, sent, failed };
+  return { scan, queueUrl, sent, failed, refused };
 };
 
 async function main(): Promise<void> {

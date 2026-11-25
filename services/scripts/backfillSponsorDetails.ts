@@ -14,8 +14,10 @@
 //      listed (and written to --out) for reconcile:processed-bills inside a RUNBOOK 4.1 quiet window, since a patch of
 //      actions or a status can notify.
 //   3. With --apply and --expect-bills <the dry run's sponsorDetailsOnly>, sends {guid} to BillDifferQueue for those
-//      bills only (reconcile:processed-bills' send, --plans patch --added-fields, paced by --rate). It never writes to S3 itself:
-//      billDiffer re-plans each bill and writes the patch, which changes no manifest date and sends no push.
+//      bills only (reconcile:processed-bills' send, --plans patch --added-fields, paced by --rate). reconcile plans them
+//      once more just before the send, and a bill whose plan is no longer a sponsorDetails patch alone (its raw bill
+//      moved on in between) is listed and not sent. It never writes to S3 itself: billDiffer re-plans each bill and
+//      writes the patch, which changes no manifest date and sends no push.
 //
 // Last lines:
 //   Sponsor details plan: bills= withSponsor= departedSponsorBills= departedSponsors= members= sponsorDetailsOnly=
@@ -357,7 +359,8 @@ export const runSponsorBackfill = async ({
     return { count, members: memberIds.size, plans, reconcile: null };
   }
 
-  // reconcile:processed-bills plans these bills again just before sending, and sends the patch plans only.
+  // reconcile:processed-bills plans these bills again just before sending, and sends only those still planning a
+  // patch of sponsorDetails alone: a bill whose raw bill moved on since the count would carry other fields too.
   const reconcile = await runReconcile({
     s3,
     sqs,
@@ -374,6 +377,7 @@ export const runSponsorBackfill = async ({
       // Its bills are patches that only add sponsorDetails, which reconcile otherwise leaves out.
       addedFields: true,
     },
+    accept: isSponsorDetailsOnly,
     log,
     logError,
     ...(now ? { now } : {}),
