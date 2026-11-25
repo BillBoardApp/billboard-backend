@@ -74,7 +74,8 @@ How the schemas map to code:
   accepted (a committee activity without a date, a committee with only subcommittee activities, an action without
   `text`, a breakdown without `why` or with an extra key, a cosponsor listed twice), as must the companion-group shapes
   clients have to keep decoding (no `companionGroup` or `companionGroups`, an empty list, an unknown `relationship`,
-  three members) and each shape without `vetoed`.
+  three members) and each shape without `vetoed`. The recent-actions list must reject any count or other user's vote
+  on it (`RECENT_ACTIONS_*`, see "Recent actions (UX-35)").
 - The OpenAPI component schemas are checked the same way: each `fixtures/openapi/<Component>.valid.json` validates
   against `#/components/schemas/<Component>`, and the label, stats, limit and App Attest cases (`LABEL_*`, `STATS_*`,
   `VERIFICATION_*` and `APP_ATTEST_*` in the script) and UX-32's `CIVIC_PROFILE_*` must be accepted or rejected as
@@ -395,6 +396,29 @@ nothing is blocked, and builds that send nothing (1.0, R1, scripts) are recorded
   failed with error <CODE>.".
 - None of these schemas is generated (only `ApiError` is): the app types them by hand in `AppAttestWire.swift` and
   `AppAttestService.swift`, using `fixtures/openapi/` as samples.
+
+## Recent actions (UX-35)
+
+`GET /recent-actions` (Cognito) builds the Updates tab's list from the caller's own data at request time; nothing new
+is stored. `schemas/entities/recent-actions.v1.schema.json` (`RecentActionsV1`, generated in both languages, so the app
+gets `UserAPIContractsV1.RecentActions` with `./scripts/syncContracts.sh`):
+
+- The caller's bills: a Yea, Nay or Abstain vote (an Updates dismissal from 1.0 or 1.1 is not a vote) or a Watch row,
+  on either member of a companion group. One row per bill, a group being one bill: the member with the latest action,
+  the vote on the primary when both members have one, `watched` when either member is.
+- An action dated in the last `windowDays` (30) Eastern days, the bill's latest there in a push's words
+  (`handlers/userNotifier/pushCopy.ts` `pushActionPhrase`): a routine follow-up such as "Motion to reconsider laid on
+  the table" only when the window has nothing else, and on the latest day the bill's own outcome ("Passed the House")
+  before the other lines. Newest first, then by title, at most 50. Nothing to show is `200` with `items: []`.
+- `id` is the guid, the day and the wording, so a newer action gives a new id. `billStatus` and `vetoed` are the bill's
+  as everywhere else.
+- `yourVote` and `votedOn` are the caller's own vote and the Eastern day it was last saved. `voteTiming` (UX-41
+  concept 2) is the latest House or Senate roll call in the window (How Congress voted's), with `daysBefore`, the days
+  from `votedOn` to it, only when that is at least 1: a vote changed or saved again on or after the roll call's day has
+  none.
+- Privacy: only the caller's own vote, never a count. The `RECENT_ACTIONS_*` cases reject `voteCount`, a tally,
+  another user's vote and a top-level count, as well as a vote other than the three, a suffixed guid, a timing of 0
+  days and more than 50 items; they accept an empty list and items with only a watch.
 
 ## Versioning
 

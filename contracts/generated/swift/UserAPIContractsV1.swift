@@ -622,6 +622,72 @@ nonisolated enum UserAPIContractsV1 {
         let district: String?
         let votePosition: String
     }
+
+    /// GET /recent-actions (UX-35): the caller's bills with an action in Congress inside the window, newest first. A
+    /// bill is the caller's when they voted Yea, Nay or Abstain on it (never an Updates dismissal from app 1.0 or 1.1)
+    /// or watch it, on either member of a companion group. One row per bill (a companion group is one bill), at most
+    /// 50. Only the caller's own vote is ever in it: no count, tally or other user's vote.
+    nonisolated struct RecentActions: Decodable {
+        /// When the server built the list.
+        let generatedAt: String
+        /// How many days back the actions reach (30 today): an action dated on or after that many Eastern calendar days
+        /// before generatedAt's.
+        let windowDays: Int
+        /// Newest action first, then by title. Empty when the caller has no bill with an action in the window.
+        let items: [RecentActionItem]
+    }
+
+    nonisolated struct RecentActionItem: Decodable {
+        /// The row's identity: the bill's plain guid, the action's day and its wording. A newer action gives a new id,
+        /// so a row cleared on the device comes back with it. Opaque: do not parse it.
+        let id: String
+        /// The plain guid of the bill whose action this is. For a companion group, the member with the latest action;
+        /// the group is one row either way.
+        let billGuid: String
+        let congress: String
+        let billType: String
+        let billNumber: String
+        /// The bill's number as the apps show it: "H.R. 77", "S.J.Res. 213".
+        let officialNumber: String
+        /// The bill's plain-language headline, as on its bill page.
+        let title: String
+        let billStatus: String?
+        /// Only as true, when the bill's veto stands (billOutcomes.ts deriveBillVetoedFromActions); absent otherwise.
+        /// billStatus keeps its value.
+        let vetoed: Bool?
+        let action: RecentAction
+        /// The caller's own vote on the bill as the server stores it (on the group's primary when they voted on both
+        /// members); absent when they only watch it. Never anyone else's.
+        let yourVote: String?
+        /// The Eastern calendar day the caller's vote was last saved (the vote shown, not the first one), when known.
+        let votedOn: String?
+        let voteTiming: RecentActionVoteTiming?
+        /// Whether the caller watches the bill (either member of a companion group).
+        let watched: Bool
+    }
+
+    nonisolated struct RecentAction: Decodable {
+        /// The action's day as Congress dates it.
+        let date: String
+        /// What happened, in a push's words: "Passed the House", "Became law", "House vote fell short of two-thirds",
+        /// or Congress's text without record references and a final period.
+        let text: String
+        /// The Library of Congress or chamber code of the action, when it has one.
+        let actionCode: String?
+    }
+
+    /// UX-41 concept 2: how long before a chamber's roll call the caller voted. Present only when the bill (either
+    /// member of a companion group) has a recorded House or Senate vote inside the window, the latest one, on an
+    /// Eastern day after the one the caller's vote shown was last saved. Absent when the vote came the same day or
+    /// later, was changed or saved again on or after that day, or has no time. Describes yourVote: a client showing
+    /// another vote (one not saved yet) leaves it out.
+    nonisolated struct RecentActionVoteTiming: Decodable {
+        let chamber: String
+        /// The roll call's day as Congress dates it.
+        let rollCallDate: String
+        /// Calendar days from votedOn to rollCallDate.
+        let daysBefore: Int
+    }
 }
 
 // For fields whose schema allows a string or an integer. The first attempt uses try? because decoding a

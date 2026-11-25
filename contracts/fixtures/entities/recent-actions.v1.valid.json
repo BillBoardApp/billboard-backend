@@ -1,0 +1,51 @@
+{
+  "generatedAt": "2026-11-25T15:04:05.000Z",
+  "windowDays": 30,
+  "items": [
+    {
+      "id": "BILLS-119hr77#2026-11-19#6b3f0c2a91d4e857",
+      "billGuid": "BILLS-119hr77",
+      "congress": "119",
+      "billType": "hr",
+      "billNumber": "77",
+      "officialNumber": "H.R. 77",
+      "title": "Rural Broadband Access Act",
+      "billStatus": "Passed",
+      "action": { "date": "2026-11-19", "text": "Passed the House", "actionCode": "8000" },
+      "yourVote": "Yea",
+      "votedOn": "2026-10-26",
+      "voteTiming": { "chamber": "House", "rollCallDate": "2026-11-19", "daysBefore": 24 },
+      "watched": true
+    },
+    {
+      "id": "BILLS-119s570#2026-11-12#0d9a5e7f3c21b468",
+      "billGuid": "BILLS-119s570",
+      "congress": "119",
+      "billType": "s",
+      "billNumber": "570",
+      "officialNumber": "S. 570",
+      "title": "Adds Reporting Rules for Federal Grant Programs",
+      "billStatus": "New",
+      "action": {
+        "date": "2026-11-12",
+        "text": "Committee on Homeland Security and Governmental Affairs. Hearings held"
+      },
+      "watched": true
+    },
+    {
+      "id": "BILLS-119hjres140#2026-11-05#c7e14b9026fa3d85",
+      "billGuid": "BILLS-119hjres140",
+      "congress": "119",
+      "billType": "hjres",
+      "billNumber": "140",
+      "officialNumber": "H.J.Res. 140",
+      "title": "Ends a Federal Rule on Water Permits",
+      "billStatus": "Passed",
+      "vetoed": true,
+      "action": { "date": "2026-11-05", "text": "Vetoed by President", "actionCode": "31000" },
+      "yourVote": "Abstain",
+      "votedOn": "2026-10-30",
+      "watched": false
+    }
+  ]
+}
