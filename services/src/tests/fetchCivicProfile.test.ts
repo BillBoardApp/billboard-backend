@@ -180,15 +180,37 @@ describe("fetchCivicProfile handler", () => {
       minThemesRequired: 3,
       minThemeVotes: 8,
     });
+    // UX-40 L4: themeVotes names all six themes, in the rubric's order, zeros included.
+    const counts = (nonZero: Record<string, number> = {}) => ({
+      individualVsCommunity: 0,
+      localVsFederal: 0,
+      freeMarketVsRegulated: 0,
+      traditionalVsProgressive: 0,
+      interventionistVsRestrained: 0,
+      privacyVsSecurity: 0,
+      ...nonZero,
+    });
 
     const run = async (items: Array<Record<string, unknown>>) => {
       mockSend.mockResolvedValueOnce({ Items: items });
       const response = await handler({ requestContext: { authorizer: { jwt: { claims: { sub: "user-1" } } } } });
       expect(response.statusCode).toBe(200);
-      return JSON.parse(response.body);
+      const body = JSON.parse(response.body);
+      // Every body: the six themes in order; a theme is in axes exactly when its count reaches the floor of 8, and
+      // themesReady counts those; no theme has more votes than votesUsed (the same window).
+      expect(Object.keys(body.themeVotes)).toEqual(Object.keys(counts()));
+      const atFloor = Object.keys(body.themeVotes).filter((axis) => body.themeVotes[axis] >= body.minThemeVotes);
+      expect(Object.keys(body.axes).sort()).toEqual([...atFloor].sort());
+      expect(body.themesReady).toBe(atFloor.length);
+      for (const count of Object.values(body.themeVotes)) {
+        expect(Number.isInteger(count)).toBe(true);
+        expect(count).toBeGreaterThanOrEqual(0);
+        expect(count).toBeLessThanOrEqual(body.votesUsed);
+      }
+      return body;
     };
 
-    it("answers the five fields both apps decode and the four UX-32 fields, as the contract lists them", async () => {
+    it("answers the five fields both apps decode, the four UX-32 fields and themeVotes, as the contract lists them", async () => {
       const body = await run(themeVotes(3, "privacyVsSecurity"));
 
       const openapi = JSON.parse(readFileSync(join(__dirname, "../../../contracts/openapi/user-api.v1.json"), "utf8"));
@@ -210,6 +232,7 @@ describe("fetchCivicProfile handler", () => {
         totalVotesWithProfile: 7,
         minVotesRequired: 25,
         ...locked("votes", 0),
+        themeVotes: counts({ traditionalVsProgressive: 7 }),
       });
     });
 
@@ -251,6 +274,7 @@ describe("fetchCivicProfile handler", () => {
         totalVotesWithProfile: 24,
         minVotesRequired: 25,
         ...locked("votes", 3),
+        themeVotes: counts({ individualVsCommunity: 24, localVsFederal: 24, privacyVsSecurity: 24 }),
       });
     });
 
@@ -271,6 +295,14 @@ describe("fetchCivicProfile handler", () => {
         totalVotesWithProfile: 20,
         minVotesRequired: 25,
         ...locked("votes", 0),
+        themeVotes: {
+          individualVsCommunity: 4,
+          localVsFederal: 4,
+          freeMarketVsRegulated: 3,
+          traditionalVsProgressive: 3,
+          interventionistVsRestrained: 3,
+          privacyVsSecurity: 3,
+        },
       });
     });
 
@@ -284,6 +316,7 @@ describe("fetchCivicProfile handler", () => {
         totalVotesWithProfile: 24,
         minVotesRequired: 32,
         ...locked("themes", 1),
+        themeVotes: counts({ privacyVsSecurity: 24 }),
       });
       const atTwentyFive = await run(themeVotes(25, "privacyVsSecurity"));
       expect(atTwentyFive).toMatchObject({ votesUsed: 25, minVotesRequired: 33, ...locked("themes", 1) });
@@ -308,6 +341,7 @@ describe("fetchCivicProfile handler", () => {
         totalVotesWithProfile: 42,
         minVotesRequired: 43,
         ...locked("themes", 0),
+        themeVotes: Object.fromEntries(axes.map((axis) => [axis, 7])),
       });
     });
 
@@ -320,6 +354,7 @@ describe("fetchCivicProfile handler", () => {
         totalVotesWithProfile: 30,
         minVotesRequired: 38,
         ...locked("themes", 1),
+        themeVotes: counts({ privacyVsSecurity: 30 }),
       });
     });
 
@@ -337,6 +372,12 @@ describe("fetchCivicProfile handler", () => {
         totalVotesWithProfile: 25,
         minVotesRequired: 28,
         ...locked("themes", 1),
+        themeVotes: counts({
+          individualVsCommunity: 10,
+          localVsFederal: 6,
+          freeMarketVsRegulated: 5,
+          privacyVsSecurity: 4,
+        }),
       });
     });
 
@@ -359,6 +400,15 @@ describe("fetchCivicProfile handler", () => {
         totalVotesWithProfile: 25,
         minVotesRequired: 26,
         ...locked("themes", 2),
+        // The contract's sample body (fixtures/openapi/UserCivicProfile.valid.json) is this one.
+        themeVotes: {
+          individualVsCommunity: 8,
+          localVsFederal: 8,
+          freeMarketVsRegulated: 7,
+          traditionalVsProgressive: 5,
+          interventionistVsRestrained: 3,
+          privacyVsSecurity: 2,
+        },
       });
     });
 
@@ -384,6 +434,13 @@ describe("fetchCivicProfile handler", () => {
         totalVotesWithProfile: 25,
         minVotesRequired: 26,
         ...locked("themes", 2),
+        themeVotes: counts({
+          individualVsCommunity: 8,
+          localVsFederal: 8,
+          freeMarketVsRegulated: 5,
+          interventionistVsRestrained: 5,
+          privacyVsSecurity: 7,
+        }),
       });
       expect(atEight).toEqual({
         axes: { individualVsCommunity: 0.75, localVsFederal: 0.75, privacyVsSecurity: 0.75 },
@@ -391,6 +448,13 @@ describe("fetchCivicProfile handler", () => {
         totalVotesWithProfile: 25,
         minVotesRequired: 25,
         ...ready(3),
+        themeVotes: counts({
+          individualVsCommunity: 8,
+          localVsFederal: 8,
+          freeMarketVsRegulated: 4,
+          interventionistVsRestrained: 5,
+          privacyVsSecurity: 8,
+        }),
       });
       expect(atNine).toMatchObject({ votesUsed: 26, minVotesRequired: 25, ...ready(3) });
       expect(Object.keys(atNine.axes)).toEqual(["individualVsCommunity", "localVsFederal", "privacyVsSecurity"]);
@@ -405,6 +469,7 @@ describe("fetchCivicProfile handler", () => {
         totalVotesWithProfile: 25,
         minVotesRequired: 25,
         ...ready(3),
+        themeVotes: counts({ localVsFederal: 25, freeMarketVsRegulated: 25, privacyVsSecurity: 25 }),
       });
     });
 
@@ -421,6 +486,8 @@ describe("fetchCivicProfile handler", () => {
       // The 3rd theme has 7 in the window: past the 100-vote cap minVotesRequired exceeds 100, so both apps still ask
       // for 1 more vote ("100 / 101 votes" in 1.1, "100 of 101 votes" in 1.2).
       expect(body).toMatchObject({ minVotesRequired: 101, ...locked("themes", 2) });
+      // UX-40 L4: the 3rd theme's count is the 7 in the window, not all 9 votes.
+      expect(body.themeVotes).toEqual(counts({ individualVsCommunity: 93, localVsFederal: 93, privacyVsSecurity: 7 }));
     });
 
     it("at the 100-vote cap, is ready only from the themes of the last 100 votes", async () => {
@@ -434,12 +501,42 @@ describe("fetchCivicProfile handler", () => {
         ...locked("themes", 2),
       });
       expect(lockedAtCap.axes).toEqual({ individualVsCommunity: 0.75, localVsFederal: 0.75 });
+      // The 20 older votes on traditionalVsProgressive are all outside the window.
+      expect(lockedAtCap.themeVotes).toEqual(counts({ individualVsCommunity: 100, localVsFederal: 100 }));
 
       const readyAtCap = await run([
         ...older,
         ...themeVotes(100, ["individualVsCommunity", "localVsFederal", "privacyVsSecurity"], 20),
       ]);
       expect(readyAtCap).toMatchObject({ votesUsed: 100, minVotesRequired: 25, ...ready(3) });
+    });
+
+    it("answers themeVotes with all six themes at 0 for a user with no votes (UX-40 L4)", async () => {
+      const body = await run([]);
+
+      expect(body).toEqual({
+        axes: {},
+        votesUsed: 0,
+        totalVotesWithProfile: 0,
+        minVotesRequired: 25,
+        ...locked("votes", 0),
+        themeVotes: counts(),
+      });
+    });
+
+    it("counts only Yea and Nay votes on scored bills in themeVotes: no Abstain, dismissal or unscored bill", async () => {
+      const body = await run([
+        ...themeVotes(5, "localVsFederal"),
+        vote("Abstain", 5, { localVsFederal: "0.5" }),
+        { ...vote("Abstain", 6, { localVsFederal: "0.5" }), legacyDismiss: { BOOL: true } },
+        // A bill scored on none of the six themes counts toward votesUsed only.
+        vote("Yea", 7, { unknownTheme: "0.5" }),
+        // A bill scored on two themes counts for each.
+        vote("Nay", 8, { localVsFederal: "-0.5", privacyVsSecurity: "0.25" }),
+      ]);
+
+      expect(body.votesUsed).toBe(7);
+      expect(body.themeVotes).toEqual(counts({ localVsFederal: 6, privacyVsSecurity: 1 }));
     });
 
     it("leaves members' floor at 3: votes that give a member a theme do not give you one", async () => {
@@ -521,6 +618,8 @@ describe("fetchCivicProfile companion groups (APPF-23)", () => {
     expect(body.votesUsed).toBe(8);
     // (0.8 + 0.2 + 0.5 + 5 x 0.5) / 8 = 0.5 -> normalized (0.5 + 1) / 2
     expect(body.axes.individualVsCommunity).toBeCloseTo(0.75, 6);
+    // UX-40 L4: the theme's count is the same 8, the pair once.
+    expect(body.themeVotes.individualVsCommunity).toBe(8);
   });
 
   // INT-11: a 1.0 or 1.1 Updates dismissal is not a vote, so it never stands for the pair.
@@ -543,6 +642,7 @@ describe("fetchCivicProfile companion groups (APPF-23)", () => {
     const body = await profileFor(votes, false);
 
     expect(body.totalVotesWithProfile).toBe(9);
+    expect(body.themeVotes.individualVsCommunity).toBe(9);
     // (0.8 - 0.8 + 0.2 + 0.5 + 5 x 0.5) / 9 = 0.3556 -> normalized
     expect(body.axes.individualVsCommunity).toBeCloseTo(0.6778, 4);
   });
