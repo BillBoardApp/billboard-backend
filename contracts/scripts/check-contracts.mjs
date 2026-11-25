@@ -1078,11 +1078,17 @@ function checkCrossFieldRules(fixtures) {
 }
 
 /**
- * The CivicScore sample's weeks as fetchCivicScore serves them (UX-41): consecutive Sundays, oldest first, the last the
- * week of the sample's last day (recentVoteDays ends today), weeksVotedRecent the weeks with a vote, and no more votes
- * in them than totalVotes.
+ * The CivicScore sample as fetchCivicScore serves it. Its civicScore is the sum of its three parts, and its streakBonus
+ * a multiple of 5 no greater than 5 x longestStreak: the day-streak bonus is frozen (D85 (a)), so it can fall behind
+ * the best streak but never pass it. Its weeks (UX-41): consecutive Sundays, oldest first, the last the week of the
+ * sample's last day (recentVoteDays ends today), weeksVotedRecent the weeks with a vote, and no more votes in them than
+ * totalVotes.
  */
 function checkCivicScoreFixture(score, where) {
+  if (score.civicScore !== score.voteScore + score.streakBonus + score.honorBonus)
+    addError(`${where}: civicScore must be voteScore + streakBonus + honorBonus`);
+  if (score.streakBonus % 5 !== 0 || score.streakBonus > 5 * score.longestStreak)
+    addError(`${where}: streakBonus must be a multiple of 5, at most 5 x longestStreak`);
   const weeks = score.recentVoteWeeks;
   if (!Array.isArray(weeks)) {
     addError(`${where}: the sample must carry recentVoteWeeks`);

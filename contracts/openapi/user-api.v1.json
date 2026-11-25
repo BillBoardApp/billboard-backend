@@ -572,7 +572,7 @@
       "get": {
         "operationId": "getCivicScore",
         "summary": "Read the caller's civic score, streaks, rank and honors",
-        "description": "A participation record (UX-31): a Yea, Nay or Abstain counts the same, a companion pair once, and a 1.0 or 1.1 Updates dismissal not at all. The score, the rank, longestStreak and the honors never go down: the parts that could are kept on the caller's record, which the first read after UX-31 seeds from what the rule before it gave. A vote counts on the day it was first cast on its bill; changing it adds no day. recentVoteWeeks and weeksVotedRecent (UX-41) count the same first votes by America/New_York week, Sunday to Saturday, over the last 8 weeks; they earn no points.",
+        "description": "A participation record (UX-31): a Yea, Nay or Abstain counts the same, a companion pair once, and a 1.0 or 1.1 Updates dismissal not at all. The score, the rank, longestStreak and the honors never go down: the parts that could are kept on the caller's record, which the first read after UX-31 seeds from what the rule before it gave. A vote counts on the day it was first cast on its bill; changing it adds no day. The day-streak bonus (streakBonus) is frozen (D85 (a)) at its value on the caller's first read after the freeze: a longer day streak still raises longestStreak but adds no points. recentVoteWeeks and weeksVotedRecent (UX-41) count the same first votes by America/New_York week, Sunday to Saturday, over the last 8 weeks; they earn no points.",
         "tags": ["Civic profile"],
         "responses": {
           "200": {
@@ -1616,7 +1616,11 @@
             "minimum": 0,
             "description": "10 for each vote counted. A vote that later leaves the count (a companion pair published over two votes, a 1.0 or 1.1 dismissal written over a vote) keeps its 10, so it can exceed 10 x totalVotes. Never goes down."
           },
-          "streakBonus": { "type": "integer", "minimum": 0, "description": "5 x longestStreak." },
+          "streakBonus": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The day-streak bonus, frozen (D85 (a), with UX-41): 5 x the best streak at the caller's first read after the freeze, never changed after. A longer streak adds nothing, so it can be less than 5 x longestStreak. Never goes down."
+          },
           "honorBonus": {
             "type": "integer",
             "minimum": 0,

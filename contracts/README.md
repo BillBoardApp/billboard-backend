@@ -94,8 +94,9 @@ How the schemas map to code:
   `totals` and `segments.verified`; the ClientMetadata sample's assertion carries a 32-byte key ID and sign-up
   `clientData`; the `UserCivicProfile` sample's `themeVotes` has no count above `votesUsed`, and its themes at
   `minThemeVotes` or more are exactly the themes in `axes`, `themesReady` of them; the `CivicScore` sample's weeks are
-  consecutive Sundays ending with the week of its last day, with `weeksVotedRecent` the weeks voted in; the `VoteExport`
-  sample's reasons are sorted and distinct.
+  consecutive Sundays ending with the week of its last day, with `weeksVotedRecent` the weeks voted in, its
+  `civicScore` is `voteScore + streakBonus + honorBonus`, and its `streakBonus` (frozen, D85 (a)) is a multiple of 5
+  no greater than 5 x `longestStreak`; the `VoteExport` sample's reasons are sorted and distinct.
 - `openapi/user-api.v1.json` validates as OpenAPI 3.1 with its `$ref`s into `schemas/`, and documents exactly the
   routes (method, path and auth) declared in `infra/lib/stacks/user-api-service.ts`. `stackRoutes()` parses that file:
   one `const` per resource from `parent.addResource('segment')`, then `addCognitoMethod`, `addPublicMethod` or
@@ -325,12 +326,17 @@ and every day field stays.
   first voted on in it (`firstVotedAt`, so a changed vote never moves its week), Yea, Nay and Abstain alike, a
   companion pair once.
 - `CivicScore.weeksVotedRecent`: the weeks of `recentVoteWeeks` with a count above 0, 0 to 8. One vote fills a week.
-- Weeks earn no points (project decision 2026-11-23, D85): the score, rank, honors and the stored record are unchanged.
+- Weeks earn no points, and the day-streak bonus is frozen (project decision 2026-11-23, D85 (a)). `streakBonus` keeps
+  the value it had on the caller's first read after the freeze (5 x the best streak then, never less than the stored
+  record gave) and never changes after, so it can be below 5 x `longestStreak`. `longestStreak` and `currentStreak`
+  still follow the days, because 1.1 and 1.2 show them; 1.3 shows the bonus as "Best streak +N". The record on
+  `UserPII` gains `civicStreakBonus`, the frozen value, and holds no week.
 - The `CivicScore` sample carries both; the `CIVIC_SCORE_*` cases accept a body without them and one with no vote in
   8 weeks, and reject 7 or 9 weeks, a week without or with a non-date `weekStart`, a negative count, an undeclared
   field, `weeksVotedRecent` above 8 or fractional, and `null`. The sample's weeks must be consecutive Sundays ending
-  with the week of its last day, with `weeksVotedRecent` the weeks voted in. Not generated, so the app types it by hand
-  (`CivicScore.swift`).
+  with the week of its last day, with `weeksVotedRecent` the weeks voted in; its `civicScore` must be the sum of its
+  three parts, and its `streakBonus` a multiple of 5 no greater than 5 x `longestStreak`. Not generated, so the app
+  types it by hand (`CivicScore.swift`).
 
 ## Download my votes (UX-40 L7)
 
