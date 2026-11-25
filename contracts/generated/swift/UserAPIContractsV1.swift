@@ -664,7 +664,10 @@ nonisolated enum UserAPIContractsV1 {
         /// The Eastern calendar day the caller's vote was last saved (the vote shown, not the first one), when known.
         let votedOn: String?
         let voteTiming: RecentActionVoteTiming?
-        /// Whether the caller watches the bill (either member of a companion group).
+        /// Whether the caller watches the bill (either member of a companion group), by their Watch rows on the server.
+        /// The Bill row a vote saves has the same key as the bill's Watch row and replaces it, so right after a vote on
+        /// a watched bill this can be false until the watch is saved again. A client that keeps its own watch state
+        /// shows that instead.
         let watched: Bool
     }
 

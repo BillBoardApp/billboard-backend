@@ -99,7 +99,7 @@
         "voteTiming": { "$ref": "#/$defs/recentActionVoteTiming" },
         "watched": {
           "type": "boolean",
-          "description": "Whether the caller watches the bill (either member of a companion group)."
+          "description": "Whether the caller watches the bill (either member of a companion group), by their Watch rows on the server. The Bill row a vote saves has the same key as the bill's Watch row and replaces it, so right after a vote on a watched bill this can be false until the watch is saved again. A client that keeps its own watch state shows that instead."
         }
       }
     },
