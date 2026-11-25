@@ -372,6 +372,17 @@ describe("runReconcile", () => {
       ]);
       expect(lines).toContain(`Sending 4 guids (patch plans only) to ${QUEUE_URL}.`);
     });
+
+    it("sends only the bills a caller's check accepts, and lists the others", async () => {
+      seedAdded();
+      const { sqs, lines, result } = await run({ apply: true, plans: ["patch"], addedFields: true }, sqsClient(), {
+        accept: (bill: { guid: string }) => bill.guid !== "BILLS-119hr2",
+      });
+
+      expect(sqs.sent.map((message) => message.body.guid)).toEqual(["BILLS-119hr21", "BILLS-119hr22", "BILLS-119hr23"]);
+      expect(result.refused).toEqual(["BILLS-119hr2"]);
+      expect(lines).toContain("Not sent, their plan changed since they were counted (1): BILLS-119hr2");
+    });
   });
 
   it("plans only the listed bills, from --guid and --guids-file, up to --limit, and reports unreadable ones", async () => {
