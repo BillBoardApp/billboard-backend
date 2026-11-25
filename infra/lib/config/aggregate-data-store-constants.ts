@@ -19,7 +19,7 @@ export const CONGRESS_MEMBER_LEGISLATIVE_PROFILE_BILL_GUID_INDEX_SORT_KEY = 'bio
 // /congress-member-record reads it). One row per member, bill and chamber (sort key "<billGuid>#<chamber>"), so a
 // newer roll call on a bill overwrites the member's row. The VotedOnIndex (local, sort key "<votedOn>#<billGuid>")
 // reads a member's rows newest first; a local index can only be created with the table. The bill guid index finds a
-// bill's rows to delete the ones a newer version no longer gives.
+// bill's rows, with the values CongressMemberStats compares before it writes a row again.
 export const CONGRESS_MEMBER_VOTE_RECORD_TABLE_NAME = 'CongressMemberVoteRecord';
 export const CONGRESS_MEMBER_VOTE_RECORD_TABLE_PRIMARY_KEY = 'bioguideId';
 export const CONGRESS_MEMBER_VOTE_RECORD_TABLE_SORT_KEY = 'billKey';
@@ -28,3 +28,4 @@ export const CONGRESS_MEMBER_VOTE_RECORD_VOTED_ON_INDEX_SORT_KEY = 'votedOnKey';
 export const CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_NAME = 'BillGuidIndex';
 export const CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_PRIMARY_KEY = 'billGuid';
 export const CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_SORT_KEY = 'bioguideId';
+export const CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_ATTRIBUTES = ['position', 'votedOn', 'actionText', 'actionCode'];

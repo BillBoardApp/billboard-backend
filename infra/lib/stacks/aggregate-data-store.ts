@@ -16,6 +16,7 @@ import {
   CONGRESS_MEMBER_VOTE_PROFILE_BILL_GUID_INDEX_NAME,
   CONGRESS_MEMBER_VOTE_PROFILE_BILL_GUID_INDEX_PRIMARY_KEY,
   CONGRESS_MEMBER_VOTE_PROFILE_BILL_GUID_INDEX_SORT_KEY,
+  CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_ATTRIBUTES,
   CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_NAME,
   CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_PRIMARY_KEY,
   CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_SORT_KEY,
@@ -99,12 +100,14 @@ export class AggregateDataStoreStack extends cdk.Stack {
       projectionType: ddb.ProjectionType.ALL,
     });
 
-    // KEYS_ONLY carries the table keys too: the bioguideId and billKey of each of a bill's rows, to delete them.
+    // A bill's rows, with the table keys and the values CongressMemberStats compares, so it deletes the rows the bill
+    // no longer gives and writes only new or changed ones.
     congressMemberVoteRecordTable.addGlobalSecondaryIndex({
       indexName: CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_NAME,
       partitionKey: { name: CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_PRIMARY_KEY, type: ddb.AttributeType.STRING },
       sortKey: { name: CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_SORT_KEY, type: ddb.AttributeType.STRING },
-      projectionType: ddb.ProjectionType.KEYS_ONLY,
+      projectionType: ddb.ProjectionType.INCLUDE,
+      nonKeyAttributes: CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_ATTRIBUTES,
     });
   }
 }

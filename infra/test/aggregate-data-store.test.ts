@@ -36,7 +36,7 @@ describe("AggregateDataStoreStack", () => {
 
   // UX-39d: the members' roll-call record. One row per member, bill and chamber, so a newer roll call overwrites it;
   // read newest first per member through a local index, which exists only if the table is created with it; a bill's
-  // rows found through its guid.
+  // rows found through its guid, with the values the writer compares.
   test("creates the member vote record table keyed by bill and chamber, a newest-first local index and a bill guid index", () => {
     templates.aggregateTemplate.hasResourceProperties("AWS::DynamoDB::Table", {
       TableName: "CongressMemberVoteRecord",
@@ -62,7 +62,10 @@ describe("AggregateDataStoreStack", () => {
             { AttributeName: "billGuid", KeyType: "HASH" },
             { AttributeName: "bioguideId", KeyType: "RANGE" },
           ],
-          Projection: { ProjectionType: "KEYS_ONLY" },
+          Projection: {
+            ProjectionType: "INCLUDE",
+            NonKeyAttributes: ["position", "votedOn", "actionText", "actionCode"],
+          },
         },
       ],
     });

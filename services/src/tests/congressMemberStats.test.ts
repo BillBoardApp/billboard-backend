@@ -2043,13 +2043,12 @@ describe("the members' roll-call record (UX-39d)", () => {
 
     await apply(bill());
 
-    // A000001 is written over in place, under the same key.
+    // A000001 is written over in place; the unchanged Senate row is not written again.
     expect(puts().map(rowId)).toEqual([
       "A000001|BILLS-119hr2312#House",
       "B000002|BILLS-119hr2312#House",
       "C000003|BILLS-119hr2312#House",
       "D000004|BILLS-119hr2312#House",
-      "S000148|BILLS-119hr2312#Senate",
     ]);
     expect(deletes()).toEqual([{ Key: { bioguideId: { S: "Z000009" }, billKey: { S: "BILLS-119hr2312#House" } } }]);
   });
@@ -2064,15 +2063,34 @@ describe("the members' roll-call record (UX-39d)", () => {
     expect(deletes()).toEqual([{ Key: { bioguideId: { S: "A000001" }, billKey: { S: "BILLS-119hr2312#House" } } }]);
   });
 
-  it("writes the same rows again on a redelivery, and deletes nothing", async () => {
+  it("writes nothing on a redelivery: every stored row already has these values", async () => {
     const table = recordTable();
     await apply(bill());
-    const first = puts().map(rowId);
+    expect(table.rows.size).toBe(5);
     mockDdbSend.mockClear();
 
     await apply(bill());
 
-    expect(puts().map(rowId)).toEqual(first);
+    expect(puts()).toEqual([]);
+    expect(deletes()).toEqual([]);
+  });
+
+  it("writes a row again when only its position or its action text changed", async () => {
+    const table = recordTable();
+    await apply(bill());
+    mockDdbSend.mockClear();
+    const changed = bill();
+    changed.officialVotes.house.members[1] = { bioguideId: "B000002", displayName: "Two", votePosition: "Present" };
+    changed.officialVotes.house.resultText = "On passage Passed (corrected)";
+
+    await apply(changed);
+
+    expect(puts().map((row) => [row.bioguideId.S, row.position.S, row.actionText?.S])).toEqual([
+      ["A000001", "Yea", "On passage Passed (corrected)"],
+      ["B000002", "Present", "On passage Passed (corrected)"],
+      ["C000003", "Present", "On passage Passed (corrected)"],
+      ["D000004", "Not Voting", "On passage Passed (corrected)"],
+    ]);
     expect(deletes()).toEqual([]);
     expect(table.rows.size).toBe(5);
   });
@@ -2133,8 +2151,8 @@ describe("the members' roll-call record (UX-39d)", () => {
       "C000003|BILLS-119hr2312#House",
       "D000004|BILLS-119hr2312#House",
     ]);
-    // Five rows from the first pass, three from the second.
-    expect(puts()).toHaveLength(8);
+    // The second pass wrote no row again: the first pass's values are known without the index.
+    expect(puts()).toHaveLength(5);
   });
 });
 
