@@ -15,10 +15,12 @@
 // reconcile:<run start>:<guid>) for the patch and summarize plans only (or the kinds --plans names),
 // paced by --rate. A patch that only adds a field processed bills gained since they were written
 // (ADDED_FIELDS: sponsorDetails, REL-46 5.3) is counted on its own line and sent only with
-// --added-fields: until backfill:sponsor-details has run, nearly every bill plans one. It never writes to S3: billDiffer re-plans each bill when its message arrives and
-// does the write or the summary send itself, so a bill that changed in between is handled from its
-// newer state. Run it only once the deployed BillDiffer, BillSummarizer and EnrichOfficialVotes are the
-// ones that carry this rule, inside a quiet window of the notification path (RUNBOOK 4.1). Ends with
+// --added-fields: nearly every bill plans one until billDiffer next writes it, since
+// backfill:sponsor-details sends only the bills whose sponsor has left. It never writes to S3:
+// billDiffer re-plans each bill when its message arrives and does the write or the summary send
+// itself, so a bill that changed in between is handled from its newer state. Run it only once the
+// deployed BillDiffer, BillSummarizer and EnrichOfficialVotes are the ones that carry this rule,
+// inside a quiet window of the notification path (RUNBOOK 4.1). Ends with
 // "Reconcile complete sent= failed= unreadable=" and exits
 // with status 1 when a send failed or a bill could not be read. --guid and --guids-file never fall
 // back to every raw bill: a list file without a guid stops the run.
