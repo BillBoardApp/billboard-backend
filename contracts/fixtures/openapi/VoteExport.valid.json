@@ -1,0 +1,33 @@
+{
+  "votes": [
+    {
+      "billId": "BILLS-119hr1285",
+      "title": "Clean Energy Access Act",
+      "congress": "119",
+      "billType": "hr",
+      "billNumber": "1285",
+      "vote": "Yea",
+      "reasons": ["economic_impact", "taxes_spending"],
+      "firstVotedAt": "2026-10-01T15:00:00.000Z",
+      "votedAt": "2026-10-02T15:00:00.000Z",
+      "state": "VA",
+      "district": "8",
+      "verified": true
+    },
+    {
+      "billId": "BILLS-119s570",
+      "title": null,
+      "congress": "119",
+      "billType": "s",
+      "billNumber": "570",
+      "vote": "Abstain",
+      "reasons": [],
+      "firstVotedAt": null,
+      "votedAt": null,
+      "state": null,
+      "district": null,
+      "verified": false
+    }
+  ],
+  "nextToken": "sample-cursor-page-2"
+}

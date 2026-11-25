@@ -1546,6 +1546,9 @@ exports[`data store grants (CQ-15) every role keeps the same normalized permissi
       "xray:PutTelemetryRecords",
       "xray:PutTraceSegments",
     ],
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL","BILL_GUID"]}}": [
+      "dynamodb:BatchGetItem",
+    ],
     "arn:aws:dynamodb:\${Region}:\${Account}:table/UserFeedback": [
       "dynamodb:BatchGetItem",
       "dynamodb:ConditionCheckItem",

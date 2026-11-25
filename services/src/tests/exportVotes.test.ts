@@ -17,6 +17,8 @@ process.env.MANIFEST_SORT_KEY = "sk";
 process.env.MANIFEST_PK_VALUE = "BILL";
 process.env.MANIFEST_GUID_LOOKUP_PK = "BILL_GUID";
 
+import { readFileSync } from "fs";
+import { join } from "path";
 import { BatchGetItemCommand, QueryCommand } from "@aws-sdk/client-dynamodb";
 
 const { __mockSend: mockSend } = jest.requireMock("@aws-sdk/client-dynamodb");
@@ -441,6 +443,21 @@ describe("GET /account-data/votes (UX-40 L7)", () => {
     } finally {
       spies.forEach((spy) => spy.mockRestore());
     }
+  });
+
+  it("matches the contract's VoteExport schema and sample", async () => {
+    fakeTables([{ Items: [voteRow("BILLS-119hr1285", "Yea")] }], { "BILLS-119hr1285": "Clean Energy Access Act" });
+    const body = (await run()).json;
+
+    const openapi = JSON.parse(readFileSync(join(__dirname, "../../../contracts/openapi/user-api.v1.json"), "utf8"));
+    const schema = openapi.components.schemas;
+    expect(Object.keys(body).sort()).toEqual(schema.VoteExport.required.sort());
+    expect(Object.keys(body.votes[0]).sort()).toEqual(Object.keys(schema.ExportedVote.properties).sort());
+    expect(schema.ExportedVote.required.sort()).toEqual(Object.keys(schema.ExportedVote.properties).sort());
+    const fixture = JSON.parse(
+      readFileSync(join(__dirname, "../../../contracts/fixtures/openapi/VoteExport.valid.json"), "utf8"),
+    );
+    expect(Object.keys(fixture.votes[0]).sort()).toEqual(Object.keys(body.votes[0]).sort());
   });
 });
 

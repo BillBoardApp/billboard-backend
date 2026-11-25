@@ -80,7 +80,8 @@ How the schemas map to code:
   `VERIFICATION_*` and `APP_ATTEST_*` in the script) and UX-32's `CIVIC_PROFILE_*` must be accepted or rejected as
   listed there: both spellings of each renamed sub-category and the near-miss spellings; `BillStats` with and without
   `comparison`, a withheld verified split, and the `weighted*` fields old builds need; `limitReason`;
-  `UserCivicProfile` with and without the theme lock's fields and `themeVotes`; the App Attest bodies, header grammar, `clientData`,
+  `UserCivicProfile` with and without the theme lock's fields and `themeVotes`; `VoteExport` (`VOTE_EXPORT_*`); the
+  App Attest bodies, header grammar, `clientData`,
   version, ClientMetadata and `Retry-After`. A case may also be a literal value (for a schema with no fixture, such
   as a header). The script prints how many cases ran.
 - Rules a schema cannot express: manifest `count` equals the array length; release artifact names are unique;
@@ -92,7 +93,8 @@ How the schemas map to code:
   the `BillStats` sample has `weighted*` equal to the plain counts in every bucket and a `comparison` derived from
   `totals` and `segments.verified`; the ClientMetadata sample's assertion carries a 32-byte key ID and sign-up
   `clientData`; the `UserCivicProfile` sample's `themeVotes` has no count above `votesUsed`, and its themes at
-  `minThemeVotes` or more are exactly the themes in `axes`, `themesReady` of them.
+  `minThemeVotes` or more are exactly the themes in `axes`, `themesReady` of them; the `VoteExport` sample's reasons
+  are sorted and distinct.
 - `openapi/user-api.v1.json` validates as OpenAPI 3.1 with its `$ref`s into `schemas/`, and documents exactly the
   routes (method, path and auth) declared in `infra/lib/stacks/user-api-service.ts`. `stackRoutes()` parses that file:
   one `const` per resource from `parent.addResource('segment')`, then `addCognitoMethod`, `addPublicMethod` or
@@ -230,6 +232,29 @@ enough data · 5 of 8 votes"). Builds 1.1 and 1.2 ignore the new field.
 - The sample carries it; the `CIVIC_PROFILE_*` cases accept a body without it and one with every count 0, and reject
   a missing or unknown theme, a negative, fractional or string count, and `null`. Not generated, so services and the
   app type it by hand.
+
+## Download my votes (UX-40 L7)
+
+`GET /account-data/votes` (Cognito, handler `services/src/handlers/fetchFeedback`, `exportVotes.ts`) gives the caller
+their own votes, a page at a time; app 1.3 writes them as CSV or JSON on the phone. Votes only (project decision
+2026-11-23): other account data stays a request by email.
+
+- `VoteExport`: `votes` (array of `ExportedVote`) and, while more rows follow, `nextToken`. Ask again with
+  `?cursor=<nextToken>` until it is absent. A page reads at most 500 rows, so it can hold fewer votes, even none, with
+  a `nextToken`. The cursor is opaque (base64url without padding): it holds the last bill id read and a tag of the
+  caller, and the handler rebuilds the start key in the caller's own partition. A cursor it did not give this caller
+  is `400` with `ApiError` `{"error":"INVALID_CURSOR"}`: start again without one. API Gateway's route throttle
+  answers `429` with only a message (`ACCOUNT_DATA_VOTES_THROTTLE` in `infra/lib/config/abuse-limits.ts`).
+- `ExportedVote`: every field always present, `null` where nothing is known: `billId` (as stored), `title` (from the
+  bills manifest; `null` without a manifest row), `congress`, `billType` and `billNumber` (from the bill id; `null`
+  when it is not a bill guid), `vote` (`Yea`, `Nay` or `Abstain`), `reasons` (keys, sorted), `firstVotedAt` (UX-31's
+  first-vote time, else `votedAt`), `votedAt` (last change), `state`, `district` and `verified` (as stored with the
+  vote). Never the weight, the App Attest outcome, the adult flag or the bill's theme scores; the schema is closed.
+- Left out: an `Abstain` stored for a 1.0 or 1.1 dismissal (INT-11), and rows with no Yea, Nay or Abstain.
+- `fixtures/openapi/VoteExport.valid.json` is a sample with a `nextToken`; the `VOTE_EXPORT_*` cases accept the last
+  page, an empty page and a non-guid bill id, and reject the internal fields, another vote value, a missing field,
+  a `null` or padded `nextToken` and an undeclared field. The sample's reasons must be sorted and distinct. Not
+  generated, so services and the app type it by hand.
 
 ## App Attest (INT-04)
 

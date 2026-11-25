@@ -44,6 +44,7 @@ describe('lib/config/abuse-limits.ts', () => {
       SHARE_SITE_RATE_LIMIT_PER_5_MINUTES: 2000,
       USER_API_STAGE_THROTTLE: { rateLimit: 50, burstLimit: 100 },
       SHARE_PUBLIC_USAGE_PLAN_THROTTLE: { rateLimit: 25, burstLimit: 50 },
+      ACCOUNT_DATA_VOTES_THROTTLE: { rateLimit: 2, burstLimit: 4 },
       ACCOUNT_INTEGRITY_ALARM_THRESHOLDS: {
         voteDailyCapExceeded: { threshold: 1, periodMinutes: 60 },
         voteVelocity: { threshold: 300, periodMinutes: 10 },
@@ -109,6 +110,16 @@ describe('lib/config/abuse-limits.ts', () => {
       expect(throttle.rateLimit).toBeLessThanOrEqual(10);
       expect(throttle.burstLimit).toBeLessThanOrEqual(3);
     });
+  });
+
+  // UX-40 L7: the vote export reads a caller's whole vote record, so its route stays well below the stage-wide throttle
+  // it would otherwise share with every other method.
+  test('keeps the vote export route throttle well below the stage-wide one', () => {
+    const { ACCOUNT_DATA_VOTES_THROTTLE: votes, USER_API_STAGE_THROTTLE: stage } = abuseLimits;
+    expect(votes.rateLimit).toBeGreaterThan(0);
+    expect(votes.burstLimit).toBeGreaterThanOrEqual(1);
+    expect(votes.rateLimit).toBeLessThanOrEqual(stage.rateLimit / 10);
+    expect(votes.burstLimit).toBeLessThanOrEqual(stage.burstLimit / 10);
   });
 
   test('keeps the alarm windows whole minutes the descriptions can state', () => {

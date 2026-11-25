@@ -32,7 +32,7 @@ import {
   USER_WEEKLY_DIGESTS_TABLE_NAME,
   VERIFIED_ADDRESS_CLAIMS_TABLE_NAME,
 } from '../config/user-store-constants';
-import { BILL_STORE_BUCKET_NAME, BILLS_MANIFEST_TABLE_NAME, BILLS_MANIFEST_TABLE_PRIMARY_KEY, BILLS_MANIFEST_TABLE_SORT_KEY, BILLS_MANIFEST_TABLE_PK_VALUE, CONGRESS_MEMBER_STORE_BUCKET_NAME, CONGRESS_MEMBERS_MANIFEST_TABLE_NAME, CONGRESS_MEMBERS_MANIFEST_TABLE_PRIMARY_KEY } from '../config/congress-store-constants';
+import { BILL_STORE_BUCKET_NAME, BILLS_MANIFEST_GUID_LOOKUP_PK_VALUE, BILLS_MANIFEST_TABLE_NAME, BILLS_MANIFEST_TABLE_PRIMARY_KEY, BILLS_MANIFEST_TABLE_SORT_KEY, BILLS_MANIFEST_TABLE_PK_VALUE, CONGRESS_MEMBER_STORE_BUCKET_NAME, CONGRESS_MEMBERS_MANIFEST_TABLE_NAME, CONGRESS_MEMBERS_MANIFEST_TABLE_PRIMARY_KEY } from '../config/congress-store-constants';
 import {
   CONGRESS_MEMBER_STATS_TABLE_NAME,
   CONGRESS_MEMBER_STATS_TABLE_PRIMARY_KEY,
@@ -112,6 +112,7 @@ import {
   USER_API_NAME,
 } from '../config/user-api-service-constants';
 import {
+  ACCOUNT_DATA_VOTES_THROTTLE,
   APP_ATTEST_ALLOWED_ENVIRONMENTS,
   APP_ATTEST_ATTEST_THROTTLE,
   APP_ATTEST_CHALLENGE_THROTTLE,
@@ -165,7 +166,7 @@ import {
   type LambdaDeploymentKind,
   type ProdAliasDeploymentOptions,
 } from './helpers/codedeploy-utils';
-import { storeBucket, storeTable } from './helpers/data-store-refs';
+import { grantStoreTablePartitions, storeBucket, storeTable } from './helpers/data-store-refs';
 import {
   BILL_COMPANION_ENVIRONMENT,
   grantCompanionGroupsRead,
@@ -595,10 +596,25 @@ export class UserAPIServiceStack extends cdk.Stack {
       environment: {
         ...feedbackTableEnvironment,
         SORT_KEY: USER_FEEDBACK_SORT_KEY,
+        // UX-40 L7: GET /account-data/votes adds each bill's title from the manifest (its guid lookup row, then its
+        // bill row).
+        MANIFEST_TABLE_NAME: BILLS_MANIFEST_TABLE_NAME,
+        MANIFEST_PRIMARY_KEY: BILLS_MANIFEST_TABLE_PRIMARY_KEY,
+        MANIFEST_SORT_KEY: BILLS_MANIFEST_TABLE_SORT_KEY,
+        MANIFEST_PK_VALUE: BILLS_MANIFEST_TABLE_PK_VALUE,
+        MANIFEST_GUID_LOOKUP_PK: BILLS_MANIFEST_GUID_LOOKUP_PK_VALUE,
       },
       timeout: cdk.Duration.seconds(USER_API_DEFAULT_TIMEOUT_SECONDS),
     }).alias;
     feedbackTable.grantReadData(this.fetchFeedback);
+    // Only BatchGetItem, and only on the bill rows and their guid lookup rows: no Query or Scan of the manifest, no
+    // other partition (the companion rows) and no write.
+    grantStoreTablePartitions(
+      this.fetchFeedback,
+      billsManifestTable,
+      ['BatchGetItem'],
+      [BILLS_MANIFEST_TABLE_PK_VALUE, BILLS_MANIFEST_GUID_LOOKUP_PK_VALUE],
+    );
 
     this.setFeedback = addProdFunction('SetFeedback', 'setFeedback', {
       environment: {
@@ -1754,6 +1770,9 @@ export class UserAPIServiceStack extends cdk.Stack {
     gateway.addCognitoMethod(accountData, 'DELETE', this.accountData);
     const accountDataStatus = accountData.addResource('status');
     gateway.addCognitoMethod(accountDataStatus, 'GET', this.accountDataStatus);
+    // UX-40 L7: Download my votes, on FetchFeedback (fetchFeedback/exportVotes.ts), with its own stage throttle (below).
+    const accountDataVotes = accountData.addResource('votes');
+    gateway.addCognitoMethod(accountDataVotes, 'GET', this.fetchFeedback);
 
     const processedBill = this.userApi.root.addResource('processed-bill');
     gateway.addCognitoMethod(processedBill, 'GET', this.fetchProcessedBill);
@@ -1812,11 +1831,13 @@ export class UserAPIServiceStack extends cdk.Stack {
     gateway.addPublicMethod(appAttestAttestResource, 'POST', this.appAttest);
     this.throttleStageMethod('/app-attest/challenge', 'POST', APP_ATTEST_CHALLENGE_THROTTLE);
     this.throttleStageMethod('/app-attest/attest', 'POST', APP_ATTEST_ATTEST_THROTTLE);
+    // After the App Attest settings, so theirs keep their places in the stage's MethodSettings.
+    this.throttleStageMethod('/account-data/votes', 'GET', ACCOUNT_DATA_VOTES_THROTTLE);
   }
 
   /**
    * Gives one method of the prod stage its own throttle (abuse-limits.ts explains why the App Attest routes
-   * need one). A method setting replaces the stage-wide one for that method, so it repeats the stage's
+   * and the vote export need one). A method setting replaces the stage-wide one for that method, so it repeats the stage's
    * logging, metrics and data-trace values. The stage is UserApiGateway's; this appends to its MethodSettings.
    */
   private throttleStageMethod(resourcePath: string, httpMethod: string, throttle: MethodThrottle): void {
@@ -1828,7 +1849,7 @@ export class UserAPIServiceStack extends cdk.Stack {
       )
       : undefined;
     if (!stageWide) {
-      throw new Error('The prod stage has no stage-wide method setting to base the App Attest throttles on.');
+      throw new Error('The prod stage has no stage-wide method setting to base the method throttles on.');
     }
     stage.methodSettings = [
       ...(settings as apigateway.CfnStage.MethodSettingProperty[]),

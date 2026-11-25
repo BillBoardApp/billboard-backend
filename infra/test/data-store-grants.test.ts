@@ -67,7 +67,8 @@ describe('data store grants (CQ-15)', () => {
 
   // APPF-23: every grant scoped to BillsManifest partitions, across all stacks. Only BillDiffer writes the
   // link lists and only PublishBillsManifest writes the groups row; the other new readers get the
-  // groups row only, except UserMatcher, which resolves one bill's companion itself.
+  // groups row only, except UserMatcher, which resolves one bill's companion itself. UX-40 L7: FetchFeedback
+  // (GET /account-data/votes) batch-reads the bill rows and their guid lookup rows for titles, and no companion row.
   test('the companion rows are reached only through these partition-scoped grants', () => {
     const scoped = Object.entries(normalizedRolePermissions(stacks)).flatMap(([identity, byResource]) =>
       Object.entries(byResource)
@@ -79,6 +80,7 @@ describe('data store grants (CQ-15)', () => {
       'fn:BillDiffer table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL_COMPANION_DECL"]}} -> dynamodb:DeleteItem,dynamodb:GetItem,dynamodb:PutItem',
       `fn:FetchBillStats ${groupsOnly} -> dynamodb:GetItem`,
       `fn:FetchCivicScore ${groupsOnly} -> dynamodb:GetItem`,
+      'fn:FetchFeedback table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL","BILL_GUID"]}} -> dynamodb:BatchGetItem',
       `fn:FetchProcessedBill ${groupsOnly} -> dynamodb:GetItem`,
       `fn:PublishBillsManifest ${groupsOnly} -> dynamodb:PutItem`,
       'fn:UserMatcher table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL_COMPANION_DECL"]}} -> dynamodb:Query',

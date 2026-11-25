@@ -450,6 +450,52 @@ const DEVICE_SETTINGS_MUST_REJECT = [
   [DEVICE_SETTINGS_UPDATE, "a numeric notify_weekly_brief", { notify_weekly_brief: 1 }],
 ];
 
+// GET /account-data/votes (UX-40 L7, Download my votes): one page of the caller's own votes. Every field of a vote is
+// always sent (null where nothing is known), and nothing else: never the weight, the App Attest outcome, the adult flag
+// or the bill's theme scores. nextToken only while more rows follow.
+const VOTE_EXPORT = component("VoteExport");
+const withFirstExportedVote = (edit) => (page) => ({ ...page, votes: [edit(page.votes[0]), ...page.votes.slice(1)] });
+const VOTE_EXPORT_MUST_ACCEPT = [
+  [VOTE_EXPORT, "the last page (no nextToken)", without("nextToken")],
+  [VOTE_EXPORT, "a page whose rows were all left out, with a nextToken", (page) => ({ ...page, votes: [] })],
+  [VOTE_EXPORT, "a caller with no votes", { votes: [] }],
+  [
+    VOTE_EXPORT,
+    "a bill id that is not a bill guid",
+    withFirstExportedVote((vote) => ({
+      ...vote,
+      billId: "legacy-1",
+      congress: null,
+      billType: null,
+      billNumber: null,
+    })),
+  ],
+];
+const VOTE_EXPORT_MUST_REJECT = [
+  ...["effectiveWeight", "appAttest", "adultEligible", "civicProfile", "legacyDismiss"].map((field) => [
+    VOTE_EXPORT,
+    `an exported vote with the internal field ${field}`,
+    withFirstExportedVote((vote) => ({ ...vote, [field]: vote.verified })),
+  ]),
+  [VOTE_EXPORT, "a vote other than Yea, Nay or Abstain", withFirstExportedVote((vote) => ({ ...vote, vote: "yea" }))],
+  [VOTE_EXPORT, "an exported vote without verified", withFirstExportedVote(without("verified"))],
+  [
+    VOTE_EXPORT,
+    "an exported vote without title (null when unknown, never absent)",
+    withFirstExportedVote(without("title")),
+  ],
+  [VOTE_EXPORT, "verified as a string", withFirstExportedVote((vote) => ({ ...vote, verified: "true" }))],
+  [
+    VOTE_EXPORT,
+    "a votedAt that is not a date-time",
+    withFirstExportedVote((vote) => ({ ...vote, votedAt: "yesterday" })),
+  ],
+  [VOTE_EXPORT, "a null nextToken", (page) => ({ ...page, nextToken: null })],
+  [VOTE_EXPORT, "a padded nextToken", (page) => ({ ...page, nextToken: `${page.nextToken}==` })],
+  [VOTE_EXPORT, "an undeclared top-level field", (page) => ({ ...page, count: page.votes.length })],
+  [VOTE_EXPORT, "a page without votes", without("votes")],
+];
+
 // App Attest (C3 4.3-4.4): bodies of the two routes, the header grammar and its clientData, the version header, the
 // pre-sign-up ClientMetadata, and Retry-After.
 const MARKER = component("AppAttestMarker");
@@ -633,6 +679,7 @@ const MUST_REJECT = [
   ...VERIFICATION_MUST_REJECT,
   ...CIVIC_PROFILE_MUST_REJECT,
   ...DEVICE_SETTINGS_MUST_REJECT,
+  ...VOTE_EXPORT_MUST_REJECT,
   ...APP_ATTEST_MUST_REJECT,
 ];
 
@@ -729,6 +776,7 @@ const MUST_ACCEPT = [
   ...VERIFICATION_MUST_ACCEPT,
   ...CIVIC_PROFILE_MUST_ACCEPT,
   ...DEVICE_SETTINGS_MUST_ACCEPT,
+  ...VOTE_EXPORT_MUST_ACCEPT,
   ...APP_ATTEST_MUST_ACCEPT,
 ];
 
@@ -827,6 +875,13 @@ function checkCrossFieldRules(fixtures) {
 
   const profile = fixtures.get(USER_CIVIC_PROFILE);
   if (profile) checkCivicProfileFixture(profile, `${USER_CIVIC_PROFILE} fixture`);
+
+  // UX-40 L7: the sample's reasons are sorted keys, each once, as the route sends them.
+  (fixtures.get(VOTE_EXPORT)?.votes ?? []).forEach((vote, index) => {
+    const sorted = [...new Set(vote.reasons)].sort();
+    if (JSON.stringify(sorted) !== JSON.stringify(vote.reasons))
+      addError(`${VOTE_EXPORT} fixture votes[${index}]: reasons must be sorted and distinct`);
+  });
 }
 
 /**

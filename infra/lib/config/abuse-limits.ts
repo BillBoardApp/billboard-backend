@@ -177,6 +177,13 @@ export const USER_API_STAGE_THROTTLE: MethodThrottle = { rateLimit: 50, burstLim
 /** The share site origin's usage plan throttle on the public processed-bill route (its API key). */
 export const SHARE_PUBLIC_USAGE_PLAN_THROTTLE: MethodThrottle = { rateLimit: 25, burstLimit: 50 };
 
+/** UX-40 L7: GET /account-data/votes ("Download my votes") on the prod stage, for all callers together. Each page reads
+ * up to 500 of the caller's vote rows and their manifest titles (about 10 BatchGetItem calls), so it costs far more than
+ * an ordinary read, and a user asks for it rarely: most exports are one page, the largest about 35. Over it, API Gateway
+ * answers 429 before the function (FetchFeedback, shared with GET /feedback, is never starved by it). Raise it if real
+ * exports meet it. */
+export const ACCOUNT_DATA_VOTES_THROTTLE: MethodThrottle = { rateLimit: 2, burstLimit: 4 };
+
 // ── Detection thresholds (MonitoringStack) ───────────────────────────────────────────────────────
 
 /** A detection alarm: it fires at `threshold` or more in one `periodMinutes` window. */

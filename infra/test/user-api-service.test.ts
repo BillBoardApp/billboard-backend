@@ -7,6 +7,7 @@ import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import {
+  ACCOUNT_DATA_VOTES_THROTTLE,
   APP_ATTEST_ALLOWED_ENVIRONMENTS,
   APP_ATTEST_ATTEST_THROTTLE,
   APP_ATTEST_CHALLENGE_THROTTLE,
@@ -2215,6 +2216,8 @@ describe("UserAPIServiceStack, account integrity", () => {
       expect(settings.slice(1)).toEqual([
         { ResourcePath: challengePath, HttpMethod: "POST", ...inherited, ...throttled(APP_ATTEST_CHALLENGE_THROTTLE) },
         { ResourcePath: "/~1app-attest~1attest", HttpMethod: "POST", ...inherited, ...throttled(APP_ATTEST_ATTEST_THROTTLE) },
+        // UX-40 L7's vote export, after them (its own test is below).
+        { ResourcePath: "/~1account-data~1votes", HttpMethod: "GET", ...inherited, ...throttled(ACCOUNT_DATA_VOTES_THROTTLE) },
       ]);
       expect(inherited).toEqual({ LoggingLevel: "ERROR", MetricsEnabled: true, DataTraceEnabled: false });
       // The bursts fit the reserved concurrency, and the rates do for calls of up to 400 ms.
@@ -2407,6 +2410,101 @@ describe("UserAPIServiceStack, account integrity", () => {
         expect(templateChanges(template(), flipped)).toEqual({ added: [], removed: [], changed: [stageId] });
         expect(stageMethodSettings(flipped)[1]).toEqual(expect.objectContaining({ ThrottlingRateLimit: 20, ThrottlingBurstLimit: 4 }));
       });
+    });
+  });
+
+  // ── UX-40 L7: Download my votes ─────────────────────────────────────────────────────────────
+
+  describe("UX-40 L7: GET /account-data/votes", () => {
+    const apiResources = () => templates.userApiTemplate.findResources("AWS::ApiGateway::Resource");
+    const pathOfResource = (logicalId: string): string => {
+      const resource = apiResources()[logicalId];
+      const parent = resource.Properties.ParentId?.Ref as string | undefined;
+      return `${parent ? pathOfResource(parent) : ""}/${resource.Properties.PathPart}`;
+    };
+    const methodsOn = (resourcePath: string) =>
+      Object.values(templates.userApiTemplate.findResources("AWS::ApiGateway::Method"))
+        .filter((method) => method.Properties.ResourceId?.Ref && pathOfResource(method.Properties.ResourceId.Ref) === resourcePath)
+        .map((method) => method.Properties);
+    const votesSetting = (stageTemplate: CfnTemplate) => {
+      const stages = Object.values(stageTemplate.Resources).filter((resource) => resource.Type === "AWS::ApiGateway::Stage");
+      expect(stages).toHaveLength(1);
+      return (stages[0].Properties.MethodSettings as Array<Record<string, any>>)
+        .filter((setting) => setting.ResourcePath === "/~1account-data~1votes");
+    };
+
+    test("is a Cognito GET on the FetchFeedback prod alias, beside the account-data methods it does not change", () => {
+      const [method, ...others] = methodsOn("/account-data/votes");
+      expect(others).toEqual([]);
+      expect(method.HttpMethod).toBe("GET");
+      expect(method.AuthorizationType).toBe("COGNITO_USER_POOLS");
+      expect(method.AuthorizerId).toEqual(expect.anything());
+      expect(method.Integration.Type).toBe("AWS_PROXY");
+      expect(JSON.stringify(method.Integration.Uri)).toMatch(/"Ref":"FetchFeedbackProdAlias[0-9A-F]{8}"/);
+      // No request validator or model: it takes no body.
+      expect(method.RequestValidatorId).toBeUndefined();
+      expect(methodsOn("/account-data").map((m) => m.HttpMethod)).toEqual(["DELETE"]);
+      expect(methodsOn("/account-data/status").map((m) => m.HttpMethod)).toEqual(["GET"]);
+    });
+
+    test("has its own stage throttle, inheriting the stage's logging, metrics and data-trace values", () => {
+      const stages = Object.values(template().Resources).filter((resource) => resource.Type === "AWS::ApiGateway::Stage");
+      const [stageWide] = stages[0].Properties.MethodSettings;
+      expect(votesSetting(template())).toEqual([
+        {
+          ResourcePath: "/~1account-data~1votes",
+          HttpMethod: "GET",
+          LoggingLevel: stageWide.LoggingLevel,
+          MetricsEnabled: stageWide.MetricsEnabled,
+          DataTraceEnabled: false,
+          ThrottlingRateLimit: ACCOUNT_DATA_VOTES_THROTTLE.rateLimit,
+          ThrottlingBurstLimit: ACCOUNT_DATA_VOTES_THROTTLE.burstLimit,
+        },
+      ]);
+    });
+
+    test("FetchFeedback may BatchGetItem only the manifest's bill and guid lookup rows, and writes nothing", () => {
+      expect(environmentOf("FetchFeedback")).toEqual(
+        expect.objectContaining({
+          TABLE_NAME: "UserFeedback",
+          MANIFEST_TABLE_NAME: "BillsManifest",
+          MANIFEST_PRIMARY_KEY: "pk",
+          MANIFEST_SORT_KEY: "sk",
+          MANIFEST_PK_VALUE: "BILL",
+          MANIFEST_GUID_LOOKUP_PK: "BILL_GUID",
+        }),
+      );
+      const statements = statementsOf("FetchFeedback");
+      expect(partitionScopedGrants(statements)).toEqual([
+        {
+          resource: "table/BillsManifest",
+          actions: ["dynamodb:BatchGetItem"],
+          condition: leadingKeysCondition("BILL", "BILL_GUID"),
+        },
+      ]);
+      // The scoped grant is its only manifest access: no Query, Scan or GetItem of the table, no companion rows.
+      const manifestStatements = statements.filter((statement) => JSON.stringify(statement.Resource).includes("table/BillsManifest"));
+      expect(manifestStatements).toHaveLength(1);
+      const access = storeActions(statements);
+      expect(Object.keys(access)).toEqual(["table/BillsManifest", "table/UserFeedback", "table/UserFeedback/index/*"]);
+      expect(Object.values(access).flat().filter(isDataWrite)).toEqual([]);
+    });
+
+    test("raising its throttle changes only the stage", () => {
+      const flipped = synthUserApiWithAbuseLimits({ ACCOUNT_DATA_VOTES_THROTTLE: { rateLimit: 5, burstLimit: 8 } });
+      const stageId = Object.keys(templates.userApiTemplate.findResources("AWS::ApiGateway::Stage"))[0];
+      expect(templateChanges(template(), flipped)).toEqual({ added: [], removed: [], changed: [stageId] });
+      expect(votesSetting(flipped)).toEqual([
+        expect.objectContaining({ HttpMethod: "GET", ThrottlingRateLimit: 5, ThrottlingBurstLimit: 8 }),
+      ]);
+    });
+
+    test("the OpenAPI document has the route on the Cognito scheme and the fetchFeedback handler", () => {
+      const openApi = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "contracts", "openapi", "user-api.v1.json"), "utf8"));
+      const operation = openApi.paths["/account-data/votes"]?.get;
+      expect(operation?.["x-billboard-handler"]).toBe("services/src/handlers/fetchFeedback");
+      expect(operation?.security).toBeUndefined();
+      expect(Object.keys(openApi.paths["/account-data/votes"])).toEqual(["get"]);
     });
   });
 });

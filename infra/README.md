@@ -55,7 +55,7 @@ env -u AWS_PROFILE -u AWS_DEFAULT_REGION AWS_CONFIG_FILE=/dev/null AWS_SHARED_CR
 | File | What it holds |
 |---|---|
 | `lib/config/deployment-identity.ts` | The AWS account and region, the Route 53 hosted zone, the Slack workspace and channel, the GitHub repository allowed to deploy (`GitHubOidcStack`), and the fixed S3 bucket names. The production values, except the account: AWS's documentation example stands in for it |
-| `lib/config/abuse-limits.ts` | Every anti-abuse limit, throttle, alarm threshold and switch (App Attest, the account-integrity modes, the sign-up filter and its daily check, the WAF rate rules, the unconfirmed sign-up cleanup), with the values production runs. `services/src/shared/abuseLimits.ts` mirrors some of them and `test/abuse-limits.test.ts` checks both |
+| `lib/config/abuse-limits.ts` | Every anti-abuse limit, throttle, alarm threshold and switch (App Attest, the account-integrity modes, the sign-up filter and its daily check, the WAF rate rules, the vote export's route throttle, the unconfirmed sign-up cleanup), with the values production runs. `services/src/shared/abuseLimits.ts` mirrors some of them and `test/abuse-limits.test.ts` checks both |
 | `lib/config/*-constants.ts`, `bedrock-models.ts`, `email-constants.ts` | Table, queue and function names, schedules, capacity settings, the Bedrock models, the email domain |
 
 Every switch is read by its handler from the environment, and a value the handler does not recognise means the mild
