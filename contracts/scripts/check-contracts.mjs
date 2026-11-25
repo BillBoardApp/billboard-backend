@@ -589,6 +589,50 @@ const DEVICE_SETTINGS_MUST_REJECT = [
   [DEVICE_SETTINGS_UPDATE, "a numeric notify_weekly_brief", { notify_weekly_brief: 1 }],
 ];
 
+// GET /civic-score (UX-41 concept 3, "Weeks you voted"): recentVoteWeeks (the last 8 Eastern weeks by their Sunday) and
+// weeksVotedRecent, additive: apps 1.1 and 1.2 require every key they know and ignore the rest, so a body without them
+// (a server before UX-41) stays valid.
+const CIVIC_SCORE = component("CivicScore");
+const withWeek = (index, edit) => (score) => ({
+  ...score,
+  recentVoteWeeks: score.recentVoteWeeks.map((week, at) => (at === index ? edit(week) : week)),
+});
+const CIVIC_SCORE_MUST_ACCEPT = [
+  [
+    CIVIC_SCORE,
+    "a body without the week fields (a server before UX-41)",
+    without("recentVoteWeeks", "weeksVotedRecent"),
+  ],
+  [
+    CIVIC_SCORE,
+    "a caller with no vote in the last 8 weeks",
+    (score) => ({
+      ...score,
+      recentVoteWeeks: score.recentVoteWeeks.map((week) => ({ ...week, count: 0 })),
+      weeksVotedRecent: 0,
+    }),
+  ],
+];
+const CIVIC_SCORE_MUST_REJECT = [
+  [CIVIC_SCORE, "7 weeks", (score) => ({ ...score, recentVoteWeeks: score.recentVoteWeeks.slice(1) })],
+  [
+    CIVIC_SCORE,
+    "9 weeks",
+    (score) => ({ ...score, recentVoteWeeks: [...score.recentVoteWeeks, score.recentVoteWeeks.at(-1)] }),
+  ],
+  [CIVIC_SCORE, "a week without weekStart", withWeek(0, without("weekStart"))],
+  [
+    CIVIC_SCORE,
+    "a weekStart that is a time",
+    withWeek(0, (week) => ({ ...week, weekStart: `${week.weekStart}T00:00:00Z` })),
+  ],
+  [CIVIC_SCORE, "a negative week count", withWeek(7, (week) => ({ ...week, count: -1 }))],
+  [CIVIC_SCORE, "a week with an undeclared field", withWeek(7, (week) => ({ ...week, voted: week.count > 0 }))],
+  [CIVIC_SCORE, "weeksVotedRecent above 8", (score) => ({ ...score, weeksVotedRecent: 9 })],
+  [CIVIC_SCORE, "a fractional weeksVotedRecent", (score) => ({ ...score, weeksVotedRecent: 3.5 })],
+  [CIVIC_SCORE, "a null recentVoteWeeks", (score) => ({ ...score, recentVoteWeeks: null })],
+];
+
 // GET /account-data/votes (UX-40 L7, Download my votes): one page of the caller's own votes. Every field of a vote is
 // always sent (null where nothing is known), and nothing else: never the weight, the App Attest outcome, the adult flag
 // or the bill's theme scores. nextToken only while more rows follow.
@@ -821,6 +865,7 @@ const MUST_REJECT = [
   ...VERIFICATION_MUST_REJECT,
   ...CIVIC_PROFILE_MUST_REJECT,
   ...DEVICE_SETTINGS_MUST_REJECT,
+  ...CIVIC_SCORE_MUST_REJECT,
   ...VOTE_EXPORT_MUST_REJECT,
   ...APP_ATTEST_MUST_REJECT,
 ];
@@ -920,6 +965,7 @@ const MUST_ACCEPT = [
   ...VERIFICATION_MUST_ACCEPT,
   ...CIVIC_PROFILE_MUST_ACCEPT,
   ...DEVICE_SETTINGS_MUST_ACCEPT,
+  ...CIVIC_SCORE_MUST_ACCEPT,
   ...VOTE_EXPORT_MUST_ACCEPT,
   ...APP_ATTEST_MUST_ACCEPT,
 ];
@@ -1020,12 +1066,45 @@ function checkCrossFieldRules(fixtures) {
   const profile = fixtures.get(USER_CIVIC_PROFILE);
   if (profile) checkCivicProfileFixture(profile, `${USER_CIVIC_PROFILE} fixture`);
 
+  const score = fixtures.get(CIVIC_SCORE);
+  if (score) checkCivicScoreFixture(score, `${CIVIC_SCORE} fixture`);
+
   // UX-40 L7: the sample's reasons are sorted keys, each once, as the route sends them.
   (fixtures.get(VOTE_EXPORT)?.votes ?? []).forEach((vote, index) => {
     const sorted = [...new Set(vote.reasons)].sort();
     if (JSON.stringify(sorted) !== JSON.stringify(vote.reasons))
       addError(`${VOTE_EXPORT} fixture votes[${index}]: reasons must be sorted and distinct`);
   });
+}
+
+/**
+ * The CivicScore sample's weeks as fetchCivicScore serves them (UX-41): consecutive Sundays, oldest first, the last the
+ * week of the sample's last day (recentVoteDays ends today), weeksVotedRecent the weeks with a vote, and no more votes
+ * in them than totalVotes.
+ */
+function checkCivicScoreFixture(score, where) {
+  const weeks = score.recentVoteWeeks;
+  if (!Array.isArray(weeks)) {
+    addError(`${where}: the sample must carry recentVoteWeeks`);
+    return;
+  }
+  const dayMs = 86_400_000;
+  weeks.forEach((week, index) => {
+    const start = Date.parse(`${week.weekStart}T00:00:00Z`);
+    if (new Date(start).getUTCDay() !== 0) addError(`${where}: recentVoteWeeks[${index}].weekStart must be a Sunday`);
+    if (index > 0 && start - Date.parse(`${weeks[index - 1].weekStart}T00:00:00Z`) !== 7 * dayMs)
+      addError(`${where}: recentVoteWeeks must be consecutive weeks, oldest first`);
+  });
+  const today = score.recentVoteDays?.at(-1)?.date;
+  const lastStart = weeks.at(-1)?.weekStart;
+  if (today && lastStart) {
+    const daysIn = (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${lastStart}T00:00:00Z`)) / dayMs;
+    if (daysIn < 0 || daysIn > 6) addError(`${where}: the last week must be the week of the last recentVoteDays day`);
+  }
+  const voted = weeks.filter((week) => week.count > 0).length;
+  if (score.weeksVotedRecent !== voted) addError(`${where}: weeksVotedRecent must be ${voted}`);
+  if (weeks.reduce((sum, week) => sum + week.count, 0) > score.totalVotes)
+    addError(`${where}: recentVoteWeeks holds more votes than totalVotes`);
 }
 
 /**
