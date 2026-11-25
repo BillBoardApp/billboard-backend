@@ -34,14 +34,26 @@ describe("AggregateDataStoreStack", () => {
     });
   });
 
-  // UX-39d: the members' roll-call record, read newest first per member, a bill's rows found through its guid.
-  test("creates the member vote record table, keyed newest first, with a keys-only bill guid index", () => {
+  // UX-39d: the members' roll-call record. One row per member, bill and chamber, so a newer roll call overwrites it;
+  // read newest first per member through a local index, which exists only if the table is created with it; a bill's
+  // rows found through its guid.
+  test("creates the member vote record table keyed by bill and chamber, a newest-first local index and a bill guid index", () => {
     templates.aggregateTemplate.hasResourceProperties("AWS::DynamoDB::Table", {
       TableName: "CongressMemberVoteRecord",
       BillingMode: "PAY_PER_REQUEST",
       KeySchema: [
         { AttributeName: "bioguideId", KeyType: "HASH" },
-        { AttributeName: "recordKey", KeyType: "RANGE" },
+        { AttributeName: "billKey", KeyType: "RANGE" },
+      ],
+      LocalSecondaryIndexes: [
+        {
+          IndexName: "VotedOnIndex",
+          KeySchema: [
+            { AttributeName: "bioguideId", KeyType: "HASH" },
+            { AttributeName: "votedOnKey", KeyType: "RANGE" },
+          ],
+          Projection: { ProjectionType: "ALL" },
+        },
       ],
       GlobalSecondaryIndexes: [
         {

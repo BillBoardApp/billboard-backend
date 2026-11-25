@@ -29,7 +29,10 @@ const BILLS: Record<string, unknown> = {
   "processed-bills/BILLS-119hr2.json": { sponsors: [] }, // no official votes
   "processed-bills/BILLS-119hr3.json": votes("Unknown"), // no position the record keeps
   "processed-bills/BILLS-119s4.json": {
-    officialVotes: { senate: { members: [{ bioguideId: "S123", vote: "nay" }] } },
+    // A Senate vote read from its XML: the day with the Senate's clock time.
+    officialVotes: {
+      senate: { actionDate: "2026-03-05T14:30:00.000Z", members: [{ bioguideId: "S123", vote: "nay" }] },
+    },
   },
   "processed-bills/BILLS-120hr5.json": votes("Yea"),
   "processed-bills/BILLS-119hr6.json": null,
@@ -127,11 +130,15 @@ describe("backfill:member-vote-record (UX-39d)", () => {
     expect(() => parseArgs(["--rate", "21"])).toThrow("--rate needs a whole number from 1 to 20");
   });
 
-  it("counts the member rows a bill gives the record: the four positions Congress records", () => {
+  it("counts the member rows a bill gives the record: the four positions Congress records, in a dated vote", () => {
     expect(memberRowsOf(BILLS["processed-bills/BILLS-119hr1.json"])).toBe(4);
     expect(memberRowsOf(BILLS["processed-bills/BILLS-119hr3.json"])).toBe(0);
     expect(memberRowsOf(BILLS["processed-bills/BILLS-119s4.json"])).toBe(1);
     expect(memberRowsOf(null)).toBe(0);
+    // congressMemberStats leaves a chamber vote without its day out of the record, so it counts none.
+    const undated = { officialVotes: { house: { members: [{ bioguideId: "A000001", votePosition: "Yea" }] } } };
+    expect(memberRowsOf(undated)).toBe(0);
+    expect(memberRowsOf({ officialVotes: { house: { ...undated.officialVotes.house, actionDate: "soon" } } })).toBe(0);
   });
 
   it("dry run: counts and sends nothing", async () => {

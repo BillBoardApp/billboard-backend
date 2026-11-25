@@ -1856,7 +1856,7 @@ describe("Senate member lookup refresh (REL-46)", () => {
 
 describe("the members' roll-call record (UX-39d)", () => {
   const key = "processed-bills/BILLS-119hr2312.json";
-  type WriteRequestItem = { PutRequest?: { Item: Record<string, AttributeValue> }; DeleteRequest?: unknown };
+  const HOUSE_TEXT = "On passage Passed by the Yeas and Nays: 220 - 210 (Roll no. 61).";
   const bill = (overrides: Record<string, unknown> = {}) => ({
     schemaVersion: 1,
     kind: "processed",
@@ -1871,7 +1871,7 @@ describe("the members' roll-call record (UX-39d)", () => {
       house: {
         actionDate: "2026-02-01",
         actionCode: "8000",
-        resultText: "On passage Passed by the Yeas and Nays: 220 - 210 (Roll no. 61).",
+        resultText: HOUSE_TEXT,
         members: [
           { bioguideId: "A000001", displayName: "One", votePosition: "Yea" },
           { bioguideId: "B000002", displayName: "Two", votePosition: "Nay" },
@@ -1882,21 +1882,88 @@ describe("the members' roll-call record (UX-39d)", () => {
         ],
       },
       senate: {
-        actionDate: "2026-03-05",
+        // A Senate vote read from its XML: the Senate's day and clock time, stored in ISO form.
+        actionDate: "2026-03-05T23:30:00.000Z",
         members: [{ bioguideId: "S123", displayName: "Smith", state: "NY", votePosition: "Nay" }],
       },
     },
     ...overrides,
   });
 
-  let existingRecordRows: Array<Record<string, AttributeValue>>;
+  type Row = Record<string, AttributeValue>;
+  const rowId = (row: Row) => `${row.bioguideId.S}|${row.billKey.S}`;
+
+  /**
+   * CongressMemberVoteRecord in memory. The BillGuidIndex answers from `index`, which follows the table only when
+   * `indexLags` is false: an eventually consistent index that has not yet seen this message's writes.
+   */
+  const recordTable = () => {
+    const state = { rows: new Map<string, Row>(), index: new Map<string, Row>(), indexLags: false };
+    mockDdbSend.mockImplementation(async (cmd: FakeDdbCommand) => {
+      const input = cmd.input ?? {};
+      if (input.TableName === "CongressMemberVoteRecord" && input.IndexName) {
+        return { Items: [...state.index.values()].filter((row) => row.billGuid.S === "BILLS-119hr2312") };
+      }
+      const requests = input.RequestItems?.CongressMemberVoteRecord;
+      if (requests) {
+        for (const request of requests) {
+          if (request.PutRequest) state.rows.set(rowId(request.PutRequest.Item), request.PutRequest.Item);
+          if (request.DeleteRequest) state.rows.delete(rowId(request.DeleteRequest.Key));
+        }
+        if (!state.indexLags) state.index = new Map(state.rows);
+        return {};
+      }
+      if (input.IndexName) return { Items: [] };
+      if (input.TableName === "CongressMembersManifest") {
+        return {
+          Items: [
+            { bioguideId: { S: "S000148" }, name: { S: "Sam Smith" }, chamber: { S: "Senate" }, state: { S: "NY" } },
+          ],
+        };
+      }
+      return {};
+    });
+    return state;
+  };
+
   const recordWrites = () =>
     mockDdbSend.mock.calls.flatMap(
-      (call: unknown[]) =>
-        ((call[0] as FakeDdbCommand).input.RequestItems?.CongressMemberVoteRecord ?? []) as WriteRequestItem[],
+      (call: unknown[]) => (call[0] as FakeDdbCommand).input.RequestItems?.CongressMemberVoteRecord ?? [],
     );
   const puts = () => recordWrites().flatMap((request) => (request.PutRequest ? [request.PutRequest.Item] : []));
   const deletes = () => recordWrites().flatMap((request) => (request.DeleteRequest ? [request.DeleteRequest] : []));
+
+  const houseRow = (bioguideId: string, position: string, extra: Row = {}): Row => ({
+    bioguideId: { S: bioguideId },
+    billKey: { S: "BILLS-119hr2312#House" },
+    votedOnKey: { S: "2026-02-01#BILLS-119hr2312" },
+    billGuid: { S: "BILLS-119hr2312" },
+    chamber: { S: "House" },
+    position: { S: position },
+    votedOn: { S: "2026-02-01" },
+    actionText: { S: HOUSE_TEXT },
+    actionCode: { S: "8000" },
+    updatedAt: { S: expect.any(String) },
+    ...extra,
+  });
+  const senateRow: Row = {
+    bioguideId: { S: "S000148" },
+    billKey: { S: "BILLS-119hr2312#Senate" },
+    votedOnKey: { S: "2026-03-05#BILLS-119hr2312" },
+    billGuid: { S: "BILLS-119hr2312" },
+    chamber: { S: "Senate" },
+    position: { S: "Nay" },
+    votedOn: { S: "2026-03-05" },
+    updatedAt: { S: expect.any(String) },
+  };
+  /** A row as the BillGuidIndex projects it. */
+  const indexed = (bioguideId: string, chamber: string, values: Record<string, string>): Row => ({
+    bioguideId: { S: bioguideId },
+    billKey: { S: `BILLS-119hr2312#${chamber}` },
+    billGuid: { S: "BILLS-119hr2312" },
+    ...Object.fromEntries(Object.entries(values).map(([name, value]) => [name, { S: value }])),
+  });
+  const SAME_HOUSE = { position: "Yea", votedOn: "2026-02-01", actionText: HOUSE_TEXT, actionCode: "8000" };
 
   beforeEach(() => {
     restoreEnv?.();
@@ -1910,7 +1977,8 @@ describe("the members' roll-call record (UX-39d)", () => {
         CONGRESS_MEMBERS_MANIFEST_TABLE_NAME: "CongressMembersManifest",
         VOTE_RECORD_TABLE_NAME: "CongressMemberVoteRecord",
         VOTE_RECORD_PRIMARY_KEY: "bioguideId",
-        VOTE_RECORD_SORT_KEY: "recordKey",
+        VOTE_RECORD_SORT_KEY: "billKey",
+        VOTE_RECORD_VOTED_ON_KEY: "votedOnKey",
         VOTE_RECORD_BILL_GUID_INDEX_NAME: "BillGuidIndex",
         VOTE_RECORD_BILL_GUID_INDEX_PK: "billGuid",
       },
@@ -1918,20 +1986,6 @@ describe("the members' roll-call record (UX-39d)", () => {
     );
     jest.resetModules();
     handler = require("../handlers/congressMemberStats").handler;
-    existingRecordRows = [];
-    mockDdbSend.mockImplementation(async (cmd: FakeDdbCommand) => {
-      const input = cmd.input ?? {};
-      if (input.IndexName && input.TableName === "CongressMemberVoteRecord") return { Items: existingRecordRows };
-      if (input.IndexName) return { Items: [] };
-      if (input.TableName === "CongressMembersManifest") {
-        return {
-          Items: [
-            { bioguideId: { S: "S000148" }, name: { S: "Sam Smith" }, chamber: { S: "Senate" }, state: { S: "NY" } },
-          ],
-        };
-      }
-      return {};
-    });
   });
 
   const apply = async (payload: unknown) => {
@@ -1939,64 +1993,22 @@ describe("the members' roll-call record (UX-39d)", () => {
     return handler(sqsWrappedS3Keys([key]) as unknown as SQSEvent);
   };
 
-  it("writes every position Congress recorded, under the plain guid, newest-first keys, and the action text", async () => {
+  it("writes every position Congress recorded, one row per member and chamber, dated by the roll call's day", async () => {
+    recordTable();
+
     const res = await apply(bill());
 
     expect(res).toEqual({ batchItemFailures: [] });
-    const house = "2026-02-01T00:00:00.000Z#BILLS-119hr2312";
-    const houseRow = (bioguideId: string, position: string) => ({
-      bioguideId: { S: bioguideId },
-      recordKey: { S: house },
-      billGuid: { S: "BILLS-119hr2312" },
-      chamber: { S: "House" },
-      position: { S: position },
-      votedAt: { S: "2026-02-01T00:00:00.000Z" },
-      actionText: { S: "On passage Passed by the Yeas and Nays: 220 - 210 (Roll no. 61)." },
-      actionCode: { S: "8000" },
-      updatedAt: { S: expect.any(String) },
-    });
     expect(puts()).toEqual([
       houseRow("A000001", "Yea"),
       houseRow("B000002", "Nay"),
       houseRow("C000003", "Present"),
       houseRow("D000004", "Not Voting"),
-      // The Senate's lis id, resolved to the bioguide id through the members manifest.
-      {
-        bioguideId: { S: "S000148" },
-        recordKey: { S: "2026-03-05T00:00:00.000Z#BILLS-119hr2312" },
-        billGuid: { S: "BILLS-119hr2312" },
-        chamber: { S: "Senate" },
-        position: { S: "Nay" },
-        votedAt: { S: "2026-03-05T00:00:00.000Z" },
-        updatedAt: { S: expect.any(String) },
-      },
+      // The Senate's lis id, resolved to the bioguide id through the members manifest; its day is the Senate's own,
+      // with no time zone applied to the clock time.
+      senateRow,
     ]);
     expect(deletes()).toEqual([]);
-  });
-
-  it("writes the record for a bill without a civic profile, whose profile rows stay unwritten (REL-43)", async () => {
-    await apply(bill());
-
-    expect(puts()).toHaveLength(5);
-    const profileTables = mockDdbSend.mock.calls.flatMap((call: unknown[]) =>
-      Object.keys((call[0] as FakeDdbCommand).input.RequestItems ?? {}),
-    );
-    expect(profileTables).not.toContain("CongressMemberVoteProfiles");
-  });
-
-  it("deletes the rows of an older roll call and of members the bill no longer lists, and keeps the rest", async () => {
-    existingRecordRows = [
-      { bioguideId: { S: "A000001" }, recordKey: { S: "2026-02-01T00:00:00.000Z#BILLS-119hr2312" } },
-      { bioguideId: { S: "A000001" }, recordKey: { S: "2025-12-01T00:00:00.000Z#BILLS-119hr2312" } },
-      { bioguideId: { S: "Z000009" }, recordKey: { S: "2026-02-01T00:00:00.000Z#BILLS-119hr2312" } },
-    ];
-
-    await apply(bill());
-
-    expect(deletes()).toEqual([
-      { Key: { bioguideId: { S: "A000001" }, recordKey: { S: "2025-12-01T00:00:00.000Z#BILLS-119hr2312" } } },
-      { Key: { bioguideId: { S: "Z000009" }, recordKey: { S: "2026-02-01T00:00:00.000Z#BILLS-119hr2312" } } },
-    ]);
     const queried = mockDdbSend.mock.calls
       .map((call: unknown[]) => (call[0] as FakeDdbCommand).input)
       .find((input: FakeDdbInput) => input.TableName === "CongressMemberVoteRecord" && input.IndexName);
@@ -2006,47 +2018,123 @@ describe("the members' roll-call record (UX-39d)", () => {
     });
   });
 
+  it("writes the record for a bill without a civic profile, whose profile rows stay unwritten (REL-43)", async () => {
+    recordTable();
+
+    await apply(bill());
+
+    expect(puts()).toHaveLength(5);
+    const profileTables = mockDdbSend.mock.calls.flatMap((call: unknown[]) =>
+      Object.keys((call[0] as FakeDdbCommand).input.RequestItems ?? {}),
+    );
+    expect(profileTables).not.toContain("CongressMemberVoteProfiles");
+  });
+
+  it("overwrites a member's row when a newer roll call replaces it, and deletes only rows the bill no longer gives", async () => {
+    const table = recordTable();
+    // An older roll call's rows (another day and text), a member the newer one does not list, and a Senate row.
+    table.index = new Map(
+      [
+        indexed("A000001", "House", { position: "Nay", votedOn: "2025-12-01", actionText: "On motion to recommit" }),
+        indexed("Z000009", "House", { position: "Yea", votedOn: "2025-12-01" }),
+        indexed("S000148", "Senate", { position: "Nay", votedOn: "2026-03-05" }),
+      ].map((row) => [rowId(row), row]),
+    );
+
+    await apply(bill());
+
+    // A000001 is written over in place, under the same key.
+    expect(puts().map(rowId)).toEqual([
+      "A000001|BILLS-119hr2312#House",
+      "B000002|BILLS-119hr2312#House",
+      "C000003|BILLS-119hr2312#House",
+      "D000004|BILLS-119hr2312#House",
+      "S000148|BILLS-119hr2312#Senate",
+    ]);
+    expect(deletes()).toEqual([{ Key: { bioguideId: { S: "Z000009" }, billKey: { S: "BILLS-119hr2312#House" } } }]);
+  });
+
   it("deletes every row of a bill whose official votes are gone", async () => {
-    existingRecordRows = [
-      { bioguideId: { S: "A000001" }, recordKey: { S: "2026-02-01T00:00:00.000Z#BILLS-119hr2312" } },
-    ];
+    const table = recordTable();
+    table.index = new Map([[rowId(indexed("A000001", "House", SAME_HOUSE)), indexed("A000001", "House", SAME_HOUSE)]]);
 
     await apply(bill({ officialVotes: undefined }));
 
     expect(puts()).toEqual([]);
-    expect(deletes()).toEqual([
-      { Key: { bioguideId: { S: "A000001" }, recordKey: { S: "2026-02-01T00:00:00.000Z#BILLS-119hr2312" } } },
-    ]);
+    expect(deletes()).toEqual([{ Key: { bioguideId: { S: "A000001" }, billKey: { S: "BILLS-119hr2312#House" } } }]);
   });
 
   it("writes the same rows again on a redelivery, and deletes nothing", async () => {
+    const table = recordTable();
     await apply(bill());
-    const first = puts().map((item) => [item.bioguideId.S, item.recordKey.S]);
-    existingRecordRows = puts().map((item) => ({ bioguideId: item.bioguideId, recordKey: item.recordKey }));
+    const first = puts().map(rowId);
     mockDdbSend.mockClear();
 
     await apply(bill());
 
-    expect(puts().map((item) => [item.bioguideId.S, item.recordKey.S])).toEqual(first);
+    expect(puts().map(rowId)).toEqual(first);
     expect(deletes()).toEqual([]);
+    expect(table.rows.size).toBe(5);
   });
 
-  it("dates a chamber vote without a day by the sync time, and skips a chamber with no usable date", async () => {
-    const undated = bill({
-      storedAt: "not a date",
-      officialVotes: {
-        lastSyncedAt: "2026-02-02T12:00:00.000Z",
-        house: { members: [{ bioguideId: "A000001", votePosition: "Yea" }] },
-      },
-    });
-    await apply(undated);
-    expect(puts().map((item) => item.recordKey.S)).toEqual(["2026-02-02T12:00:00.000Z#BILLS-119hr2312"]);
-
-    mockDdbSend.mockClear();
+  it("leaves out a chamber vote without its own day, never dating it by the sync or store time", async () => {
+    recordTable();
     await apply(
-      bill({ storedAt: "", officialVotes: { house: { members: [{ bioguideId: "A000001", vote: "aye" }] } } }),
+      bill({
+        officialVotes: {
+          lastSyncedAt: "2026-02-02T12:00:00.000Z",
+          house: { members: [{ bioguideId: "A000001", votePosition: "Yea" }] },
+          senate: { actionDate: "March 5", members: [{ bioguideId: "S123", state: "NY", votePosition: "Nay" }] },
+        },
+      }),
     );
+
     expect(puts()).toEqual([]);
+  });
+
+  it("deletes a row the first pass wrote when the newer version drops it, though the index has not seen it yet", async () => {
+    const table = recordTable();
+    table.indexLags = true;
+    const v1 = bill();
+    const v2 = bill();
+    // v2: B000002's row is gone from the House roll call, and the Senate vote is gone.
+    v2.officialVotes.house.members = v2.officialVotes.house.members.filter((member) => member.bioguideId !== "B000002");
+    delete (v2.officialVotes as { senate?: unknown }).senate;
+    const versions = [{ versionId: "v1", body: v1 }];
+    let written = false;
+    mockS3Send.mockImplementation(async (cmd: FakeS3Command) => {
+      const input = cmd.input ?? {};
+      if (input.Prefix === key) {
+        // v2 is written while v1 is being applied: it is listed once v1's record rows have landed.
+        if (table.rows.size > 0 && !written) {
+          written = true;
+          versions.unshift({ versionId: "v2", body: v2 });
+        }
+        return {
+          Versions: versions.map((version, index) => ({
+            Key: key,
+            VersionId: version.versionId,
+            IsLatest: index === 0,
+            LastModified: new Date(Date.UTC(2026, 8, 25, 12, 0, versions.length - index)).toISOString(),
+          })),
+          DeleteMarkers: [],
+          IsTruncated: false,
+        };
+      }
+      const version = input.VersionId ? versions.find((v) => v.versionId === input.VersionId) : versions[0];
+      return { Body: jsonReadable(version!.body) };
+    });
+
+    const res = await handler(sqsWrappedS3Keys([key], { versionId: "v1" }));
+
+    expect(res).toEqual({ batchItemFailures: [] });
+    expect([...table.rows.keys()].sort()).toEqual([
+      "A000001|BILLS-119hr2312#House",
+      "C000003|BILLS-119hr2312#House",
+      "D000004|BILLS-119hr2312#House",
+    ]);
+    // Five rows from the first pass, three from the second.
+    expect(puts()).toHaveLength(8);
   });
 });
 

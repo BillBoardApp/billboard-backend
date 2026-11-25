@@ -308,8 +308,8 @@ const SPONSOR_MUST_REJECT = [
 
 // ── A member's votes and bills (UX-39d) ──
 // Positions only as Congress records them (no judging word, no Abstain, which only BillBoard users cast), plain guids,
-// and the paging shapes clients must decode: a last page without nextCursor, a later page without sponsoredBills, and a
-// member with no record.
+// days without a time, and the shapes clients must decode: a last page without nextCursor, a later page without
+// sponsoredBills, and a member with no record.
 const MEMBER_RECORD = "schemas/entities/congress-member-record.v1.schema.json";
 const withRecordVote = (edit) => (record) => ({ ...record, votes: [edit(record.votes[0]), ...record.votes.slice(1)] });
 const withRecordBill = (edit) => (record) => ({
@@ -318,11 +318,20 @@ const withRecordBill = (edit) => (record) => ({
 });
 const RECORD_MUST_ACCEPT = [
   [MEMBER_RECORD, "a last page (no nextCursor)", ({ nextCursor, ...record }) => record],
-  [MEMBER_RECORD, "a later page (no sponsoredBills)", ({ sponsoredBills, sponsoredBillCount, ...record }) => record],
+  [
+    MEMBER_RECORD,
+    "a later page (no sponsoredBills)",
+    ({ sponsoredBills, sponsoredBillCount, ...record }) => record,
+  ],
   [
     MEMBER_RECORD,
     "a member with no record",
-    (record) => ({ bioguideId: record.bioguideId, votes: [], sponsoredBills: [], sponsoredBillCount: 0 }),
+    (record) => ({
+      bioguideId: record.bioguideId,
+      votes: [],
+      sponsoredBills: [],
+      sponsoredBillCount: 0,
+    }),
   ],
   [MEMBER_RECORD, "a Senate vote", withRecordVote((vote) => ({ ...vote, chamber: "Senate" }))],
 ];
@@ -336,7 +345,12 @@ const RECORD_MUST_REJECT = [
   [MEMBER_RECORD, "a lower-case chamber", withRecordVote((vote) => ({ ...vote, chamber: "house" }))],
   [MEMBER_RECORD, "a suffixed bill guid", withRecordVote((vote) => ({ ...vote, billGuid: "BILLS-119hr1285ih" }))],
   [MEMBER_RECORD, "a vote with an extra key", withRecordVote((vote) => ({ ...vote, userVote: "Yea" }))],
-  [MEMBER_RECORD, "a vote without votedAt", withRecordVote(({ votedAt, ...vote }) => vote)],
+  [MEMBER_RECORD, "a vote without votedOn", withRecordVote(({ votedOn, ...vote }) => vote)],
+  [
+    MEMBER_RECORD,
+    "a vote dated with a time",
+    withRecordVote((vote) => ({ ...vote, votedOn: "2026-03-04T00:00:00.000Z" })),
+  ],
   [MEMBER_RECORD, "vetoed false on a sponsored bill", withRecordBill((bill) => ({ ...bill, vetoed: false }))],
   [MEMBER_RECORD, "a negative sponsoredBillCount", (record) => ({ ...record, sponsoredBillCount: -1 })],
   [MEMBER_RECORD, "a record without votes", ({ votes, ...record }) => record],

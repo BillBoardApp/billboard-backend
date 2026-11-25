@@ -27,6 +27,7 @@ import { GetQueueAttributesCommand, GetQueueUrlCommand, SendMessageBatchCommand,
 import { Readable } from "node:stream";
 
 import { congressOfBillGuid } from "../src/shared/memberCounters";
+import { voteRecordDayOf, voteRecordPositionOf } from "../src/shared/memberVoteRecord";
 import { buildS3WrappedObjectMessage } from "../src/shared/replayCongressVoteProfiles";
 
 export interface VoteRecordBackfillConfig {
@@ -70,7 +71,6 @@ const MAX_CONCURRENCY = 25;
 const BATCH_SIZE = 10;
 export const QUEUE_WAIT_MS = 30_000;
 export const QUEUE_WAIT_LIMIT_MS = 10 * 60_000;
-const POSITIONS = new Set(["yea", "yes", "aye", "nay", "no", "present", "not voting", "not-voting", "nv"]);
 
 export const parseArgs = (argv: readonly string[]): CliOptions => {
   const options: CliOptions = {
@@ -146,19 +146,23 @@ type Log = (...args: unknown[]) => void;
 
 const toTrimmedString = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 
-/** How many member rows a processed bill's official votes give the record (members with a position). */
+/**
+ * How many member rows a processed bill's official votes give the record: members with a position, in a chamber vote
+ * dated by its own day (congressMemberStats leaves an undated one out).
+ */
 export const memberRowsOf = (payload: unknown): number => {
   if (!payload || typeof payload !== "object") return 0;
   const officialVotes = (payload as Record<string, unknown>).officialVotes as Record<string, unknown> | undefined;
   let rows = 0;
   for (const chamber of ["house", "senate"]) {
-    const members = (officialVotes?.[chamber] as Record<string, unknown> | undefined)?.members;
+    const chamberVote = officialVotes?.[chamber] as Record<string, unknown> | undefined;
+    if (!voteRecordDayOf(chamberVote?.actionDate)) continue;
+    const members = chamberVote?.members;
     if (!Array.isArray(members)) continue;
     for (const member of members) {
       const record = (member ?? {}) as Record<string, unknown>;
       const id = toTrimmedString(record.bioguideId ?? record.memberId ?? record.id);
-      const position = toTrimmedString(record.votePosition ?? record.vote ?? record.position).toLowerCase();
-      if (id && POSITIONS.has(position)) rows += 1;
+      if (id && voteRecordPositionOf(record.votePosition ?? record.vote ?? record.position)) rows += 1;
     }
   }
   return rows;

@@ -341,7 +341,7 @@ nonisolated enum UserAPIContractsV1 {
     nonisolated struct CongressMemberRecord: Decodable {
         /// A Congress.gov bioguide ID: one capital letter and six digits, such as D000001.
         let bioguideId: String
-        /// The member's latest roll-call vote on each bill in BillBoard that has one, newest first (by votedAt, then
+        /// The member's latest roll-call vote on each bill in BillBoard that has one, newest first (by votedOn, then
         /// bill guid), at most the request's limit. A member in both chambers' latest roll calls of a bill (who moved
         /// chambers) has one entry for each. Empty for a member with no recorded vote, or past the last page.
         let votes: [CongressMemberRecordVote]
@@ -369,8 +369,9 @@ nonisolated enum UserAPIContractsV1 {
         /// The chamber whose roll call this is.
         let chamber: String
         let position: String
-        /// The roll call's day (midnight UTC), or when the vote was synced when Congress gave no day.
-        let votedAt: String
+        /// The roll call's day as Congress records it, YYYY-MM-DD (Washington's day, with no time or zone): show it as
+        /// it is, never converted to the device's time zone. A roll call without a day is not in the record.
+        let votedOn: String
         /// What the roll call was on, as Congress words it (a passage, a cloture vote, a motion), at most 500
         /// characters; absent when Congress gave none.
         let actionText: String?

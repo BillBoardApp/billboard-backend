@@ -21,6 +21,7 @@ interface Command {
   kind: "Query" | "GetItem" | "BatchGetItem";
   input: {
     TableName?: string;
+    IndexName?: string;
     Limit?: number;
     ScanIndexForward?: boolean;
     ExclusiveStartKey?: Item;
@@ -36,22 +37,23 @@ let handler: (event: unknown) => Promise<APIGatewayProxyResult>;
 
 const IN_THE_120TH = Date.parse("2027-01-20T12:00:00.000Z");
 
-/** One member's vote rows, newest first as the table sorts them, and the tables the handler reads. */
-const voteRow = (votedAt: string, guid: string, position: string, extra: Item = {}): Item => ({
+/** One member's vote rows, newest first as the VotedOnIndex sorts them, and the tables the handler reads. */
+const voteRow = (votedOn: string, guid: string, position: string, extra: Item = {}, chamber = "House"): Item => ({
   bioguideId: { S: "A000001" },
-  recordKey: { S: `${votedAt}#${guid}` },
+  billKey: { S: `${guid}#${chamber}` },
+  votedOnKey: { S: `${votedOn}#${guid}` },
   billGuid: { S: guid },
-  chamber: { S: "House" },
+  chamber: { S: chamber },
   position: { S: position },
-  votedAt: { S: votedAt },
+  votedOn: { S: votedOn },
   ...extra,
 });
 
 const VOTES: Item[] = [
-  voteRow("2027-01-15T00:00:00.000Z", "BILLS-120hr5", "Yea", { actionText: { S: "On passage Passed: 300 - 120" } }),
-  voteRow("2026-12-10T00:00:00.000Z", "BILLS-119hr900", "Not Voting"),
-  voteRow("2026-11-02T00:00:00.000Z", "BILLS-119hr812", "Present"),
-  voteRow("2026-10-01T00:00:00.000Z", "BILLS-119hr77", "Nay", { actionText: { S: "On motion to recommit Failed" } }),
+  voteRow("2027-01-15", "BILLS-120hr5", "Yea", { actionText: { S: "On passage Passed: 300 - 120" } }),
+  voteRow("2026-12-10", "BILLS-119hr900", "Not Voting"),
+  voteRow("2026-11-02", "BILLS-119hr812", "Present"),
+  voteRow("2026-10-01", "BILLS-119hr77", "Nay", { actionText: { S: "On motion to recommit Failed" } }),
 ];
 
 const MANIFEST: Record<string, Item> = {
@@ -94,13 +96,21 @@ const STATS: Item = {
   sponsoredBillGuids120: { SS: ["BILLS-120hr2"] },
 };
 
-const fakeTables = (options: { votes?: Item[]; stats?: Item | null; manifestFails?: boolean } = {}) => {
+const fakeTables = (
+  options: {
+    votes?: Item[];
+    stats?: Item | null;
+    manifestFails?: boolean;
+  } = {},
+) => {
   const votes = options.votes ?? VOTES;
   mockSend.mockImplementation(async (command: Command) => {
     const input = command.input;
     if (command.kind === "Query") {
-      const after = input.ExclusiveStartKey?.recordKey?.S;
-      const start = after ? votes.findIndex((row) => row.recordKey.S === after) + 1 : 0;
+      const after = input.ExclusiveStartKey;
+      const start = after
+        ? votes.findIndex((row) => row.billKey.S === after.billKey?.S && row.votedOnKey.S === after.votedOnKey?.S) + 1
+        : 0;
       return { Items: votes.slice(start, start + (input.Limit ?? votes.length)) };
     }
     if (command.kind === "GetItem") return options.stats === null ? {} : { Item: options.stats ?? STATS };
@@ -136,7 +146,9 @@ beforeEach(() => {
     {
       VOTE_RECORD_TABLE_NAME: "CongressMemberVoteRecord",
       VOTE_RECORD_PRIMARY_KEY: "bioguideId",
-      VOTE_RECORD_SORT_KEY: "recordKey",
+      VOTE_RECORD_SORT_KEY: "billKey",
+      VOTE_RECORD_VOTED_ON_INDEX_NAME: "VotedOnIndex",
+      VOTE_RECORD_VOTED_ON_KEY: "votedOnKey",
       STATS_TABLE_NAME: "CongressMembersStats",
       STATS_PRIMARY_KEY: "bioguideId",
       MANIFEST_TABLE_NAME: "BillsManifest",
@@ -180,7 +192,7 @@ describe("fetchCongressMemberRecord (UX-39d)", () => {
           title: "Extends school meals",
           chamber: "House",
           position: "Yea",
-          votedAt: "2027-01-15T00:00:00.000Z",
+          votedOn: "2027-01-15",
           actionText: "On passage Passed: 300 - 120",
         },
         // No manifest row yet: the vote is served without a title.
@@ -191,7 +203,7 @@ describe("fetchCongressMemberRecord (UX-39d)", () => {
           billNumber: "900",
           chamber: "House",
           position: "Not Voting",
-          votedAt: "2026-12-10T00:00:00.000Z",
+          votedOn: "2026-12-10",
         },
         {
           billGuid: "BILLS-119hr812",
@@ -201,7 +213,7 @@ describe("fetchCongressMemberRecord (UX-39d)", () => {
           title: "Names a post office",
           chamber: "House",
           position: "Present",
-          votedAt: "2026-11-02T00:00:00.000Z",
+          votedOn: "2026-11-02",
         },
         {
           billGuid: "BILLS-119hr77",
@@ -211,7 +223,7 @@ describe("fetchCongressMemberRecord (UX-39d)", () => {
           title: "Changes the rules for small farms",
           chamber: "House",
           position: "Nay",
-          votedAt: "2026-10-01T00:00:00.000Z",
+          votedOn: "2026-10-01",
           actionText: "On motion to recommit Failed",
         },
       ],
@@ -250,6 +262,7 @@ describe("fetchCongressMemberRecord (UX-39d)", () => {
     const [query] = commands("Query");
     expect(query.input).toMatchObject({
       TableName: "CongressMemberVoteRecord",
+      IndexName: "VotedOnIndex",
       ScanIndexForward: false,
       Limit: 26,
       ExpressionAttributeValues: { ":pk": { S: "A000001" } },
@@ -275,7 +288,7 @@ describe("fetchCongressMemberRecord (UX-39d)", () => {
 
     const first = body(await request({ bioguideId: "A000001", limit: "2" }));
     expect(first.votes.map((vote: { billGuid: string }) => vote.billGuid)).toEqual(["BILLS-120hr5", "BILLS-119hr900"]);
-    expect(Buffer.from(first.nextCursor, "base64url").toString()).toBe("2026-12-10T00:00:00.000Z#BILLS-119hr900");
+    expect(Buffer.from(first.nextCursor, "base64url").toString()).toBe("2026-12-10#BILLS-119hr900#House");
     expect(first.sponsoredBills).toHaveLength(4);
 
     mockSend.mockClear();
@@ -288,9 +301,11 @@ describe("fetchCongressMemberRecord (UX-39d)", () => {
     expect(second).not.toHaveProperty("nextCursor");
     expect(second).not.toHaveProperty("sponsoredBills");
     expect(second).not.toHaveProperty("sponsoredBillCount");
+    // The local index's start key: the table's keys and the index's sort key.
     expect(commands("Query")[0].input.ExclusiveStartKey).toEqual({
       bioguideId: { S: "A000001" },
-      recordKey: { S: "2026-12-10T00:00:00.000Z#BILLS-119hr900" },
+      billKey: { S: "BILLS-119hr900#House" },
+      votedOnKey: { S: "2026-12-10#BILLS-119hr900" },
     });
     expect(commands("GetItem")).toEqual([]);
   });
@@ -348,6 +363,11 @@ describe("fetchCongressMemberRecord (UX-39d)", () => {
     [{ bioguideId: "A000001", limit: "ten" }, "INVALID_LIMIT"],
     [{ bioguideId: "A000001", cursor: "not a cursor!" }, "INVALID_CURSOR"],
     [{ bioguideId: "A000001", cursor: Buffer.from("A000002#anything").toString("base64url") }, "INVALID_CURSOR"],
+    [
+      // A cursor of the record's first key design: no chamber.
+      { bioguideId: "A000001", cursor: Buffer.from("2026-12-10T00:00:00.000Z#BILLS-119hr900").toString("base64url") },
+      "INVALID_CURSOR",
+    ],
     [{ bioguideId: "A000001", cursor: "" }, "INVALID_CURSOR"],
   ])("answers 400 for %j without reading anything", async (query, error) => {
     const result = await request(query as Record<string, string>);
@@ -366,20 +386,18 @@ describe("fetchCongressMemberRecord (UX-39d)", () => {
 
   it("never sends a user's vote or a judging word: only the record's own fields", async () => {
     fakeTables({
-      votes: [
-        voteRow("2026-10-01T00:00:00.000Z", "BILLS-119hr77", "Nay", { userVote: { S: "Yea" }, score: { N: "3" } }),
-      ],
+      votes: [voteRow("2026-10-01", "BILLS-119hr77", "Nay", { userVote: { S: "Yea" }, score: { N: "3" } })],
     });
 
     const [vote] = body(await request({ bioguideId: "A000001" })).votes;
 
     expect(Object.keys(vote).sort()).toEqual(
-      ["billGuid", "billNumber", "billType", "chamber", "congress", "position", "title", "votedAt"].sort(),
+      ["billGuid", "billNumber", "billType", "chamber", "congress", "position", "title", "votedOn"].sort(),
     );
   });
 
   it("leaves out a row with a position Congress does not record", async () => {
-    fakeTables({ votes: [voteRow("2026-10-01T00:00:00.000Z", "BILLS-119hr77", "Missed")] });
+    fakeTables({ votes: [voteRow("2026-10-01", "BILLS-119hr77", "Missed")] });
 
     expect(body(await request({ bioguideId: "A000001" })).votes).toEqual([]);
   });

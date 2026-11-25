@@ -1506,7 +1506,7 @@ exports[`data store grants (CQ-15) every role keeps the same normalized permissi
     "arn:aws:dynamodb:\${Region}:\${Account}:table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL","BILL_GUID"]}}": [
       "dynamodb:BatchGetItem",
     ],
-    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMemberVoteRecord": [
+    "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMemberVoteRecord/index/VotedOnIndex": [
       "dynamodb:Query",
     ],
     "arn:aws:dynamodb:\${Region}:\${Account}:table/CongressMembersStats": [
