@@ -332,6 +332,22 @@ export const addedFieldsPatch = (
   return { next, changedFields };
 };
 
+const isAddedField = (field: VisibleField): field is (typeof ADDED_FIELDS)[number] =>
+  (ADDED_FIELDS as readonly VisibleField[]).includes(field);
+
+/**
+ * True for a patch that only adds ADDED_FIELDS fields the processed bill lacks: the bill is behind on nothing else
+ * (reason added_fields, or derived_fields_changed when that field is all that differs). Until backfill:sponsor-details
+ * has run, nearly every bill plans one, so reconcile:processed-bills reports them apart and sends them only when asked.
+ */
+export const isAddedFieldsOnlyPatch = (
+  processed: ProcessedBillDocument | null | undefined,
+  plan: Pick<ReconcilePlan, "kind" | "changedFields">,
+): boolean =>
+  plan.kind === "patch" &&
+  plan.changedFields.length > 0 &&
+  plan.changedFields.every((field) => isAddedField(field) && processed?.[field] === undefined);
+
 /** applyDerivedFields and the fields it changed, or null when nothing clients can see changes. */
 export const derivedPatch = (
   processed: ProcessedBillDocument,

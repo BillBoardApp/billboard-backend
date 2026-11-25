@@ -166,6 +166,7 @@ describe("parseGuidsFile and parseArgs", () => {
       concurrency: 8,
       rate: 10,
       plans: null,
+      addedFields: false,
     });
     expect(
       parseArgs(["--guid", "BILLS-119hr1400ih", "--guid", "BILLS-119hr1400", "--guids-file", "list.txt", "--apply"]),
@@ -186,6 +187,7 @@ describe("parseGuidsFile and parseArgs", () => {
     expect(parseArgs(["--plans", "patch,summarize_missing"]).plans).toEqual(["patch", "summarize_missing"]);
     expect(() => parseArgs(["--plans", "patch,unchanged"])).toThrow("--plans takes patch, summarize_missing");
     expect(() => parseArgs(["--plans"])).toThrow("--plans needs a value");
+    expect(parseArgs(["--added-fields", "--apply"])).toMatchObject({ addedFields: true, apply: true });
   });
 
   it("reads its configuration from the environment", () => {
@@ -219,6 +221,7 @@ describe("runReconcile", () => {
     expect(lines).toContain(
       "patched fields: actions=1 committees=0 sponsors=0 sponsorDetails=0 cosponsors=0 billStatus=1 officialVotes=0",
     );
+    expect(lines).toContain("patches that only add a field bills gained since they were written (sponsorDetails): 0");
     expect(lines).toContain("patches that add a passed or failed action or change billStatus (1)");
     expect(lines).toContain('  BILLS-119hr2 passed 2026-02-10 "Passed House"; billStatus New -> Passed');
     expect(lines).toContain(`Dry run: would send 3 guids (patch and summarize plans) to ${QUEUE_URL}.`);
@@ -306,6 +309,69 @@ describe("runReconcile", () => {
 
     expect(lines).toContain("summarize_text_changed (1): BILLS-119hr9");
     expect(lines).toContain('  BILLS-119hr9 passed 2026-02-10 "Passed House"; billStatus New -> Passed');
+  });
+
+  describe("patches that only add a field bills gained since they were written (REL-46 5.3)", () => {
+    const SPONSOR = { bioguideId: "A000001", firstName: "Ada", lastName: "Able", party: "D", state: "OH", district: 9 };
+    const DETAILS = [{ bioguideId: "A000001", name: "Ada Able", party: "D", state: "OH", district: "09" }];
+    const withSponsor = (doc: ReturnType<typeof raw>) => ({
+      ...doc,
+      content: { ...doc.content, bill: { bill: { sponsors: [SPONSOR] } } },
+    });
+    /** A processed bill without sponsorDetails, built from the raw version given (or from an older one). */
+    const store = (guid: string, options: { builtFromLatest: boolean; processed?: Record<string, unknown> }) => {
+      const doc = withSponsor(raw(guid));
+      const versionId = mockS3.put(`raw-bills/${guid}.json`, doc);
+      mockS3.put(`processed-bills/${guid}.json`, processed(guid, { sponsors: ["A000001"], ...options.processed }), {
+        [SOURCE_METADATA_KEYS.textHash]: sourceTextHash(doc as RawBill),
+        [SOURCE_METADATA_KEYS.rawVersion]: options.builtFromLatest ? versionId : "older",
+        [SOURCE_METADATA_KEYS.fetchedAt]: doc.metadata.fetchedAt,
+      });
+    };
+    const seedAdded = () => {
+      seed();
+      store("BILLS-119hr21", { builtFromLatest: true }); // same raw version: reason added_fields
+      store("BILLS-119hr22", { builtFromLatest: false }); // a newer raw version that differs only in sponsorDetails
+      // Already has sponsorDetails, which the raw bill changed: a real patch, sent as before.
+      store("BILLS-119hr23", {
+        builtFromLatest: false,
+        processed: { sponsorDetails: [{ ...DETAILS[0], party: "R" }] },
+      });
+    };
+
+    it("reports them on their own line and leaves them out of --apply", async () => {
+      seedAdded();
+      const dry = await run({});
+
+      expect(dry.lines).toContain(
+        "patches that only add a field bills gained since they were written (sponsorDetails): 2",
+      );
+      expect(dry.result.scan.planned.filter((bill) => bill.addedFieldsOnly).map((bill) => bill.guid)).toEqual([
+        "BILLS-119hr21",
+        "BILLS-119hr22",
+      ]);
+      expect(dry.lines).toContain(
+        "Dry run: would send 4 guids (patch and summarize plans; 2 patches that only add a field left out, see " +
+          `--added-fields) to ${QUEUE_URL}.`,
+      );
+
+      const applied = await run({ apply: true, plans: ["patch"] });
+      expect(applied.sqs.sent.map((message) => message.body.guid)).toEqual(["BILLS-119hr2", "BILLS-119hr23"]);
+      expect(applied.lines.at(-1)).toBe("Reconcile complete sent=2 failed=0 unreadable=0");
+    });
+
+    it("sends them with --added-fields", async () => {
+      seedAdded();
+      const { sqs, lines } = await run({ apply: true, plans: ["patch"], addedFields: true });
+
+      expect(sqs.sent.map((message) => message.body.guid)).toEqual([
+        "BILLS-119hr2",
+        "BILLS-119hr21",
+        "BILLS-119hr22",
+        "BILLS-119hr23",
+      ]);
+      expect(lines).toContain(`Sending 4 guids (patch plans only) to ${QUEUE_URL}.`);
+    });
   });
 
   it("plans only the listed bills, from --guid and --guids-file, up to --limit, and reports unreadable ones", async () => {
