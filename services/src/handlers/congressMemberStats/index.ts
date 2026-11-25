@@ -1,4 +1,5 @@
 import {
+  BatchGetItemCommand,
   DynamoDBClient,
   QueryCommand,
   ScanCommand,
@@ -29,6 +30,7 @@ import {
   type VoteRecordPosition,
 } from "../../shared/memberVoteRecord";
 import { emitEmbeddedMetric } from "../../shared/metrics";
+import { sleep } from "../../shared/retry";
 import { extractS3ObjectRefsFromSQSEvent } from "../../shared/s3EventExtract";
 import { processSqsRecords } from "../../shared/sqsBatch";
 
@@ -749,9 +751,11 @@ const deleteLegislativeProfileRows = async (bioguideIds: string[], billGuid: str
 // Every position is kept as Congress records it (Yea, Nay, Present, Not Voting; an Unknown row is left out), never
 // judged, and dated by the roll call's own day (votedOn); a chamber vote without one is left out. The row's key is the
 // member and "<billGuid>#<chamber>" (shared/memberVoteRecord.ts), so a newer roll call overwrites it; only a row the
-// bill no longer gives at all (a member or a chamber vote gone) is deleted, found through the BillGuidIndex. A row whose
-// stored values are the same is not written again. The vote and legislative profiles above, and what they score, do
-// not change.
+// bill no longer gives at all (a member or a chamber vote gone) is deleted, found through the BillGuidIndex. A row is
+// not written again when the BillGuidIndex shows the same values and a strongly consistent read of the table confirms
+// them: the index is eventually consistent, so after a message that changed or deleted a row it can still show the
+// row's earlier values, and a newer version that puts the row back to those values must still write it. The vote and
+// legislative profiles above, and what they score, do not change.
 
 type VoteRecordRow = {
   bioguideId: string;
@@ -763,7 +767,7 @@ type VoteRecordRow = {
   actionCode?: string;
 };
 
-/** A stored row's values, as the BillGuidIndex projects them. */
+/** A stored row's values: the ones the BillGuidIndex projects. */
 type StoredVoteRecordRow = Pick<VoteRecordRow, "position" | "votedOn" | "actionText" | "actionCode">;
 
 /**
@@ -775,8 +779,27 @@ type StoredVoteRecordRow = Pick<VoteRecordRow, "position" | "votedOn" | "actionT
 type VoteRecordPassState = Map<string, StoredVoteRecordRow | null>;
 
 const VOTE_RECORD_ACTION_TEXT_MAX = 500;
+/** BatchGetItem's limit of keys per request. */
+const VOTE_RECORD_BATCH_GET_SIZE = 100;
+const VOTE_RECORD_BATCH_GET_MAX_ATTEMPTS = 5;
+const VOTE_RECORD_BATCH_GET_BACKOFF_MS = 200;
+const VOTE_RECORD_ROW_NAMES = {
+  "#memberId": VOTE_RECORD_PRIMARY_KEY,
+  "#billKey": VOTE_RECORD_SORT_KEY,
+  "#position": "position",
+};
+const VOTE_RECORD_ROW_PROJECTION = "#memberId, #billKey, #position, votedOn, actionText, actionCode";
 
 const voteRecordRowId = (bioguideId: string, billKey: string): string => `${bioguideId}|${billKey}`;
+
+/** A row's table key, from its "bioguideId|billKey". */
+const toKey = (id: string): Record<string, AttributeValue> => {
+  const separator = id.indexOf("|");
+  return {
+    [VOTE_RECORD_PRIMARY_KEY]: { S: id.slice(0, separator) },
+    [VOTE_RECORD_SORT_KEY]: { S: id.slice(separator + 1) },
+  };
+};
 
 /** The record rows of a processed bill's official votes, keyed by the key's plain guid. */
 const extractVoteRecordRows = async (payload: unknown, billGuid: string): Promise<VoteRecordRow[]> => {
@@ -829,7 +852,26 @@ const extractVoteRecordRows = async (payload: unknown, billGuid: string): Promis
   return rows;
 };
 
-/** The bill's record rows now stored, by "bioguideId|billKey", with the values the BillGuidIndex projects. */
+/** A stored row's "bioguideId|billKey" and values, or null for an item without its keys. */
+const storedVoteRecordRowOf = (item: Record<string, AttributeValue>): [string, StoredVoteRecordRow] | null => {
+  const bioguideId = item?.[VOTE_RECORD_PRIMARY_KEY]?.S;
+  const billKey = item?.[VOTE_RECORD_SORT_KEY]?.S;
+  if (!bioguideId || !billKey) return null;
+  return [
+    voteRecordRowId(bioguideId, billKey),
+    {
+      position: (item.position?.S ?? "") as VoteRecordPosition,
+      votedOn: item.votedOn?.S ?? "",
+      ...(item.actionText?.S ? { actionText: item.actionText.S } : {}),
+      ...(item.actionCode?.S ? { actionCode: item.actionCode.S } : {}),
+    },
+  ];
+};
+
+/**
+ * The bill's record rows the BillGuidIndex shows, by "bioguideId|billKey", with their values. The index is eventually
+ * consistent: it can miss a row written moments earlier, still show one just deleted, or show a row's earlier values.
+ */
 const queryStoredVoteRecordRows = async (billGuid: string): Promise<Map<string, StoredVoteRecordRow>> => {
   const stored = new Map<string, StoredVoteRecordRow>();
   if (!VOTE_RECORD_TABLE_NAME) return stored;
@@ -840,30 +882,53 @@ const queryStoredVoteRecordRows = async (billGuid: string): Promise<Map<string, 
         TableName: VOTE_RECORD_TABLE_NAME,
         IndexName: VOTE_RECORD_BILL_GUID_INDEX_NAME,
         KeyConditionExpression: "#billGuid = :billGuid",
-        ExpressionAttributeNames: {
-          "#billGuid": VOTE_RECORD_BILL_GUID_INDEX_PK,
-          "#memberId": VOTE_RECORD_PRIMARY_KEY,
-          "#billKey": VOTE_RECORD_SORT_KEY,
-          "#position": "position",
-        },
+        ExpressionAttributeNames: { "#billGuid": VOTE_RECORD_BILL_GUID_INDEX_PK, ...VOTE_RECORD_ROW_NAMES },
         ExpressionAttributeValues: { ":billGuid": { S: billGuid } },
-        ProjectionExpression: "#memberId, #billKey, #position, votedOn, actionText, actionCode",
+        ProjectionExpression: VOTE_RECORD_ROW_PROJECTION,
         ExclusiveStartKey: startKey,
       }),
     );
     for (const item of response.Items ?? []) {
-      const bioguideId = item?.[VOTE_RECORD_PRIMARY_KEY]?.S;
-      const billKey = item?.[VOTE_RECORD_SORT_KEY]?.S;
-      if (!bioguideId || !billKey) continue;
-      stored.set(voteRecordRowId(bioguideId, billKey), {
-        position: (item.position?.S ?? "") as VoteRecordPosition,
-        votedOn: item.votedOn?.S ?? "",
-        ...(item.actionText?.S ? { actionText: item.actionText.S } : {}),
-        ...(item.actionCode?.S ? { actionCode: item.actionCode.S } : {}),
-      });
+      const entry = storedVoteRecordRowOf(item);
+      if (entry) stored.set(...entry);
     }
     startKey = response.LastEvaluatedKey;
   } while (startKey);
+  return stored;
+};
+
+/**
+ * These rows' values in the table, by "bioguideId|billKey", read with strongly consistent reads, so every write that
+ * finished before is seen; a row not stored is left out. A key still unprocessed after the retries is left out too, so
+ * its row is written.
+ */
+const readVoteRecordRowsConsistently = async (ids: string[]): Promise<Map<string, StoredVoteRecordRow>> => {
+  const stored = new Map<string, StoredVoteRecordRow>();
+  if (!VOTE_RECORD_TABLE_NAME) return stored;
+  for (let start = 0; start < ids.length; start += VOTE_RECORD_BATCH_GET_SIZE) {
+    let keys = ids.slice(start, start + VOTE_RECORD_BATCH_GET_SIZE).map(toKey);
+    for (let attempt = 1; keys.length > 0; attempt += 1) {
+      const response = await ddb.send(
+        new BatchGetItemCommand({
+          RequestItems: {
+            [VOTE_RECORD_TABLE_NAME]: {
+              Keys: keys,
+              ConsistentRead: true,
+              ProjectionExpression: VOTE_RECORD_ROW_PROJECTION,
+              ExpressionAttributeNames: VOTE_RECORD_ROW_NAMES,
+            },
+          },
+        }),
+      );
+      for (const item of response.Responses?.[VOTE_RECORD_TABLE_NAME] ?? []) {
+        const entry = storedVoteRecordRowOf(item);
+        if (entry) stored.set(...entry);
+      }
+      keys = response.UnprocessedKeys?.[VOTE_RECORD_TABLE_NAME]?.Keys ?? [];
+      if (keys.length === 0 || attempt >= VOTE_RECORD_BATCH_GET_MAX_ATTEMPTS) break;
+      await sleep(VOTE_RECORD_BATCH_GET_BACKOFF_MS * attempt);
+    }
+  }
   return stored;
 };
 
@@ -874,17 +939,11 @@ const sameStoredValues = (row: VoteRecordRow, stored: StoredVoteRecordRow | unde
   (stored.actionText ?? "") === (row.actionText ?? "") &&
   (stored.actionCode ?? "") === (row.actionCode ?? "");
 
-const toKey = (id: string): Record<string, AttributeValue> => {
-  const separator = id.indexOf("|");
-  return {
-    [VOTE_RECORD_PRIMARY_KEY]: { S: id.slice(0, separator) },
-    [VOTE_RECORD_SORT_KEY]: { S: id.slice(separator + 1) },
-  };
-};
-
 /**
  * Puts the bill's new and changed record rows and deletes the ones it no longer gives; the number of rows written or
- * deleted. `passes` carries what an earlier pass of the same message left (VoteRecordPassState) and is updated.
+ * deleted. `passes` carries what an earlier pass of the same message left (VoteRecordPassState) and is updated. A row
+ * is left unwritten only when the index (with `passes` over it) and a strongly consistent read of the table both have
+ * its values; only those rows are read.
  */
 const writeVoteRecord = async (
   key: string,
@@ -899,10 +958,15 @@ const writeVoteRecord = async (
     if (row) stored.set(id, row);
     else stored.delete(id);
   }
-  const incoming = new Map(rows.map((row) => [voteRecordRowId(row.bioguideId, row.billKey), row]));
-  const changed = rows.filter(
-    (row) => !sameStoredValues(row, stored.get(voteRecordRowId(row.bioguideId, row.billKey))),
-  );
+  const idOf = (row: VoteRecordRow) => voteRecordRowId(row.bioguideId, row.billKey);
+  const incoming = new Map(rows.map((row) => [idOf(row), row]));
+  // The index can still show the values a row had before a message handled moments earlier changed or deleted it: the
+  // table, read strongly consistently, decides which of the rows the index shows unchanged really are.
+  const unchangedInIndex = rows.filter((row) => sameStoredValues(row, stored.get(idOf(row))));
+  const confirmed = await readVoteRecordRowsConsistently(unchangedInIndex.map(idOf));
+  const isUnchanged = (row: VoteRecordRow) => sameStoredValues(row, confirmed.get(idOf(row)));
+  const changed = rows.filter((row) => !isUnchanged(row));
+  const notConfirmed = unchangedInIndex.filter((row) => !isUnchanged(row)).length;
   const stale = [...stored.keys()].filter((id) => !incoming.has(id));
 
   const timestamp = new Date().toISOString();
@@ -930,6 +994,13 @@ const writeVoteRecord = async (
     passes.set(id, { position, votedOn, ...(actionText ? { actionText } : {}), ...(actionCode ? { actionCode } : {}) });
   }
   for (const id of stale) passes.set(id, null);
+  if (notConfirmed > 0) {
+    console.log("Wrote member vote record rows the bill guid index showed unchanged but the table did not", {
+      key,
+      billGuid,
+      rows: notConfirmed,
+    });
+  }
   if (stale.length > 0) {
     console.log("Deleted member vote record rows the processed bill no longer gives", {
       key,
