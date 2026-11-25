@@ -749,8 +749,9 @@ const deleteLegislativeProfileRows = async (bioguideIds: string[], billGuid: str
 // Every position is kept as Congress records it (Yea, Nay, Present, Not Voting; an Unknown row is left out), never
 // judged, and dated by the roll call's own day (votedOn); a chamber vote without one is left out. The row's key is the
 // member and "<billGuid>#<chamber>" (shared/memberVoteRecord.ts), so a newer roll call overwrites it; only a row the
-// bill no longer gives at all (a member or a chamber vote gone) is deleted, found through the BillGuidIndex. The vote
-// and legislative profiles above, and what they score, do not change.
+// bill no longer gives at all (a member or a chamber vote gone) is deleted, found through the BillGuidIndex. A row whose
+// stored values are the same is not written again. The vote and legislative profiles above, and what they score, do
+// not change.
 
 type VoteRecordRow = {
   bioguideId: string;
@@ -762,12 +763,16 @@ type VoteRecordRow = {
   actionCode?: string;
 };
 
+/** A stored row's values, as the BillGuidIndex projects them. */
+type StoredVoteRecordRow = Pick<VoteRecordRow, "position" | "votedOn" | "actionText" | "actionCode">;
+
 /**
- * What the passes of one message left in the table for the bill, by "bioguideId|billKey": true for a row a pass wrote,
- * false for a row it deleted. The BillGuidIndex is eventually consistent, so the extra pass in processProcessedBillKey
- * reads this over the index: a row the first pass wrote moments earlier is deleted if the newer version drops it.
+ * What the passes of one message left in the table for the bill, by "bioguideId|billKey": the row a pass wrote or kept,
+ * or null for a row it deleted. The BillGuidIndex is eventually consistent, so the extra pass in processProcessedBillKey
+ * reads this over the index: a row the first pass wrote moments earlier is deleted if the newer version drops it, and a
+ * row it deleted is not mistaken for one still stored.
  */
-type VoteRecordPassState = Map<string, boolean>;
+type VoteRecordPassState = Map<string, StoredVoteRecordRow | null>;
 
 const VOTE_RECORD_ACTION_TEXT_MAX = 500;
 
@@ -824,9 +829,9 @@ const extractVoteRecordRows = async (payload: unknown, billGuid: string): Promis
   return rows;
 };
 
-/** The bill's record rows now stored, as "bioguideId|billKey". */
-const queryStoredVoteRecordRows = async (billGuid: string): Promise<Set<string>> => {
-  const stored = new Set<string>();
+/** The bill's record rows now stored, by "bioguideId|billKey", with the values the BillGuidIndex projects. */
+const queryStoredVoteRecordRows = async (billGuid: string): Promise<Map<string, StoredVoteRecordRow>> => {
+  const stored = new Map<string, StoredVoteRecordRow>();
   if (!VOTE_RECORD_TABLE_NAME) return stored;
   let startKey: Record<string, AttributeValue> | undefined;
   do {
@@ -839,9 +844,10 @@ const queryStoredVoteRecordRows = async (billGuid: string): Promise<Set<string>>
           "#billGuid": VOTE_RECORD_BILL_GUID_INDEX_PK,
           "#memberId": VOTE_RECORD_PRIMARY_KEY,
           "#billKey": VOTE_RECORD_SORT_KEY,
+          "#position": "position",
         },
         ExpressionAttributeValues: { ":billGuid": { S: billGuid } },
-        ProjectionExpression: "#memberId, #billKey",
+        ProjectionExpression: "#memberId, #billKey, #position, votedOn, actionText, actionCode",
         ExclusiveStartKey: startKey,
       }),
     );
@@ -849,12 +855,24 @@ const queryStoredVoteRecordRows = async (billGuid: string): Promise<Set<string>>
       const bioguideId = item?.[VOTE_RECORD_PRIMARY_KEY]?.S;
       const billKey = item?.[VOTE_RECORD_SORT_KEY]?.S;
       if (!bioguideId || !billKey) continue;
-      stored.add(voteRecordRowId(bioguideId, billKey));
+      stored.set(voteRecordRowId(bioguideId, billKey), {
+        position: (item.position?.S ?? "") as VoteRecordPosition,
+        votedOn: item.votedOn?.S ?? "",
+        ...(item.actionText?.S ? { actionText: item.actionText.S } : {}),
+        ...(item.actionCode?.S ? { actionCode: item.actionCode.S } : {}),
+      });
     }
     startKey = response.LastEvaluatedKey;
   } while (startKey);
   return stored;
 };
+
+const sameStoredValues = (row: VoteRecordRow, stored: StoredVoteRecordRow | undefined): boolean =>
+  stored !== undefined &&
+  stored.position === row.position &&
+  stored.votedOn === row.votedOn &&
+  (stored.actionText ?? "") === (row.actionText ?? "") &&
+  (stored.actionCode ?? "") === (row.actionCode ?? "");
 
 const toKey = (id: string): Record<string, AttributeValue> => {
   const separator = id.indexOf("|");
@@ -865,8 +883,8 @@ const toKey = (id: string): Record<string, AttributeValue> => {
 };
 
 /**
- * Puts the bill's record rows and deletes the ones it no longer gives; the number of rows written or deleted. `passes`
- * carries what an earlier pass of the same message left (VoteRecordPassState) and is updated.
+ * Puts the bill's new and changed record rows and deletes the ones it no longer gives; the number of rows written or
+ * deleted. `passes` carries what an earlier pass of the same message left (VoteRecordPassState) and is updated.
  */
 const writeVoteRecord = async (
   key: string,
@@ -877,15 +895,18 @@ const writeVoteRecord = async (
   if (!VOTE_RECORD_TABLE_NAME) return 0;
   const rows = await extractVoteRecordRows(current, billGuid);
   const stored = await queryStoredVoteRecordRows(billGuid);
-  for (const [id, present] of passes) {
-    if (present) stored.add(id);
+  for (const [id, row] of passes) {
+    if (row) stored.set(id, row);
     else stored.delete(id);
   }
-  const incoming = new Set(rows.map((row) => voteRecordRowId(row.bioguideId, row.billKey)));
-  const stale = [...stored].filter((id) => !incoming.has(id));
+  const incoming = new Map(rows.map((row) => [voteRecordRowId(row.bioguideId, row.billKey), row]));
+  const changed = rows.filter(
+    (row) => !sameStoredValues(row, stored.get(voteRecordRowId(row.bioguideId, row.billKey))),
+  );
+  const stale = [...stored.keys()].filter((id) => !incoming.has(id));
 
   const timestamp = new Date().toISOString();
-  const puts: WriteRequest[] = rows.map((row) => ({
+  const puts: WriteRequest[] = changed.map((row) => ({
     PutRequest: {
       Item: {
         [VOTE_RECORD_PRIMARY_KEY]: { S: row.bioguideId },
@@ -904,8 +925,11 @@ const writeVoteRecord = async (
   const deletes: WriteRequest[] = stale.map((id) => ({ DeleteRequest: { Key: toKey(id) } }));
   await batchWriteAll({ db: ddb, tableName: VOTE_RECORD_TABLE_NAME, requests: puts });
   await batchWriteAll({ db: ddb, tableName: VOTE_RECORD_TABLE_NAME, requests: deletes });
-  for (const id of incoming) passes.set(id, true);
-  for (const id of stale) passes.set(id, false);
+  for (const [id, row] of incoming) {
+    const { position, votedOn, actionText, actionCode } = row;
+    passes.set(id, { position, votedOn, ...(actionText ? { actionText } : {}), ...(actionCode ? { actionCode } : {}) });
+  }
+  for (const id of stale) passes.set(id, null);
   if (stale.length > 0) {
     console.log("Deleted member vote record rows the processed bill no longer gives", {
       key,
