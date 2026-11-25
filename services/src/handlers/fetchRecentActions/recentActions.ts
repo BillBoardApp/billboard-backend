@@ -23,7 +23,8 @@ import { normalizeInlineText, pushActionPhrase } from "../../shared/pushText";
  * - A row is one bill: a companion group (APPF-23) is one bill, shown by the member the Bills card's status shows
  *   (shared/companionStatusLead.ts: a law, then a veto, then a passage, before a later move), so the row's number,
  *   title, billStatus and vetoed are that member's and match the card. Its vote is the primary's when the caller voted
- *   on both members, and it is watched when either member is.
+ *   on both members, and it is watched when either member is. Its id is keyed on the group's primary (the guid the
+ *   app keys the group's card on), not on the member shown, so the id changes only with a newer action.
  * - Its action is the bill's latest one dated in the window, from either member of a group, worded as a push words it
  *   (pushActionPhrase): the bill's own outcome ("Passed the House", "Became law"), or Congress's text without record
  *   references. A routine follow-up ("Motion to reconsider laid on the table", billActions.ts) counts only when the
@@ -207,8 +208,11 @@ export const voteTimingFor = (
   return daysBefore >= 1 ? { chamber: latest.chamber, rollCallDate: latest.date, daysBefore } : undefined;
 };
 
-/** The row's id: the guid, the action's day and a hash of its wording (case aside). */
-export const recentActionId = (guid: string, action: RecentActionV1): string =>
+/**
+ * The row's id: the bill's key (a companion group's primary guid, a single bill's own guid), the action's day and a
+ * hash of its wording (case aside).
+ */
+export const recentActionId = (guid: string, action: Pick<RecentActionV1, "date" | "text">): string =>
   `${guid}#${action.date}#${createHash("sha256").update(action.text.toLowerCase()).digest("hex").slice(0, 16)}`;
 
 const BILL_STATUSES: ReadonlySet<string> = new Set(BILL_STATUS_VALUES_V1);
@@ -254,6 +258,9 @@ const rowForGroup = (
   }));
   const parsed = lead ? parseBillGuid(lead.guid) : null;
   if (!lead || !parsed) return null;
+  // The id's guid is the group's primary, as the app keys the group: the member shown can switch with no new action
+  // (an equal-rank pair goes to the member whose manifest row moved later, and a text version moves a row).
+  const groupKey = parseBillGuid(members[0])?.plainGuid ?? members[0];
 
   const officialNumber =
     officialBillNumber({ billType: parsed.billType, billNumber: parsed.billNumber, guid: lead.guid }) ?? lead.guid;
@@ -269,7 +276,7 @@ const rowForGroup = (
     : undefined;
 
   return {
-    id: recentActionId(parsed.plainGuid, action),
+    id: recentActionId(groupKey, action),
     billGuid: parsed.plainGuid,
     congress: parsed.congress,
     billType: parsed.billType,

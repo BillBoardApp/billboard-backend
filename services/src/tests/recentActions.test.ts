@@ -540,6 +540,37 @@ describe("buildRecentActionItems", () => {
       expect(item).toMatchObject({ billGuid: S50, title: "Senate headline", action: { date: "2026-11-19" } });
     });
 
+    it("keeps the row's id when only the other member's manifest row moves, keyed on the primary", () => {
+      const bills = new Map([
+        [HR77, bill(HR77, "House headline", [])],
+        [S50, bill(S50, "Senate headline", [hearing("2026-11-12")])],
+      ]);
+      const [before] = build({
+        groups: [[HR77, S50]],
+        bills,
+        movedAt: new Map([
+          [HR77, "2026-11-05T18:00:00.000Z"],
+          [S50, "2026-11-12T18:00:00.000Z"],
+        ]),
+        watched: new Set([HR77]),
+      });
+      // A text version of H.R. 77 moves its manifest row with no new action: it now stands for the pair.
+      const [after] = build({
+        groups: [[HR77, S50]],
+        bills,
+        movedAt: new Map([
+          [HR77, "2026-11-15T18:00:00.000Z"],
+          [S50, "2026-11-12T18:00:00.000Z"],
+        ]),
+        watched: new Set([HR77]),
+      });
+      expect(before.billGuid).toBe(S50);
+      expect(after.billGuid).toBe(HR77);
+      expect(after.action).toEqual(before.action);
+      expect(after.id).toBe(before.id);
+      expect(before.id).toBe(recentActionId(HR77, { date: "2026-11-12", text: "Committee on Finance. Hearings held" }));
+    });
+
     it("applies the routine follow-up rule across the group: one member's follow-up never hides the other's news", () => {
       const held = { actionDate: "2026-11-20", text: "Held at the desk.", type: "Floor" };
       const [item] = build({

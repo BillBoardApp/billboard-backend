@@ -693,8 +693,9 @@ export interface RecentActionVoteTimingV1 {
 
 export interface RecentActionItemV1 {
   /**
-   * The row's identity: the bill's plain guid, the action's day and its wording. A newer action gives a new id, so a
-   * row cleared on the device comes back with it. Opaque: do not parse it.
+   * The row's identity: the bill's key (a companion group's primary guid, as the app keys the group's card; a single
+   * bill's own plain guid), the action's day and its wording. Only a newer action gives a new id, so a row cleared on
+   * the device comes back with it; a change in which member of a group the row shows does not. Opaque: do not parse it.
    */
   id: string;
   /**
