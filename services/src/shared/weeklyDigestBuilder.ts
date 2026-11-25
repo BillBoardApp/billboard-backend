@@ -9,6 +9,7 @@ import type { BillContentTypePreference } from "./billContentTypes";
 import { billTypeMatchesContentPreferences } from "./billContentTypes";
 import { officialBillNumber } from "./billNumbers";
 import { isCommemorativeResolution } from "./commemorativeResolutions";
+import { companionStatusLead } from "./companionStatusLead";
 import { deterministicUuidFromString } from "./deterministicUuid";
 import {
   addEasternDays,
@@ -880,42 +881,13 @@ function companionGroupCandidate(representative: Candidate, members: Candidate[]
 }
 
 /**
- * A status's rank among a companion group's members, as app 1.3's companion card ranks them
- * (`CompanionGroupIndex.statusLead` in the iOS app): Finalized 5, Passed 3, Failed 2, Updated 1, New 0, and a vetoed
- * member that is not Finalized 4 (COMPANION_VETOED_RANK). Passed and Failed are not tied: a Passed/Failed pair shows as
- * the Passed bill, whichever moved later.
- */
-const COMPANION_STATUS_RANK: Record<BillStatusValue, number> = {
-  New: 0,
-  Updated: 1,
-  Failed: 2,
-  Passed: 3,
-  Finalized: 5,
-};
-
-/**
- * A vetoed member's rank (project decision 2026-11-19), above Passed and below Finalized: a vetoed bill whose override
- * failed is Failed, and ranked by its status it lost to a partner that had only passed its own chamber, so the group
- * hid the veto. App 1.2 ranks by the status alone, so in that rare case its card shows the partner while the brief
- * names the vetoed bill.
- */
-const COMPANION_VETOED_RANK = 4;
-
-/** A member's rank in its companion group, from its manifest row (the rank is above COMPANION_STATUS_RANK). */
-function companionRank(candidate: Candidate): number {
-  return candidate.status !== "Finalized" && candidate.manifest.vetoed === true
-    ? COMPANION_VETOED_RANK
-    : COMPANION_STATUS_RANK[candidate.status];
-}
-
-/**
  * APPF-23: one candidate per companion group. The member with the highest rank stands for the
- * group (its bill, status and billGuid), as the apps show one card for the pair with that status:
- * a law (REL-44) whose twin moved later still reads "Became law", a vetoed bill stands over a twin
- * that only passed (companionRank), and a Passed bill stands over its Failed twin. Among equal
- * ranks, the member that moved most recently in the window; a tie goes to the primary. The group
- * takes the best priority bucket of its members and the union of their matches; watched and voted
- * already cover the whole group. Ungrouped candidates are unchanged.
+ * group (its bill, status and billGuid), as the apps show one card for the pair with that status
+ * (shared/companionStatusLead.ts): a law (REL-44) whose twin moved later still reads "Became law",
+ * a vetoed bill stands over a twin that only passed, and a Passed bill stands over its Failed twin.
+ * Among equal ranks, the member that moved most recently in the window; a tie goes to the primary.
+ * The group takes the best priority bucket of its members and the union of their matches; watched
+ * and voted already cover the whole group. Ungrouped candidates are unchanged.
  */
 function collapseCompanionCandidates(
   candidates: Candidate[],
@@ -944,12 +916,13 @@ function collapseCompanionCandidates(
   return slots.flatMap((members) => {
     if (members.length === 1) return members;
 
-    const representative = members.reduce((best, member) => {
-      const rank = companionRank(member) - companionRank(best);
-      if (rank !== 0) return rank > 0 ? member : best;
-      const delta = member.updatedAt.getTime() - best.updatedAt.getTime();
-      return delta > 0 || (delta === 0 && isPrimary(member) && !isPrimary(best)) ? member : best;
-    });
+    const representative =
+      companionStatusLead(members, (member) => ({
+        status: member.status,
+        vetoed: member.manifest.vetoed === true,
+        movedAtMs: member.updatedAt.getTime(),
+        isPrimary: isPrimary(member),
+      })) ?? members[0];
     const group = companionGroupCandidate(representative, members);
     return group ? [group] : [];
   });
