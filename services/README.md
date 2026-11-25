@@ -224,12 +224,14 @@ the reason "You voted on this" and never the vote itself. It is built from the v
 bill no section shows (one that passed, failed, became law or is new with no other match, a ceremonial resolution, a
 bill type the reader turned off) is listed too, and of the voted bills updated since the week began the 40 most recent
 are loaded. That includes a row rewritten after the week, before the build (weekend ingestion of a Friday or Saturday
-action): the bill's actions decide whether it moved in the week. App 1.3 shows it first; the sections are built as
-before, so 1.1 and 1.2 (which ignore the key) lose nothing, and 1.3 shows a bill that is also in a section once, under
-Your bills. Such a bill has the same `billGuid` in both lists, a companion pair included (the Your bills item takes the
-section item's guid), and the Sunday push names a bill once by `billGuid` or title. A brief can hold `yourBills` alone,
-which only 1.3 and later are served. Snapshots expire
-21 days after publication; only the current week's is read.
+action): the bill's actions decide whether it moved in the week. A companion pair is listed once, by a bill of the pair
+that moved in the week. App 1.3 shows it first; the sections are built as before, so 1.1 and 1.2 (which ignore the key)
+lose nothing, and the headline still counts section items. 1.3 shows a bill that is also in a section once, under Your
+bills, matching by companion group (the manifest's `companionGroups`), not by `billGuid` alone (project decision
+2026-11-25). Such a bill also has the same `billGuid` in both lists, a companion pair included (the Your bills item
+takes the section item's guid), so the Sunday push, which lists the reader's bills first, names it once by `billGuid`.
+A brief can hold `yourBills` alone, which only 1.3 and later are served. Snapshots expire 21 days after publication;
+only the current week's is read.
 
 **Companion bills (APPF-23).** Identical bills introduced in both chambers (H.R. 1285 and S. 570) are paired so the
 app shows them as one bill and each person's vote counts once. `fetchRawBill` stores related bills →

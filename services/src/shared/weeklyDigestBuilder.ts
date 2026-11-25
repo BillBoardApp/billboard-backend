@@ -45,14 +45,16 @@ import {
  *   and 1.2 decode section kinds as a strict enum but ignore unknown top-level keys; app 1.3 shows it first. Its items
  *   say "You voted on this" (1.3 words the reader's own vote from its own store); no vote choice is ever written. It is
  *   built apart from the sections, from the voted bills themselves, so a voted bill no section would show (one that
- *   passed, failed, became law or is new, with no watch, followed member, topic or life area) is listed too. The
- *   sections are built exactly as before, so 1.1 and 1.2, which never read the list, keep every item they showed: a
- *   bill listed here can also be in a section, and app 1.3 shows it once, here. It has the same billGuid in both lists,
- *   a companion group included: the item here takes the guid of the section's item, which can be the group's other
- *   bill. A voted bill's row rewritten after the week, before the build, still counts here, though no section takes
- *   it: its actions say whether it moved in the week. The field is left out in a week with no such bill. A brief can
- *   hold Your bills alone, with no section; fetchLatestWeeklyDigest serves that one only to app 1.3 and later, since
- *   1.1 and 1.2 would show it empty.
+ *   passed, failed, became law or is new, with no watch, followed member, topic or life area) is listed too. A
+ *   companion group is listed once, stood for by a member that moved in the week. The sections are built exactly as
+ *   before, so 1.1 and 1.2, which never read the list, keep every item they showed, and the headline still counts
+ *   section items: a bill listed here can also be in a section (project decision 2026-11-25). App 1.3 shows it once,
+ *   here, matching the two by companion group (the manifest's companionGroups), not by billGuid alone. It also has the
+ *   same billGuid in both lists, a companion group included: the item here takes the guid of the section's item, which
+ *   can be the group's other bill, so the push names it once. A voted bill's row rewritten after the week, before the
+ *   build, still counts here, though no section takes it: its actions say whether it moved in the week. The field is
+ *   left out in a week with no such bill. A brief can hold Your bills alone, with no section; fetchLatestWeeklyDigest
+ *   serves that one only to app 1.3 and later, since 1.1 and 1.2 would show it empty.
  * - A member is named only by the name the members table stores (REL-46 A4). One who is not there, such as a member
  *   who left Congress, gets no member item and no "Backed by" reason: the brief never shows a bioguide id as a name.
  *   Nor do they count toward a bill's rank, so a bill that only such a member backs is not in the brief unless
@@ -71,8 +73,9 @@ const HYDRATED_CANDIDATES = 12;
 export const YOUR_BILLS_MAX = 20;
 /**
  * The most voted bills whose processed bills are loaded for Your bills, the most recently updated first: only a loaded
- * bill shows whether its latest action is dated in the week. Twice YOUR_BILLS_MAX, so a busy voter's list is still
- * full; each bill loads once per run, shared by every user.
+ * bill shows whether its latest action is dated in the week. Each bill of a companion group counts on its own, since
+ * the group is made one item only after loading. Twice YOUR_BILLS_MAX, so a busy voter's list is still full; each bill
+ * loads once per run, shared by every user.
  */
 export const YOUR_BILLS_HYDRATED = 2 * YOUR_BILLS_MAX;
 /** A yourBills item's reason; app 1.3 says the reader's own vote instead ("You voted Yea"). */
@@ -1008,20 +1011,33 @@ function votedOnly(facts: CandidateFacts): Candidate {
 }
 
 /**
- * Your bills this week (UX-41 concept 4): of `voted` (built apart from the sections), the bills whose latest action is
- * dated in the week, newest action first, at most YOUR_BILLS_MAX, each saying "You voted on this". A bill is loaded as
- * it is, with no ceremonial verdict: the reader voted on it, so nothing about it leaves it out.
+ * Your bills this week (UX-41 concept 4): of `voted` (one candidate per voted bill, built apart from the sections), the
+ * bills whose latest action is dated in the week, newest action first, at most YOUR_BILLS_MAX, each saying "You voted
+ * on this". A companion group is one item, made only from its members that moved in the week, so the bill that stands
+ * for it (ranked as collapseCompanionCandidates ranks a group's members) is always one that moved. Made from all its
+ * members, the group could be stood for by a twin with no action in the week, such as a Senate bill that passed in
+ * February over the House bill that passed this week, and was then left out. A bill is loaded as it is, with no
+ * ceremonial verdict: the reader voted on it, so nothing about it leaves it out.
  */
-async function buildYourBills(voted: Candidate[], input: WeeklyDigestBuildInput): Promise<WeeklyDigestItem[]> {
-  const loaded = await Promise.all(
-    voted.map(async (candidate): Promise<RankedCandidate> => {
+async function buildYourBills(
+  voted: Candidate[],
+  input: WeeklyDigestBuildInput,
+  companions: ReadonlyMap<string, CompanionGroupV1>,
+): Promise<WeeklyDigestItem[]> {
+  const movedByGuid = new Map<string, { bill: ProcessedBillLike; action: WeekAction }>();
+  await Promise.all(
+    voted.map(async (candidate) => {
       const bill = (await input.loadProcessedBill(candidate.manifest)) ?? createPlaceholderBill(candidate.manifest);
-      return { ...candidate, bill };
+      const action = latestActionInWeek(bill, input.window);
+      if (action) movedByGuid.set(candidate.manifest.guid, { bill, action });
     }),
   );
-  return loaded
-    .map((candidate) => ({ candidate, action: latestActionInWeek(candidate.bill, input.window) }))
-    .filter((entry): entry is { candidate: RankedCandidate; action: WeekAction } => entry.action !== undefined)
+  const moved = voted.filter((candidate) => movedByGuid.has(candidate.manifest.guid));
+  return collapseCompanionCandidates(moved, companions)
+    .map((candidate) => {
+      const { bill, action } = movedByGuid.get(candidate.manifest.guid)!;
+      return { candidate: { ...candidate, bill }, action };
+    })
     .sort(
       (left, right) =>
         right.action.day.localeCompare(left.action.day) || compareCandidates(left.candidate, right.candidate),
@@ -1107,18 +1123,17 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
   // UX-41 concept 4: Your bills this week is built apart from the sections, from every bill the reader voted on that
   // was updated since the week began, whatever the ranking makes of it: a voted bill that passed, failed, became law or
   // is new has no bucket of its own unless it is watched or matches a member, topic or life area. Nor does the
-  // content-type choice or a ceremonial verdict leave it out: the reader voted on it. Companion groups are one bill, as
-  // in the sections; the most recently updated are loaded first (YOUR_BILLS_HYDRATED). Unlike a section candidate, a
-  // row rewritten after the week ended, between Sunday 00:00 and the build (weekend ingestion of a Friday or Saturday
-  // action), still counts: the loaded bill's actions decide whether it moved in the week (latestActionInWeek). Left out
-  // here, that bill would never be listed, since next week its row is in the window but its action is not.
-  const votedCandidates = collapseCompanionCandidates(
-    input.manifestItems
-      .map((item) => (votedBillKeys.has(billKey(item.guid)) ? factsOf(item) : null))
-      .filter((facts): facts is CandidateFacts => facts !== null)
-      .map((facts) => classify(facts) ?? votedOnly(facts)),
-    companions,
-  )
+  // content-type choice or a ceremonial verdict leave it out: the reader voted on it. Each voted bill is a candidate of
+  // its own here, the most recently updated loaded first (YOUR_BILLS_HYDRATED); a companion group is made one bill, as
+  // in the sections, only once its loaded members show which moved in the week (buildYourBills). Unlike a section
+  // candidate, a row rewritten after the week ended, between Sunday 00:00 and the build (weekend ingestion of a Friday
+  // or Saturday action), still counts: the loaded bill's actions decide whether it moved in the week
+  // (latestActionInWeek). Left out here, that bill would never be listed, since next week its row is in the window but
+  // its action is not.
+  const votedCandidates = input.manifestItems
+    .map((item) => (votedBillKeys.has(billKey(item.guid)) ? factsOf(item) : null))
+    .filter((facts): facts is CandidateFacts => facts !== null)
+    .map((facts) => classify(facts) ?? votedOnly(facts))
     .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime() || compareCandidates(left, right))
     .slice(0, YOUR_BILLS_HYDRATED);
 
@@ -1141,7 +1156,7 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
 
   const [hydratedCandidates, yourBills] = await Promise.all([
     hydrate(rankedCandidates.slice(0, HYDRATED_CANDIDATES)),
-    buildYourBills(votedCandidates, input),
+    buildYourBills(votedCandidates, input, companions),
   ]);
 
   const consumed = new Set<string>();
@@ -1246,11 +1261,13 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
   }
 
   // A companion group under Your bills and in a bill section gets one billGuid: its Your bills item takes the billGuid
-  // and id of the section's item, so app 1.3 and the push (weeklyBriefBillTitles) match the two by billGuid. The lists
-  // can stand for the group by different bills, since a section ranks only the members that have a bucket and Your
-  // bills every voted member. For example, a voted House bill that passed, with no other match, stands for its group
-  // under Your bills, while Needs attention has only its Senate twin, which changed. The item keeps its own words: the
-  // group's news of the week, from the bill that stands for it under Your bills.
+  // and id of the section's item, so the push (weeklyBriefBillTitles), which has no companion index, names the group
+  // once by billGuid. App 1.3 matches the two by companion group (project decision 2026-11-25), which the shared
+  // billGuid agrees with. The lists can stand for the group by different bills, since a section ranks only the members
+  // that have a bucket and Your bills the voted members that moved in the week. For example, a voted House bill that
+  // passed, with no other match, stands for its group under Your bills, while Needs attention has only its Senate twin,
+  // which changed. The item keeps its own words: the group's news of the week, from the bill that stands for it under
+  // Your bills.
   const sectionGuidByGroup = new Map<string, string>();
   for (const item of [...needsAttention, ...movedThisWeek, ...worthQuickLook]) {
     if (item.billGuid && companionGroupOf(item.billGuid, companions)) {
