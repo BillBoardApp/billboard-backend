@@ -572,7 +572,7 @@
       "get": {
         "operationId": "getCivicScore",
         "summary": "Read the caller's civic score, streaks, rank and honors",
-        "description": "A participation record (UX-31): a Yea, Nay or Abstain counts the same, a companion pair once, and a 1.0 or 1.1 Updates dismissal not at all. The score, the rank, longestStreak and the honors never go down: the parts that could are kept on the caller's record, which the first read after UX-31 seeds from what the rule before it gave. A vote counts on the day it was first cast on its bill; changing it adds no day.",
+        "description": "A participation record (UX-31): a Yea, Nay or Abstain counts the same, a companion pair once, and a 1.0 or 1.1 Updates dismissal not at all. The score, the rank, longestStreak and the honors never go down: the parts that could are kept on the caller's record, which the first read after UX-31 seeds from what the rule before it gave. A vote counts on the day it was first cast on its bill; changing it adds no day. recentVoteWeeks and weeksVotedRecent (UX-41) count the same first votes by America/New_York week, Sunday to Saturday, over the last 8 weeks; they earn no points.",
         "tags": ["Civic profile"],
         "responses": {
           "200": {
@@ -1634,6 +1634,27 @@
             "type": "array",
             "description": "Every honor earned, in the ladder's order, including one whose condition no longer holds.",
             "items": { "$ref": "#/components/schemas/CivicHonor" }
+          },
+          "recentVoteWeeks": {
+            "type": "array",
+            "minItems": 8,
+            "maxItems": 8,
+            "description": "UX-41 concept 3, additive (apps 1.1 and 1.2 ignore it; absent from a server before it, so decode it as optional). The last 8 weeks, Sunday to Saturday in America/New_York (the Weekly Brief's week, also before a user's switch to Eastern days), oldest first, the current week last; count is the bills first voted on that week (firstVotedAt, so a changed vote never moves its week), Yea, Nay and Abstain alike, a companion pair once. Weeks earn no points.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["weekStart", "count"],
+              "properties": {
+                "weekStart": { "type": "string", "format": "date", "description": "The week's Sunday." },
+                "count": { "type": "integer", "minimum": 0 }
+              }
+            }
+          },
+          "weeksVotedRecent": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8,
+            "description": "UX-41 concept 3, additive: the weeks of recentVoteWeeks with a count above 0 (\"Weeks you voted: 6 of the last 8\")."
           }
         }
       },

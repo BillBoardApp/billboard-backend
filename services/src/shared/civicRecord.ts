@@ -1,5 +1,5 @@
 import { GetItemCommand, UpdateItemCommand, type AttributeValue, type DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { civicDayKeys, computeStreaks, nextEasternMidnight, recentDays } from "./civicDays";
+import { civicDayKeys, computeStreaks, nextEasternMidnight, recentDays, recentWeeks } from "./civicDays";
 import { CIVIC_PROFILE_MIN_VOTES, civicProfileReadiness, civicProfileWindow } from "./civicProfileReadiness";
 import {
   evaluateEarnedHonors,
@@ -72,6 +72,21 @@ export const CIVIC_RECORD_ATTRIBUTES = {
 /** The last 30 days in the Civic Rank sheet. */
 export const RECENT_VOTE_DAYS = 30;
 
+/**
+ * UX-41 concept 3 ("Weeks you voted: 6 of the last 8", app 1.3): the weeks, Sunday to Saturday in America/New_York
+ * (the Weekly Brief's week), the current one last. A week counts the bills first voted on in it (firstVotedAt, so a
+ * changed vote never moves its week), Yea, Nay and Abstain alike, a companion pair once. One vote fills a week, so more
+ * votes earn nothing, and a missed week is never a "broken" anything. Weeks earn no points (project decision
+ * 2026-11-23, D85 (a)): the score is unchanged.
+ */
+export const RECENT_VOTE_WEEKS = 8;
+
+/**
+ * Weeks are always America/New_York weeks, unlike the days, which stay UTC days before a user's switch so that no day
+ * streak breaks (civicDays.ts): weeks have no streak to keep, and the Brief's week is Eastern.
+ */
+const easternDayOf = civicDayKeys(Number.NEGATIVE_INFINITY);
+
 export interface CivicRecord {
   /**
    * Days are UTC days before this instant and America/New_York days from it on (civicDays.ts): an ISO time, as stored.
@@ -115,6 +130,10 @@ export interface CivicScoreBody {
   longestStreak: number;
   lastVotedAt: string | null;
   recentVoteDays: { date: string; count: number }[];
+  /** UX-41, additive: the last RECENT_VOTE_WEEKS weeks, oldest first, by their Sunday. */
+  recentVoteWeeks: { weekStart: string; count: number }[];
+  /** UX-41, additive: the weeks of recentVoteWeeks with at least one vote. */
+  weeksVotedRecent: number;
   voteScore: number;
   streakBonus: number;
   honorBonus: number;
@@ -220,15 +239,19 @@ export function civicStanding(
   const today = dayOf(nowMs);
 
   const dayCounts = new Map<string, number>();
+  const easternDayCounts = new Map<string, number>();
   let lastFirstVoteMs: number | null = null;
   for (const vote of votes) {
     const firstMs = parseInstant(vote.firstVotedAt);
     if (firstMs === null) continue;
     const day = dayOf(firstMs);
     dayCounts.set(day, (dayCounts.get(day) ?? 0) + 1);
+    const easternDay = easternDayOf(firstMs);
+    easternDayCounts.set(easternDay, (easternDayCounts.get(easternDay) ?? 0) + 1);
     if (lastFirstVoteMs === null || firstMs > lastFirstVoteMs) lastFirstVoteMs = firstMs;
   }
   const { currentStreak, longestStreak } = computeStreaks(dayCounts.keys(), today);
+  const recentVoteWeeks = recentWeeks(easternDayCounts, easternDayOf(nowMs), RECENT_VOTE_WEEKS);
 
   const totalVotes = votes.length;
   const coverageAreaCount = new Set(votes.flatMap((vote) => vote.areas)).size;
@@ -262,6 +285,8 @@ export function civicStanding(
       longestStreak: keptBestStreak,
       lastVotedAt: lastFirstVoteMs === null ? null : new Date(lastFirstVoteMs).toISOString(),
       recentVoteDays: recentDays(dayCounts, today, RECENT_VOTE_DAYS),
+      recentVoteWeeks,
+      weeksVotedRecent: recentVoteWeeks.filter((week) => week.count > 0).length,
       voteScore,
       streakBonus,
       honorBonus,

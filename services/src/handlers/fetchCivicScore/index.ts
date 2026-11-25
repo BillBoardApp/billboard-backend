@@ -105,6 +105,10 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         nextRank,
         scoreToNextRank: nextRank ? nextRank.minScore - body.civicScore : 0,
         honors: body.honors,
+        // UX-41 concept 3, additive (apps 1.1 and 1.2 ignore them): app 1.3's "Weeks you voted: N of the last 8" and
+        // its strip of week marks. Every day field above stays: 1.1 and 1.2 still show a day streak.
+        recentVoteWeeks: body.recentVoteWeeks,
+        weeksVotedRecent: body.weeksVotedRecent,
       }),
     };
   } catch (e) {

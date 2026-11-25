@@ -193,5 +193,40 @@
       "bonusScore": 100,
       "category": "participation"
     }
-  ]
+  ],
+  "recentVoteWeeks": [
+    {
+      "weekStart": "2026-09-06",
+      "count": 12
+    },
+    {
+      "weekStart": "2026-09-13",
+      "count": 30
+    },
+    {
+      "weekStart": "2026-09-20",
+      "count": 0
+    },
+    {
+      "weekStart": "2026-09-27",
+      "count": 5
+    },
+    {
+      "weekStart": "2026-10-04",
+      "count": 0
+    },
+    {
+      "weekStart": "2026-10-11",
+      "count": 0
+    },
+    {
+      "weekStart": "2026-10-18",
+      "count": 0
+    },
+    {
+      "weekStart": "2026-10-25",
+      "count": 4
+    }
+  ],
+  "weeksVotedRecent": 4
 }
