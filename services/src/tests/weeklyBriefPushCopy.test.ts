@@ -224,6 +224,46 @@ describe("the push body (the brief's bills, in page order)", () => {
     expect(body).not.toContain(" and A Very");
   });
 
+  it("keeps the reader's own bill first when an unrelated section bill shares its title", () => {
+    const brief = {
+      ...digest([
+        {
+          kind: "moved_this_week" as const,
+          items: [bill("SAVE Act", "BILLS-119s128is"), bill("Farm Act", "BILLS-119hr7ih")],
+        },
+      ]),
+      yourBills: [{ ...bill("SAVE Act", "BILLS-119hr22ih"), reason: "You voted on this" }],
+    };
+    expect(weeklyBriefPushBody(brief)).toBe("Includes SAVE Act, Farm Act, and 1 more.");
+  });
+
+  it("never doubles a title's own closing period", () => {
+    const official = "To provide for the regulation of payment stablecoins, and for other purposes.";
+    expect(weeklyBriefPushBody(digest([{ kind: "moved_this_week", items: [bill(official, "BILLS-119s394is")] }]))).toBe(
+      `Includes ${official}`,
+    );
+    const two = digest([
+      { kind: "moved_this_week", items: [bill("SAVE Act", "BILLS-119hr22ih"), bill("Other Act.", "BILLS-119hr9ih")] },
+    ]);
+    expect(weeklyBriefPushBody(two)).toBe("Includes SAVE Act and Other Act.");
+  });
+
+  it("drops a period at the cut, so a cut after U.S. never reads four dots", () => {
+    const brief = digest([
+      {
+        kind: "moved_this_week",
+        items: [
+          bill("Strengthening Oversight of the U.S. Courts Act", "BILLS-119hr40ih"),
+          bill("Other Act", "BILLS-119hr9ih"),
+          bill("Third Act", "BILLS-119hr10ih"),
+        ],
+      },
+    ]);
+    const body = weeklyBriefPushBody(brief);
+    expect(body).not.toContain("....");
+    expect(body).toBe("Includes Strengthening Oversight of the U..., Other Act, and 1 more.");
+  });
+
   it("keeps naming two different titles after a repeat", () => {
     const brief = digest([
       {
