@@ -31,3 +31,15 @@ export const WEEKLY_BRIEF_PUSH_SCHEDULE_EXPRESSION = `cron(${WEEKLY_BRIEF_PUSH_R
 // the push, and only app 1.3 writes that. false passes 'off': every run sends nothing (the switch).
 export const WEEKLY_BRIEF_PUSH_ENABLED = true;
 export const WEEKLY_BRIEF_PUSH_TIMEOUT_SECONDS = 300;
+
+// The only attributes WeeklyBriefPush may read or write (UX-28 review), granted as dynamodb:Attributes conditions:
+// exactly what its requests name (services weeklyBriefPush/index.ts and its DAOs; its test pins them), the tables' key
+// attributes included, since a request that names a key accesses it. Change both together.
+/** UserPII Scan, beside its key (userId): whether the user is being deleted, their adult status, their state. */
+export const WEEKLY_BRIEF_PUSH_PII_ATTRIBUTES = ['deletionStatus', 'adultStatus', 'resolvedState', 'selfAttestedState'];
+/** UserWeeklyDigests GetItem: the brief and its push claim. */
+export const WEEKLY_BRIEF_PUSH_SNAPSHOT_READ_ATTRIBUTES = ['payload', 'pushClaimedAt'];
+/** UserWeeklyDigests UpdateItem: the push claim, set once. */
+export const WEEKLY_BRIEF_PUSH_SNAPSHOT_WRITE_ATTRIBUTES = ['pushClaimedAt'];
+/** UserDevices UpdateItem: a gone endpoint's ARN, removed. */
+export const WEEKLY_BRIEF_PUSH_DEVICE_WRITE_ATTRIBUTES = ['endpointArn'];

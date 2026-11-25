@@ -62,9 +62,13 @@ import {
   WEEKLY_DIGEST_WORKER_MAX_CONCURRENCY,
   WEEKLY_DIGEST_WORKER_MEMORY_MB,
   WEEKLY_DIGEST_WORKER_TIMEOUT_SECONDS,
+  WEEKLY_BRIEF_PUSH_DEVICE_WRITE_ATTRIBUTES,
   WEEKLY_BRIEF_PUSH_ENABLED,
   WEEKLY_BRIEF_PUSH_LAST_RUN_HOUR,
+  WEEKLY_BRIEF_PUSH_PII_ATTRIBUTES,
   WEEKLY_BRIEF_PUSH_SCHEDULE_EXPRESSION,
+  WEEKLY_BRIEF_PUSH_SNAPSHOT_READ_ATTRIBUTES,
+  WEEKLY_BRIEF_PUSH_SNAPSHOT_WRITE_ATTRIBUTES,
   WEEKLY_BRIEF_PUSH_TIMEOUT_SECONDS,
 } from '../config/weekly-digest-constants';
 import { APNS_PLATFORM_APPLICATION_NAME, QUIET_HOURS_ENABLED } from '../config/notification-service-constants';
@@ -1123,17 +1127,42 @@ export class UserAPIServiceStack extends cdk.Stack {
     // Exactly what it does: scan UserPII (deletion and adult status, the state for the quiet hours), read each
     // user's snapshot and claim its push (pushClaimedAt), query the user's devices and drop a gone endpoint's ARN,
     // and publish to the APNs platform endpoints. Its metrics are EMF log lines, so it needs no PutMetricData.
+    // Each read and write is held to the attributes it names (AWS's fine-grained access pattern: dynamodb:Attributes,
+    // with Select, when given, SPECIFIC_ATTRIBUTES and ReturnValues, when given, NONE), so the UserPII scan reads no
+    // other PII and an UpdateItem can set nothing but the claim or drop nothing but the endpoint.
+    const onlyAttributes = (keys: string[], attributes: string[]) => ({
+      'ForAllValues:StringEquals': { 'dynamodb:Attributes': [...keys, ...attributes] },
+      StringEqualsIfExists: { 'dynamodb:Select': 'SPECIFIC_ATTRIBUTES', 'dynamodb:ReturnValues': 'NONE' },
+    });
     weeklyBriefPush.fn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['dynamodb:Scan'],
       resources: [piiTable.tableArn],
+      conditions: onlyAttributes([USER_PARTITION_KEY], WEEKLY_BRIEF_PUSH_PII_ATTRIBUTES),
     }));
     weeklyBriefPush.fn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
+      actions: ['dynamodb:GetItem'],
       resources: [weeklyDigestsTable.tableArn],
+      conditions: onlyAttributes(
+        [USER_PARTITION_KEY, USER_WEEKLY_DIGESTS_SORT_KEY],
+        WEEKLY_BRIEF_PUSH_SNAPSHOT_READ_ATTRIBUTES,
+      ),
     }));
     weeklyBriefPush.fn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['dynamodb:Query', 'dynamodb:UpdateItem'],
+      actions: ['dynamodb:UpdateItem'],
+      resources: [weeklyDigestsTable.tableArn],
+      conditions: onlyAttributes(
+        [USER_PARTITION_KEY, USER_WEEKLY_DIGESTS_SORT_KEY],
+        WEEKLY_BRIEF_PUSH_SNAPSHOT_WRITE_ATTRIBUTES,
+      ),
+    }));
+    weeklyBriefPush.fn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:Query'],
       resources: [devicesTable.tableArn],
+    }));
+    weeklyBriefPush.fn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:UpdateItem'],
+      resources: [devicesTable.tableArn],
+      conditions: onlyAttributes([USER_PARTITION_KEY, USER_DEVICES_SORT_KEY], WEEKLY_BRIEF_PUSH_DEVICE_WRITE_ATTRIBUTES),
     }));
     weeklyBriefPush.fn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['sns:Publish'],
