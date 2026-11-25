@@ -458,7 +458,50 @@ describe("a followed member the members table does not name (one who left Congre
     expect(shownTexts(digest!).join("\n")).not.toContain(LEFT);
   });
 
-  it("still lists a bill whose only reason was that member, with no reason line rather than an id", async () => {
+  // UX-28 review: such a member still ranked the bill second ("followed_representatives"), so it took a slot in What
+  // moved this week with no reason line, mainly in the Jan 3-9 week, when 119th bills are signed after the Congress ends.
+  it("does not make a bill the reader's: a bill only that member backs is not in the brief", async () => {
+    const digest = await build({
+      items: [
+        entry("BILLS-119hr77", { sponsors: [LEFT], subCategories: [], billStatus: "New" }),
+        entry("BILLS-119hr78", { sponsors: [STAYED], subCategories: [], billStatus: "New" }),
+      ],
+      followed: [LEFT, STAYED],
+      topics: [],
+      memberNames: { [STAYED]: "Rep. Jane Doe" },
+    });
+
+    expect(items(digest).filter((item) => item.kind === "bill")).toEqual([
+      expect.objectContaining({ billGuid: "BILLS-119hr78", reason: "Backed by Rep. Jane Doe" }),
+    ]);
+    expect(shownTexts(digest!).join("\n")).not.toContain(LEFT);
+  });
+
+  it("ranks a bill that member backs by its other matches only", async () => {
+    const digest = await build({
+      items: [
+        entry("BILLS-119hr77", { sponsors: [LEFT], updatedAt: "2026-03-16T15:00:00.000Z" }),
+        entry("BILLS-119hr78", { updatedAt: "2026-03-17T15:00:00.000Z" }),
+        entry("BILLS-119hr79", { updatedAt: "2026-03-18T15:00:00.000Z" }),
+        entry("BILLS-119hr80", { updatedAt: "2026-03-19T15:00:00.000Z" }),
+      ],
+      followed: [LEFT],
+      memberNames: { [STAYED]: "Rep. Jane Doe" },
+    });
+
+    // All four are topic matches, newest first. The departed member's bill no longer leads What moved this week (it
+    // ranked second of five buckets as a followed member's bill), and now may be worth a quick look.
+    expect(section(digest, "moved_this_week").map((item) => item.billGuid)).toEqual([
+      "BILLS-119hr80",
+      "BILLS-119hr79",
+      "BILLS-119hr78",
+    ]);
+    expect(section(digest, "worth_quick_look")).toEqual([
+      expect.objectContaining({ billGuid: "BILLS-119hr77", reason: "Matches your topic: Energy" }),
+    ]);
+  });
+
+  it("still counts a followed member, unnamed, when the members table named nobody", async () => {
     const digest = await build({
       items: [entry("BILLS-119hr77", { sponsors: [LEFT], subCategories: [], billStatus: "New" })],
       followed: [LEFT],
