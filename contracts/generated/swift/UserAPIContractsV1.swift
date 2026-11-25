@@ -641,8 +641,10 @@ nonisolated enum UserAPIContractsV1 {
         /// The row's identity: the bill's plain guid, the action's day and its wording. A newer action gives a new id,
         /// so a row cleared on the device comes back with it. Opaque: do not parse it.
         let id: String
-        /// The plain guid of the bill whose action this is. For a companion group, the member with the latest action;
-        /// the group is one row either way.
+        /// The plain guid of the bill the row shows. For a companion group (one row), the member whose status the Bills
+        /// card shows for the group: a law first, then a veto, a passage, a failure, an update, then the member whose
+        /// manifest row changed later, then the primary (CompanionGroupIndex.statusLead). The row's number, title,
+        /// billStatus and vetoed are that member's; its action is the group's latest, from either member.
         let billGuid: String
         let congress: String
         let billType: String

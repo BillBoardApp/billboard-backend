@@ -464,6 +464,50 @@ describe("fetchRecentActions", () => {
     expect(s3Keys().sort()).toEqual(["processed-bills/BILLS-119hr13.json", "processed-bills/BILLS-119s13.json"]);
   });
 
+  it("reads a group's member that did not move, so a law keeps the row as on the Bills card", async () => {
+    useGroups([["BILLS-119hr19", "BILLS-119s19"]]);
+    storeBill("BILLS-119hr19", "House law", "2026-08-01T18:00:00.000Z", null, {
+      billStatus: "Finalized",
+      actions: [
+        { actionCode: "36000", actionDate: "2026-08-01", text: "Became Public Law No: 119-20.", type: "BecameLaw" },
+      ],
+    });
+    storeBill("BILLS-119s19", "Senate twin", "2026-11-12T18:00:00.000Z", "2026-11-12");
+    follow(USER_A, "BILLS-119s19");
+
+    const { items } = await listFor(USER_A);
+
+    expect(s3Keys().sort()).toEqual(["processed-bills/BILLS-119hr19.json", "processed-bills/BILLS-119s19.json"]);
+    expect(items).toEqual([
+      expect.objectContaining({
+        billGuid: "BILLS-119hr19",
+        title: "House law",
+        billStatus: "Finalized",
+        action: expect.objectContaining({ date: "2026-11-12" }),
+        watched: true,
+      }),
+    ]);
+  });
+
+  it("reads neither member of a group that did not move, nor a member with no manifest row", async () => {
+    useGroups([
+      ["BILLS-119hr20", "BILLS-119s20"],
+      ["BILLS-119hr21", "BILLS-119s21"],
+    ]);
+    storeBill("BILLS-119hr20", "Old House", "2026-09-01T18:00:00.000Z", "2026-09-01");
+    storeBill("BILLS-119s20", "Old Senate", "2026-09-02T18:00:00.000Z", "2026-09-02");
+    storeBill("BILLS-119hr21", "Moved House", "2026-11-19T18:00:00.000Z", "2026-11-19");
+    storeBill("BILLS-119s21", "Unlisted Senate", "2026-11-20T18:00:00.000Z", "2026-11-20");
+    lookups.delete("BILLS-119s21");
+    follow(USER_A, "BILLS-119hr20");
+    follow(USER_A, "BILLS-119s21");
+
+    const { items } = await listFor(USER_A);
+
+    expect(s3Keys()).toEqual(["processed-bills/BILLS-119hr21.json"]);
+    expect(items.map((item) => item.billGuid)).toEqual(["BILLS-119hr21"]);
+  });
+
   it("lists each bill on its own when the companion groups cannot be read", async () => {
     groupsRow = () => {
       throw new Error("throttled");
