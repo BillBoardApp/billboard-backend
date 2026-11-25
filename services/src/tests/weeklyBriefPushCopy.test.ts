@@ -186,6 +186,58 @@ describe("the push body (the brief's bills, in page order)", () => {
     expect(weeklyBriefPushBody(brief)).toBe("Includes Small Business Relief Act, Farm Credit Act, and 3 more.");
   });
 
+  // Review of the push copy: two unrelated bills that share a title were both named, "Includes SAVE Act and SAVE Act."
+  // A title is named once; the other bill is still counted, in "N more".
+  it("names a shared title once and counts the other bill in N more", () => {
+    const two = digest([
+      {
+        kind: "moved_this_week",
+        items: [bill("SAVE Act", "BILLS-119hr22ih"), bill("SAVE Act", "BILLS-119s128is")],
+      },
+    ]);
+    expect(weeklyBriefPushBody(two)).toBe("Includes SAVE Act and 1 more.");
+
+    const four = digest([
+      {
+        kind: "moved_this_week",
+        items: [
+          bill("SAVE Act", "BILLS-119hr22ih"),
+          bill("save  act", "BILLS-119s128is"),
+          bill("Other Act", "BILLS-119hr9ih"),
+          bill("Clean Water Act", "BILLS-119s3is"),
+        ],
+      },
+    ]);
+    expect(weeklyBriefPushBody(four)).toBe("Includes SAVE Act, Other Act, and 2 more.");
+  });
+
+  it("names two long titles that read the same once cut to 36 bytes only once", () => {
+    const long = "A Very Long Bill Title That Runs On And On";
+    const brief = digest([
+      {
+        kind: "moved_this_week",
+        items: [bill(`${long} Part One`, "BILLS-119hr1ih"), bill(`${long} Part Two`, "BILLS-119hr2ih")],
+      },
+    ]);
+    const body = weeklyBriefPushBody(brief);
+    expect(body).toBe("Includes A Very Long Bill Title That Runs... and 1 more.");
+    expect(body).not.toContain(" and A Very");
+  });
+
+  it("keeps naming two different titles after a repeat", () => {
+    const brief = digest([
+      {
+        kind: "moved_this_week",
+        items: [
+          bill("SAVE Act", "BILLS-119hr22ih"),
+          bill("SAVE Act", "BILLS-119s128is"),
+          bill("Other Act", "BILLS-119hr9ih"),
+        ],
+      },
+    ]);
+    expect(weeklyBriefPushBody(brief)).toBe("Includes SAVE Act, Other Act, and 1 more.");
+  });
+
   it("says the brief's own headline when it has no bill item (only members you follow)", () => {
     const body = weeklyBriefPushBody(
       digest(
@@ -197,7 +249,7 @@ describe("the push body (the brief's bills, in page order)", () => {
   });
 
   it("keeps every body within 160 bytes", () => {
-    const many = Array.from({ length: 8 }, (_, index) => bill(`${"Ü".repeat(40)} ${index}`, `BILLS-119hr${index}`));
+    const many = Array.from({ length: 8 }, (_, index) => bill(`${index} ${"Ü".repeat(40)}`, `BILLS-119hr${index}`));
     const body = weeklyBriefPushBody(digest([{ kind: "moved_this_week", items: many }]));
     expect(bytes(body)).toBeLessThanOrEqual(160);
     expect(body.endsWith(", and 6 more.")).toBe(true);
