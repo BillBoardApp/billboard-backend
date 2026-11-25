@@ -61,6 +61,10 @@ export interface RecentActionsInput {
   /**
    * When each bill's manifest row last moved (its BILL_GUID lookup's updatedAt), by plain guid: of a group's members
    * with the same rank, the one that moved later stands for the group, as on the Bills card. Absent counts as never.
+   * The app compares Bill.storedAt, which is this date until the device opens the member, and then the later of it
+   * and the processed copy's storedAt. The server cannot see which members a device opened, so it uses this date, as
+   * the Weekly Brief does. For an equal-rank pair the two can then show different members, with the same status; the
+   * row's id does not depend on it.
    */
   movedAt: ReadonlyMap<string, string>;
   /** The caller's votes, by plain guid. */
