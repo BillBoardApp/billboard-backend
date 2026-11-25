@@ -27,7 +27,10 @@ export interface WeeklyBriefPushCopy {
 
 /**
  * The brief's bill titles in app 1.3's page order: Your bills this week (UX-41 concept 4), then each section's items,
- * member items skipped, each bill once.
+ * member items skipped, each bill once. A bill is a repeat when its billGuid or its title (ignoring case and spacing)
+ * was already listed: the builder gives a companion group the same billGuid in both lists, and the title also catches
+ * two bills of one name, such as a House and Senate pair under different guids, which "Includes X and X." would name
+ * twice.
  */
 export const weeklyBriefBillTitles = (digest: Pick<WeeklyDigest, "sections" | "yourBills">): string[] => {
   const seen = new Set<string>();
@@ -35,10 +38,10 @@ export const weeklyBriefBillTitles = (digest: Pick<WeeklyDigest, "sections" | "y
   for (const list of [digest.yourBills ?? [], ...(digest.sections ?? []).map((section) => section.items ?? [])]) {
     for (const item of list) {
       if (item.kind !== "bill") continue;
-      const key = item.billGuid ?? item.id;
       const title = normalizeInlineText(item.title);
-      if (!title || seen.has(key)) continue;
-      seen.add(key);
+      const keys = [`guid|${item.billGuid ?? item.id}`, `title|${title.toLowerCase()}`];
+      if (!title || keys.some((key) => seen.has(key))) continue;
+      keys.forEach((key) => seen.add(key));
       titles.push(title);
     }
   }

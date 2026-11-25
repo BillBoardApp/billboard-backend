@@ -47,9 +47,10 @@ import {
  *   built apart from the sections, from the voted bills themselves, so a voted bill no section would show (one that
  *   passed, failed, became law or is new, with no watch, followed member, topic or life area) is listed too. The
  *   sections are built exactly as before, so 1.1 and 1.2, which never read the list, keep every item they showed: a
- *   bill listed here can also be in a section, and app 1.3 shows it once, here. The field is left out in a week with
- *   no such bill. A brief can hold Your bills alone, with no section; fetchLatestWeeklyDigest serves that one only to
- *   app 1.3 and later, since 1.1 and 1.2 would show it empty.
+ *   bill listed here can also be in a section, and app 1.3 shows it once, here. It has the same billGuid in both lists,
+ *   a companion group included: the item here takes the guid of the section's item, which can be the group's other
+ *   bill. The field is left out in a week with no such bill. A brief can hold Your bills alone, with no section;
+ *   fetchLatestWeeklyDigest serves that one only to app 1.3 and later, since 1.1 and 1.2 would show it empty.
  * - A member is named only by the name the members table stores (REL-46 A4). One who is not there, such as a member
  *   who left Congress, gets no member item and no "Backed by" reason: the brief never shows a bioguide id as a name.
  *   Nor do they count toward a bill's rank, so a bill that only such a member backs is not in the brief unless
@@ -1223,6 +1224,25 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
     return null;
   }
 
+  // A companion group under Your bills and in a bill section gets one billGuid: its Your bills item takes the billGuid
+  // and id of the section's item, so app 1.3 and the push (weeklyBriefBillTitles) match the two by billGuid. The lists
+  // can stand for the group by different bills, since a section ranks only the members that have a bucket and Your
+  // bills every voted member. For example, a voted House bill that passed, with no other match, stands for its group
+  // under Your bills, while Needs attention has only its Senate twin, which changed. The item keeps its own words: the
+  // group's news of the week, from the bill that stands for it under Your bills.
+  const sectionGuidByGroup = new Map<string, string>();
+  for (const item of [...needsAttention, ...movedThisWeek, ...worthQuickLook]) {
+    if (item.billGuid && companionGroupOf(item.billGuid, companions)) {
+      sectionGuidByGroup.set(billKey(item.billGuid), item.billGuid);
+    }
+  }
+  const yourBillsItems = yourBills.map((item): WeeklyDigestItem => {
+    const sectionGuid = item.billGuid ? sectionGuidByGroup.get(billKey(item.billGuid)) : undefined;
+    return sectionGuid && sectionGuid !== item.billGuid
+      ? { ...item, id: `bill|${sectionGuid}`, billGuid: sectionGuid }
+      : item;
+  });
+
   const summary = weeklyDigestHeadline({
     attention: needsAttention.length,
     moved: movedThisWeek.length,
@@ -1260,6 +1280,6 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
       },
     ],
     sections,
-    ...(yourBills.length > 0 ? { yourBills } : {}),
+    ...(yourBillsItems.length > 0 ? { yourBills: yourBillsItems } : {}),
   };
 }
