@@ -17,19 +17,31 @@ import {
  *
  *   civicScore = voteScore + streakBonus + honorBonus
  *   voteScore   = 10 x the votes the record holds: each new vote adds one, and a vote that leaves the count keeps it
- *   streakBonus = 5 x the best streak ever (days), kept when a streak ends
+ *   streakBonus = the day-streak bonus, frozen (D85 (a), below): 5 x the best streak (days) when it froze
  *   honorBonus  = the bonuses of every honor ever earned, kept when its condition stops holding
  *
- * Each part only rises, so the score and the rank (a function of the score) never drop. What has to be remembered is
- * kept on the user's UserPII row, beside the INT-06 vote counter (CIVIC_RECORD_ATTRIBUTES):
+ * Each part only rises or stays, so the score and the rank (a function of the score) never drop. What has to be
+ * remembered is kept on the user's UserPII row, beside the INT-06 vote counter (CIVIC_RECORD_ATTRIBUTES):
  *   civicEasternFrom  (S)  the instant the user's days switch from UTC to America/New_York (civicDays.ts);
  *   civicVotes        (N)  the votes the record holds, the floor of voteScore;
  *   civicVoteRows     (N)  the most vote rows seen: rows that hold a vote or held one (heldVoteRows);
  *   civicCountedVotes (N)  the votes counted at the last write (totalVotes then);
- *   civicBestStreak   (N)  the best streak, the floor of longestStreak and streakBonus;
+ *   civicBestStreak   (N)  the best streak, the floor of longestStreak;
+ *   civicStreakBonus  (N)  the frozen day-streak bonus, in points: written once, never changed (D85 (a));
  *   civicHonors       (SS) the ids of the honors earned;
  *   civicUpdatedAt    (S)  when the record last changed.
  * Account deletion removes it with the row (the tombstone replaces the row whole; CleanupOrphanedUsers deletes it).
+ *
+ * The frozen day-streak bonus (UX-41 concept 3, project decision 2026-11-23, D85 (a)). App 1.3 counts weeks, not
+ * days, and shows "Best streak +N" as a bonus that no longer grows; weeks earn no points. A record without
+ * civicStreakBonus (every record written before D85) freezes it at the first read after D85 that stores the record,
+ * at the bonus the rule before D85 gave on that read: 5 x the best streak the read keeps, which is at least 5 x the
+ * stored civicBestStreak. So the score does not drop across the switch. From then on streakBonus is the stored value:
+ * a longer day streak adds no points. longestStreak (civicBestStreak) and currentStreak still follow the days, because
+ * apps 1.1 and 1.2 show them, so after the freeze streakBonus can be below 5 x longestStreak. The streak honors
+ * (Steady, Steady Hand) are earned as before. A user whose first record is written after D85 freezes the bonus the
+ * same way, at the first read that stores it (usually the read right after their first vote: 5, for one day). A write
+ * never changes a stored civicStreakBonus (writeCivicRecord); a concurrent read that froze it first wins.
  *
  * Why three vote counters (feature review follow-up F1). The votes counted can fall: a companion pair published over
  * two of the user's votes counts once from then on, and 1.1 can write a dismissal over a vote on a decided bill. A
@@ -65,6 +77,7 @@ export const CIVIC_RECORD_ATTRIBUTES = {
   voteRows: "civicVoteRows",
   countedVotes: "civicCountedVotes",
   bestStreak: "civicBestStreak",
+  streakBonus: "civicStreakBonus",
   honors: "civicHonors",
   updatedAt: "civicUpdatedAt",
 } as const;
@@ -77,7 +90,7 @@ export const RECENT_VOTE_DAYS = 30;
  * (the Weekly Brief's week), the current one last. A week counts the bills first voted on in it (firstVotedAt, so a
  * changed vote never moves its week), Yea, Nay and Abstain alike, a companion pair once. One vote fills a week, so more
  * votes earn nothing, and a missed week is never a "broken" anything. Weeks earn no points (project decision
- * 2026-11-23, D85 (a)): the score is unchanged.
+ * 2026-11-23, D85 (a), which also freezes the day-streak bonus: module comment).
  */
 export const RECENT_VOTE_WEEKS = 8;
 
@@ -101,6 +114,10 @@ export interface CivicRecord {
   countedVotes: number | null;
   /** The best streak, in days. */
   bestStreak: number;
+  /**
+   * The frozen day-streak bonus, in points (D85 (a)); null in a record that has none yet (the next write freezes it).
+   */
+  streakBonus: number | null;
   /** The ids of the honors earned. */
   honorIds: string[];
 }
@@ -149,7 +166,12 @@ export interface CivicStanding {
 }
 
 /** A record as written: every attribute set. */
-export type StoredCivicRecord = CivicRecord & { easternFrom: string; voteRows: number; countedVotes: number };
+export type StoredCivicRecord = CivicRecord & {
+  easternFrom: string;
+  voteRows: number;
+  countedVotes: number;
+  streakBonus: number;
+};
 
 const parseInstant = (value: string | null): number | null => {
   if (value === null) return null;
@@ -274,7 +296,8 @@ export function civicStanding(
   const honorIds = [...new Set([...(stored?.honorIds ?? []), ...honors.map((honor) => honor.id)])];
 
   const voteScore = keptVotes * VOTE_POINTS;
-  const streakBonus = keptBestStreak * STREAK_DAY_POINTS;
+  // D85 (a): the bonus the record froze; a record without one freezes it at what the rule before D85 gives now.
+  const streakBonus = stored?.streakBonus ?? keptBestStreak * STREAK_DAY_POINTS;
   const honorBonus = sumHonorBonus(honors);
 
   return {
@@ -299,15 +322,16 @@ export function civicStanding(
       voteRows: voteCounts.voteRows,
       countedVotes: voteCounts.countedVotes,
       bestStreak: keptBestStreak,
+      streakBonus,
       honorIds,
     },
   };
 }
 
 /**
- * Whether `next` differs from `stored` so that it must be written: it holds more, or the votes counted moved (a fall
- * must be stored, or the next new vote would only make up for it). A new record is worth storing once it holds
- * anything.
+ * Whether `next` differs from `stored` so that it must be written: it holds more, the votes counted moved (a fall
+ * must be stored, or the next new vote would only make up for it), or it freezes the day-streak bonus (D85 (a)). A
+ * new record is worth storing once it holds anything.
  */
 export function recordChanged(stored: CivicRecord | null, next: StoredCivicRecord): boolean {
   if (!stored) return next.votes > 0 || next.bestStreak > 0 || next.honorIds.length > 0;
@@ -317,6 +341,7 @@ export function recordChanged(stored: CivicRecord | null, next: StoredCivicRecor
     next.voteRows !== stored.voteRows ||
     next.countedVotes !== stored.countedVotes ||
     next.bestStreak > stored.bestStreak ||
+    next.streakBonus !== stored.streakBonus ||
     next.honorIds.some((id) => !storedHonors.has(id)) ||
     next.easternFrom !== stored.easternFrom
   );
@@ -361,6 +386,7 @@ export function civicRecordRowOf(
       voteRows: storedCounter(item[CIVIC_RECORD_ATTRIBUTES.voteRows]),
       countedVotes: storedCounter(item[CIVIC_RECORD_ATTRIBUTES.countedVotes]),
       bestStreak: nonNegativeInteger(item[CIVIC_RECORD_ATTRIBUTES.bestStreak]),
+      streakBonus: storedCounter(item[CIVIC_RECORD_ATTRIBUTES.streakBonus]),
       honorIds: item[CIVIC_RECORD_ATTRIBUTES.honors]?.SS ?? [],
     },
     deleting,
@@ -375,7 +401,8 @@ export async function readCivicRecordRow(table: CivicRecordTable, userId: string
       Key: { [table.partitionKey]: { S: userId } },
       ConsistentRead: true,
       ProjectionExpression:
-        "#pk, deletionStatus, #easternFrom, #votes, #voteRows, #countedVotes, #bestStreak, #honors, #updatedAt",
+        "#pk, deletionStatus, #easternFrom, #votes, #voteRows, #countedVotes, #bestStreak, #streakBonus, #honors, " +
+        "#updatedAt",
       ExpressionAttributeNames: {
         "#pk": table.partitionKey,
         "#easternFrom": CIVIC_RECORD_ATTRIBUTES.easternFrom,
@@ -383,6 +410,7 @@ export async function readCivicRecordRow(table: CivicRecordTable, userId: string
         "#voteRows": CIVIC_RECORD_ATTRIBUTES.voteRows,
         "#countedVotes": CIVIC_RECORD_ATTRIBUTES.countedVotes,
         "#bestStreak": CIVIC_RECORD_ATTRIBUTES.bestStreak,
+        "#streakBonus": CIVIC_RECORD_ATTRIBUTES.streakBonus,
         "#honors": CIVIC_RECORD_ATTRIBUTES.honors,
         "#updatedAt": CIVIC_RECORD_ATTRIBUTES.updatedAt,
       },
@@ -398,10 +426,11 @@ export type CivicRecordWrite =
 
 /**
  * Writes `next` onto the user's row. One UpdateItem, on condition that the row exists (a GET never creates the row,
- * which would read everywhere as a user), is not being deleted, and holds no other `civicEasternFrom` and no higher
- * vote count, vote rows or best streak: so a stored value never drops, even under a concurrent read, and a vote is
- * never added twice (module comment). `civicCountedVotes` is written as this read counted. Honors are added to the
- * set. Errors other than the failed condition are thrown.
+ * which would read everywhere as a user), is not being deleted, and holds no other `civicEasternFrom` or
+ * `civicStreakBonus` and no higher vote count, vote rows or best streak: so a stored value never drops, even under a
+ * concurrent read, a vote is never added twice, and a frozen streak bonus is never changed (module comment).
+ * `civicCountedVotes` is written as this read counted. Honors are added to the set. Errors other than the failed
+ * condition are thrown.
  */
 export async function writeCivicRecord(
   table: CivicRecordTable,
@@ -417,6 +446,7 @@ export async function writeCivicRecord(
     "#voteRows": CIVIC_RECORD_ATTRIBUTES.voteRows,
     "#countedVotes": CIVIC_RECORD_ATTRIBUTES.countedVotes,
     "#bestStreak": CIVIC_RECORD_ATTRIBUTES.bestStreak,
+    "#streakBonus": CIVIC_RECORD_ATTRIBUTES.streakBonus,
     "#updatedAt": CIVIC_RECORD_ATTRIBUTES.updatedAt,
   };
   const values: Record<string, AttributeValue> = {
@@ -425,13 +455,14 @@ export async function writeCivicRecord(
     ":voteRows": { N: String(next.voteRows) },
     ":countedVotes": { N: String(next.countedVotes) },
     ":bestStreak": { N: String(next.bestStreak) },
+    ":streakBonus": { N: String(next.streakBonus) },
     ":updatedAt": { S: nowIso },
     ":deletionInProgress": { S: "in_progress" },
     ":deletionCompleted": { S: "completed" },
   };
   let update =
     "SET #easternFrom = :easternFrom, #votes = :votes, #voteRows = :voteRows, #countedVotes = :countedVotes, " +
-    "#bestStreak = :bestStreak, #updatedAt = :updatedAt";
+    "#bestStreak = :bestStreak, #streakBonus = :streakBonus, #updatedAt = :updatedAt";
   if (next.honorIds.length > 0) {
     update += " ADD #honors :honors";
     names["#honors"] = CIVIC_RECORD_ATTRIBUTES.honors;
@@ -450,6 +481,7 @@ export async function writeCivicRecord(
           "(attribute_not_exists(#votes) OR #votes <= :votes)",
           "(attribute_not_exists(#voteRows) OR #voteRows <= :voteRows)",
           "(attribute_not_exists(#bestStreak) OR #bestStreak <= :bestStreak)",
+          "(attribute_not_exists(#streakBonus) OR #streakBonus = :streakBonus)",
         ].join(" AND "),
         ExpressionAttributeNames: names,
         ExpressionAttributeValues: values,
