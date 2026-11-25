@@ -242,7 +242,7 @@ describe("fetchCivicScore handler", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("answers with the fields both apps decode (the OpenAPI CivicScore, every key required)", async () => {
+  it("answers with the fields both apps decode (the OpenAPI CivicScore, every key required) and UX-41's two", async () => {
     seedPii();
     setVotes([row("bill-1", "Yea", "2026-03-03T09:00:00.000Z")]);
 
@@ -250,7 +250,12 @@ describe("fetchCivicScore handler", () => {
 
     const openapi = JSON.parse(readFileSync(join(__dirname, "../../../contracts/openapi/user-api.v1.json"), "utf8"));
     const schemas = openapi.components.schemas;
-    expect(Object.keys(body).sort()).toEqual([...schemas.CivicScore.required].sort());
+    // Apps 1.1 and 1.2 require every key they know; the week fields are additive, so not required.
+    const weekFields = ["recentVoteWeeks", "weeksVotedRecent"];
+    expect(Object.keys(body).sort()).toEqual([...schemas.CivicScore.required, ...weekFields].sort());
+    expect(Object.keys(schemas.CivicScore.properties).sort()).toEqual(Object.keys(body).sort());
+    expect(schemas.CivicScore.required).toEqual(expect.not.arrayContaining(weekFields));
+    expect(Object.keys(body.recentVoteWeeks[0]).sort()).toEqual(["count", "weekStart"]);
     expect(Object.keys(body.rank).sort()).toEqual([...schemas.CivicRank.required].sort());
     expect(Object.keys(body.honors[0]).sort()).toEqual([...schemas.CivicHonor.required].sort());
     expect(Object.keys(body.recentVoteDays[0]).sort()).toEqual(["count", "date"]);
@@ -484,6 +489,153 @@ describe("UX-31: days from the first vote on a bill, in America/New_York", () =>
     ]);
     expect(body.currentStreak).toBe(1);
     expect(body.longestStreak).toBe(2);
+  });
+});
+
+describe("UX-41 concept 3: weeks you voted, Sunday to Saturday in America/New_York", () => {
+  const weeks = (body: ScoreBody) =>
+    Object.fromEntries(body.recentVoteWeeks.map((week) => [week.weekStart, week.count]));
+
+  it("lists the last 8 weeks by their Sunday, oldest first and the current week last, and counts those voted in", async () => {
+    seedPii({ civicEasternFrom: { S: "2026-10-01T04:00:00.000Z" }, civicVotes: { N: "0" } });
+    setVotes([
+      // Tuesday and Monday of the current week (Sunday Nov 22).
+      row("bill-1", "Yea", null, firstVotedAt("2026-11-24T15:00:00.000Z")),
+      row("bill-2", "Nay", null, firstVotedAt("2026-11-23T15:00:00.000Z")),
+      row("bill-3", "Yea", null, firstVotedAt("2026-11-10T15:00:00.000Z")),
+      // The oldest of the 8 weeks (Sunday Oct 4), and the week before it, which is not listed.
+      row("bill-4", "Yea", null, firstVotedAt("2026-10-05T15:00:00.000Z")),
+      row("bill-5", "Nay", null, firstVotedAt("2026-09-30T15:00:00.000Z")),
+    ]);
+
+    // Wednesday Nov 25, 10 AM EST.
+    const body = await scoreAt("2026-11-25T15:00:00.000Z");
+
+    expect(body.recentVoteWeeks).toEqual([
+      { weekStart: "2026-10-04", count: 1 },
+      { weekStart: "2026-10-11", count: 0 },
+      { weekStart: "2026-10-18", count: 0 },
+      { weekStart: "2026-10-25", count: 0 },
+      { weekStart: "2026-11-01", count: 0 },
+      { weekStart: "2026-11-08", count: 1 },
+      { weekStart: "2026-11-15", count: 0 },
+      { weekStart: "2026-11-22", count: 2 },
+    ]);
+    expect(body.weeksVotedRecent).toBe(3);
+    // The days are unchanged beside them: 1.1 and 1.2 still show a day streak and the last 30 days.
+    expect(body.totalVotes).toBe(5);
+    expect(body.currentStreak).toBe(2);
+    expect(body.recentVoteDays).toHaveLength(30);
+  });
+
+  it("puts Saturday 11:59 PM and Sunday midnight Eastern in different weeks, when clocks fall back", async () => {
+    seedPii({ civicEasternFrom: { S: "2026-10-01T04:00:00.000Z" }, civicVotes: { N: "0" } });
+    setVotes([
+      // 11:59 PM EDT Saturday Oct 31, and midnight EDT Sunday Nov 1 (clocks fall back at 2 AM that day).
+      row("bill-1", "Yea", null, firstVotedAt("2026-11-01T03:59:00.000Z")),
+      row("bill-2", "Nay", null, firstVotedAt("2026-11-01T04:00:00.000Z")),
+      // 11:30 PM EST Saturday Nov 7: still the week of Nov 1.
+      row("bill-3", "Abstain", null, firstVotedAt("2026-11-08T04:30:00.000Z")),
+    ]);
+
+    const body = await scoreAt("2026-11-09T15:00:00.000Z");
+
+    expect(weeks(body)).toEqual(expect.objectContaining({ "2026-10-25": 1, "2026-11-01": 2, "2026-11-08": 0 }));
+    expect(body.weeksVotedRecent).toBe(2);
+  });
+
+  it("puts Saturday 11:59 PM and Sunday midnight Eastern in different weeks, when clocks spring forward", async () => {
+    seedPii({ civicEasternFrom: { S: "2026-01-01T05:00:00.000Z" }, civicVotes: { N: "0" } });
+    setVotes([
+      // 11:59 PM EST Saturday Mar 7, and midnight EST Sunday Mar 8 (clocks spring forward at 2 AM that day).
+      row("bill-1", "Yea", null, firstVotedAt("2026-03-08T04:59:00.000Z")),
+      row("bill-2", "Nay", null, firstVotedAt("2026-03-08T05:00:00.000Z")),
+    ]);
+
+    const body = await scoreAt("2026-03-10T15:00:00.000Z");
+
+    expect(body.recentVoteWeeks.slice(-2)).toEqual([
+      { weekStart: "2026-03-01", count: 1 },
+      { weekStart: "2026-03-08", count: 1 },
+    ]);
+  });
+
+  it("counts Eastern weeks even while a user's days are still UTC days (before their switch)", async () => {
+    // No record yet: this read seeds it, and the user's days stay UTC days until the next Eastern midnight.
+    seedPii();
+    // 9 PM EDT Saturday Oct 24 is Sunday Oct 25 in UTC.
+    setVotes([row("bill-1", "Yea", "2026-10-25T01:00:00.000Z")]);
+
+    const body = await scoreAt("2026-10-27T15:00:00.000Z");
+
+    expect(body.recentVoteDays.find((day) => day.count > 0)?.date).toBe("2026-10-25");
+    expect(weeks(body)).toEqual(expect.objectContaining({ "2026-10-18": 1, "2026-10-25": 0 }));
+  });
+
+  it("keeps a changed vote in the week it was first cast, and puts a vote with no time in no week", async () => {
+    seedPii({ civicEasternFrom: { S: "2026-10-01T04:00:00.000Z" }, civicVotes: { N: "0" } });
+    setVotes([
+      // First cast in the week of Nov 8, changed this week.
+      row("bill-1", "Nay", "2026-11-24T15:00:00.000Z", firstVotedAt("2026-11-10T15:00:00.000Z")),
+      // A vote stored before votes were timed, changed this week: counted, in no week.
+      row("bill-2", "Yea", "2026-11-24T16:00:00.000Z", { firstVotedAt: { NULL: true } }),
+      // A row written before UX-31 (no firstVotedAt): its votedAt.
+      row("bill-3", "Yea", "2026-11-17T15:00:00.000Z"),
+    ]);
+
+    const body = await scoreAt("2026-11-25T15:00:00.000Z");
+
+    expect(body.totalVotes).toBe(3);
+    expect(weeks(body)).toEqual(expect.objectContaining({ "2026-11-08": 1, "2026-11-15": 1, "2026-11-22": 0 }));
+    expect(body.weeksVotedRecent).toBe(2);
+  });
+
+  it("counts Abstain like Yea and Nay and a 1.0 or 1.1 dismissal not at all, and one vote fills a week", async () => {
+    seedPii({ civicEasternFrom: { S: "2026-10-01T04:00:00.000Z" }, civicVotes: { N: "0" } });
+    setVotes([
+      row("bill-1", "Abstain", null, firstVotedAt("2026-11-10T15:00:00.000Z")),
+      { ...row("bill-2", "Abstain", "2026-11-17T15:00:00.000Z"), legacyDismiss: { BOOL: true } },
+      ...Array.from({ length: 5 }, (_, i) =>
+        row(`bill-${i + 3}`, "Yea", null, firstVotedAt(`2026-11-2${i}T15:00:00.000Z`)),
+      ),
+    ]);
+
+    const body = await scoreAt("2026-11-25T15:00:00.000Z");
+
+    // Two votes in the week of Nov 15 (Nov 20 and 21) and three in the week of Nov 22: each week counts once.
+    expect(weeks(body)).toEqual(expect.objectContaining({ "2026-11-08": 1, "2026-11-15": 2, "2026-11-22": 3 }));
+    expect(body.weeksVotedRecent).toBe(3);
+  });
+
+  it("earns no points and stores nothing new: the score is the same with or without votes spread over weeks", async () => {
+    const spread = [
+      row("bill-1", "Yea", null, firstVotedAt("2026-10-06T15:00:00.000Z")),
+      row("bill-2", "Yea", null, firstVotedAt("2026-10-20T15:00:00.000Z")),
+      row("bill-3", "Yea", null, firstVotedAt("2026-11-03T15:00:00.000Z")),
+    ];
+    // The same three votes, each on its own day, all in one week.
+    const bunched = [
+      row("bill-1", "Yea", null, firstVotedAt("2026-11-02T15:00:00.000Z")),
+      row("bill-2", "Yea", null, firstVotedAt("2026-11-04T15:00:00.000Z")),
+      row("bill-3", "Yea", null, firstVotedAt("2026-11-06T15:00:00.000Z")),
+    ];
+    const record = { civicEasternFrom: { S: "2026-10-01T04:00:00.000Z" }, civicVotes: { N: "0" } };
+    seedPii(record, "user-spread");
+    seedPii(record, "user-bunched");
+    setVotes(spread, "user-spread");
+    setVotes(bunched, "user-bunched");
+
+    const a = await scoreAt("2026-11-25T15:00:00.000Z", "user-spread");
+    const b = await scoreAt("2026-11-25T15:00:00.000Z", "user-bunched");
+
+    expect([a.weeksVotedRecent, b.weeksVotedRecent]).toEqual([3, 1]);
+    const points = (body: ScoreBody) => [body.civicScore, body.voteScore, body.streakBonus, body.honorBonus];
+    expect(points(a)).toEqual(points(b));
+    expect(a.civicScore).toBe(a.voteScore + a.streakBonus + a.honorBonus);
+    // The record on UserPII holds no week attribute.
+    for (const userId of ["user-spread", "user-bunched"]) {
+      expect(Object.keys(recordOf(userId) ?? {}).filter((name) => /week/i.test(name))).toEqual([]);
+    }
   });
 });
 
@@ -938,6 +1090,11 @@ describe("fetchCivicScore companion groups (APPF-23)", () => {
 
     expect(body.totalVotes).toBe(3);
     expect(body.voteScore).toBe(30);
+    // UX-41: the weeks count the pair once too (Feb 1, 3 and 4: the week of Feb 1).
+    expect(body.recentVoteWeeks.find((week) => week.weekStart === "2026-02-01")).toEqual({
+      weekStart: "2026-02-01",
+      count: 3,
+    });
   });
 
   it("lets the primary's Abstain stand for the pair over a Yea on the other member, and counts it (UX-31)", async () => {
