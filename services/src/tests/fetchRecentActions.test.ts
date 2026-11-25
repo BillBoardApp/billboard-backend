@@ -28,13 +28,19 @@ import { logLines } from "./logLines";
 
 type Item = Record<string, AttributeValue>;
 
-interface FakeInput {
+/** What the fake reads of a projection: the attributes to return, "#name" placeholders resolved through the names. */
+interface Projected {
+  ProjectionExpression?: string;
+  ExpressionAttributeNames?: Record<string, string>;
+}
+
+interface FakeInput extends Projected {
   TableName?: string;
   Key?: Item;
   KeyConditionExpression?: string;
   ExpressionAttributeValues?: Item;
   ExclusiveStartKey?: Item;
-  RequestItems?: Record<string, { Keys: Item[] }>;
+  RequestItems?: Record<string, { Keys: Item[] } & Projected>;
 }
 
 interface FakeCommand {
@@ -80,19 +86,43 @@ const page = (rows: Item[], input: FakeInput) => {
   };
 };
 
+/** The item as DynamoDB returns it under the request's ProjectionExpression: only the attributes it names. */
+const project = (item: Item, { ProjectionExpression, ExpressionAttributeNames = {} }: Projected): Item => {
+  if (!ProjectionExpression) return item;
+  const kept: Item = {};
+  for (const token of ProjectionExpression.split(",").map((part) => part.trim())) {
+    const name = token.startsWith("#") ? ExpressionAttributeNames[token] : token;
+    if (!name) throw new Error(`ProjectionExpression names ${token} without an ExpressionAttributeNames entry`);
+    if (item[name] !== undefined) kept[name] = item[name];
+  }
+  return kept;
+};
+
 const routeDynamo = async (command: FakeCommand) => {
   const op = command.constructor.name;
   const input = command.input;
   beforeCommand?.(op, input);
   if (op === "QueryCommand" && input.TableName === FEEDBACK_TABLE) {
-    return page(feedback.get(input.ExpressionAttributeValues![":pk"].S!) ?? [], input);
+    const rows = feedback.get(input.ExpressionAttributeValues![":pk"].S!) ?? [];
+    return page(
+      rows.map((row) => project(row, input)),
+      input,
+    );
   }
   if (op === "QueryCommand" && input.TableName === PREFERENCES_TABLE) {
-    return page(preferences.get(input.ExpressionAttributeValues![":pk"].S!) ?? [], input);
+    const rows = preferences.get(input.ExpressionAttributeValues![":pk"].S!) ?? [];
+    return page(
+      rows.map((row) => project(row, input)),
+      input,
+    );
   }
   if (op === "GetItemCommand" && input.Key?.pk?.S === "BILL_COMPANION_GROUPS") return groupsRow();
   if (op === "BatchGetItemCommand" && input.RequestItems?.[MANIFEST_TABLE]) {
-    const keys = input.RequestItems[MANIFEST_TABLE].Keys;
+    const request = input.RequestItems[MANIFEST_TABLE];
+    const keys = request.Keys;
+    // DynamoDB refuses more than 100 keys in one call, and a key asked for twice.
+    if (keys.length > 100) throw new Error(`BatchGetItem with ${keys.length} keys`);
+    if (new Set(keys.map((key) => key.sk.S)).size !== keys.length) throw new Error("BatchGetItem with duplicate keys");
     const responses: Item[] = [];
     const unprocessed: Item[] = [];
     for (const key of keys) {
@@ -103,7 +133,7 @@ const routeDynamo = async (command: FakeCommand) => {
         continue;
       }
       const row = lookups.get(guid);
-      if (row) responses.push(row);
+      if (row) responses.push(project(row, request));
     }
     return {
       Responses: { [MANIFEST_TABLE]: responses },
@@ -427,6 +457,25 @@ describe("fetchRecentActions", () => {
     expect(items).toHaveLength(50);
     const days = items.map((item) => item.action.date);
     expect(days).toEqual([...days].sort().reverse());
+  });
+
+  it("reads the lookup rows of 150 bills in two BatchGetItem calls of at most 100 keys", async () => {
+    for (let index = 0; index < 150; index += 1) {
+      const guid = `BILLS-119hr${300 + index}`;
+      // Only the last one moved in the window, so one bill is read from S3.
+      const movedAt = index === 149 ? "2026-11-19T18:00:00.000Z" : "2026-09-01T18:00:00.000Z";
+      storeBill(guid, `Bill ${index}`, movedAt, movedAt.slice(0, 10));
+      follow(USER_A, guid);
+    }
+
+    const { items } = await listFor(USER_A);
+
+    const batches = commands(dynamoSend, "BatchGetItemCommand").map(
+      (command) => command.input.RequestItems![MANIFEST_TABLE].Keys.length,
+    );
+    expect(batches).toEqual([100, 50]);
+    expect(s3Keys()).toEqual(["processed-bills/BILLS-119hr449.json"]);
+    expect(items.map((item) => item.billGuid)).toEqual(["BILLS-119hr449"]);
   });
 
   it("skips a bill with no processed copy and lists the rest", async () => {
