@@ -41,6 +41,10 @@ export const BILL_STATS_METRIC_NAMESPACE = 'BillBoard/BillStats';
 // embedded-metric log lines. It must match CIVIC_SCORE_METRIC_NAMESPACE in services/src/handlers/fetchCivicScore.
 export const CIVIC_SCORE_METRIC_NAMESPACE = 'BillBoard/CivicScore';
 
+// UX-35: how many days back GET /recent-actions (FetchRecentActions) lists the caller's bills' actions, Eastern calendar
+// days. The handler reads 1 to 90 and takes 30 for anything else; the app shows the value it gets (windowDays).
+export const RECENT_ACTIONS_WINDOW_DAYS = 30;
+
 // APPF-23 kill switch for companion bills. Only PublishBillsManifest reads it; every other function
 // follows the groups row it writes (BillsManifest pk=BILL_COMPANION_GROUPS, sk=CURRENT).
 // - 'false': the publisher still resolves the groups and emits CompanionGroupsShadow, but publishes

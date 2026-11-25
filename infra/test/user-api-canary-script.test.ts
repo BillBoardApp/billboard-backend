@@ -190,6 +190,10 @@ const authenticatedReplies = (overrides: Record<string, HttpReply> = {}): Record
   'auth-congress-members-manifest': { status: 200, body: JSON.stringify({ members: [{ bioguideId: 'A000001' }] }) },
   'auth-processed-congress-member': { status: 200, body: JSON.stringify({ member: { bioguideId: 'A000001' } }) },
   'auth-latest-weekly-digest': { status: 204 },
+  'auth-recent-actions': {
+    status: 200,
+    body: JSON.stringify({ generatedAt: '2026-11-25T15:00:00.000Z', windowDays: 30, items: [] }),
+  },
   ...overrides,
 });
 
@@ -290,6 +294,7 @@ describe('canary on the snapshot path (C1.9)', () => {
       'auth-congress-members-manifest',
       'auth-processed-congress-member',
       'auth-latest-weekly-digest',
+      'auth-recent-actions',
     ]);
     // The app's own request: the pointer, with the bearer token.
     const pointerStep = mockFakes.httpSteps.find((step) => step.stepName === 'auth-bills-manifest-pointer')!;
@@ -298,9 +303,10 @@ describe('canary on the snapshot path (C1.9)', () => {
     // The pointer's body holds the presigned URL, so it stays out of the Synthetics HTTP report.
     expect(pointerStep.stepConfig).toEqual({ includeResponseBody: false });
     expect(pointerStep.arity).toBe(4);
-    // Every other step calls executeHttpStep exactly as before (three arguments).
+    // Every other step calls executeHttpStep exactly as before (three arguments), but the Updates list (UX-35), which
+    // keeps the test account's votes out of the report the same way.
     mockFakes.httpSteps
-      .filter((step) => step.stepName !== 'auth-bills-manifest-pointer')
+      .filter((step) => !['auth-bills-manifest-pointer', 'auth-recent-actions'].includes(step.stepName))
       .forEach((step) => expect({ step: step.stepName, arity: step.arity }).toEqual({ step: step.stepName, arity: 3 }));
 
     // The download is a plain step, not an HTTP step, with no screenshots.
@@ -442,7 +448,27 @@ describe('product health metrics after C1.9', () => {
 
   test('the write checks stay off unless enabled', async () => {
     await runCanary();
-    expect(mockFakes.httpSteps.map((step) => step.options.method)).toEqual(Array(8).fill('GET'));
+    expect(mockFakes.httpSteps.map((step) => step.options.method)).toEqual(Array(9).fill('GET'));
+  });
+});
+
+describe('the Updates list step (UX-35)', () => {
+  test('asks GET /recent-actions with the bearer token and keeps the account\'s votes out of the report', async () => {
+    await runCanary();
+    const step = mockFakes.httpSteps.find((entry) => entry.stepName === 'auth-recent-actions')!;
+    expect(stepPath('auth-recent-actions')).toBe('/prod/recent-actions');
+    expect(step.options.method).toBe('GET');
+    expect(step.options.headers.Authorization).toBe('Bearer fake-id-token');
+    expect(step.stepConfig).toEqual({ includeResponseBody: false });
+  });
+
+  test('fails the run on another status, or on a body without items or windowDays', async () => {
+    mockFakes.httpReplies['auth-recent-actions'] = { status: 500, body: '{"error":"Internal server error"}' };
+    expect(await failure()).toBe('auth-recent-actions: expected 200, got 500');
+    mockFakes.httpReplies['auth-recent-actions'] = { status: 200, body: '{"windowDays":30}' };
+    expect(await failure()).toBe('auth-recent-actions: missing items array');
+    mockFakes.httpReplies['auth-recent-actions'] = { status: 200, body: '{"items":[]}' };
+    expect(await failure()).toBe('auth-recent-actions: missing windowDays');
   });
 });
 

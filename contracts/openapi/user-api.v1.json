@@ -568,6 +568,25 @@
         "x-billboard-handler": "services/src/handlers/fetchBillStats"
       }
     },
+    "/recent-actions": {
+      "get": {
+        "operationId": "getRecentActions",
+        "summary": "List the caller's bills with an action in Congress in the last 30 days (the Updates list)",
+        "description": "UX-35. Read at request time from the caller's own rows only: their Yea, Nay and Abstain votes (never a 1.0 or 1.1 Updates dismissal) and Watch rows, a companion group as one bill. Each row is the bill's latest action in the window in a push's words, with the caller's own vote, the Eastern day it was saved and, when a House or Senate roll call in the window came on a later day, how many days before it (UX-41). No count or other user's vote. Newest first, at most 50; 200 with items [] when there is nothing to show.",
+        "tags": ["Bills"],
+        "responses": {
+          "200": {
+            "description": "The caller's recent actions",
+            "content": {
+              "application/json": { "schema": { "$ref": "../schemas/entities/recent-actions.v1.schema.json" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        },
+        "x-billboard-handler": "services/src/handlers/fetchRecentActions"
+      }
+    },
     "/civic-score": {
       "get": {
         "operationId": "getCivicScore",

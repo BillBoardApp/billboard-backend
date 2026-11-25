@@ -100,6 +100,7 @@ import {
   PRE_SIGN_UP_CHECK_TIMEOUT_SECONDS,
   PUBLISH_BILLS_MANIFEST_MEMORY_MB,
   PUBLISH_BILLS_MANIFEST_TIMEOUT_SECONDS,
+  RECENT_ACTIONS_WINDOW_DAYS,
   RESTAMP_USER_VOTES_BATCH_SIZE,
   RESTAMP_USER_VOTES_DLQ_MAX_RECEIVE_COUNT,
   RESTAMP_USER_VOTES_DLQ_NAME,
@@ -221,6 +222,8 @@ export class UserAPIServiceStack extends cdk.Stack {
   public readonly registerUserDevice: lambda.IFunction;
   public readonly deviceNotificationSettings: lambda.IFunction;
   public readonly fetchFeedback: lambda.IFunction;
+  /** UX-35: GET /recent-actions, the Updates list of the caller's bills. */
+  public readonly fetchRecentActions: lambda.IFunction;
   public readonly setFeedback: lambda.IFunction;
   public readonly fetchBillStats: lambda.IFunction;
   public readonly deletePreferences: lambda.IFunction;
@@ -723,6 +726,38 @@ export class UserAPIServiceStack extends cdk.Stack {
       actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
       resourceArns: [piiTable.tableArn],
     });
+
+    // UX-35: the Updates list, read at request time and only for the caller (the authorizer's sub): a Query of their
+    // UserFeedback and UserPreferences partitions, then for their bills and companions the manifest's BILL_GUID lookup
+    // rows (BatchGetItem) and the companion groups row (GetItem), and at most 60 processed bills under
+    // processed-bills/ (GetObject; the bucket listing lets a bill that is not stored read as missing). No other
+    // partition of BillsManifest, no other user's rows, no writes.
+    this.fetchRecentActions = addProdFunction('FetchRecentActions', 'fetchRecentActions', {
+      environment: {
+        FEEDBACK_TABLE_NAME: USER_FEEDBACK_TABLE_NAME,
+        FEEDBACK_PARTITION_KEY: USER_PARTITION_KEY,
+        FEEDBACK_SORT_KEY: USER_FEEDBACK_SORT_KEY,
+        PREFERENCES_TABLE_NAME: USER_PREFERENCES_TABLE_NAME,
+        PREFERENCES_PARTITION_KEY: USER_PARTITION_KEY,
+        PREFERENCES_SORT_KEY: USER_PREFERENCES_SORT_KEY,
+        BUCKET_NAME: BILL_STORE_BUCKET_NAME,
+        // The manifest table and its BILL_GUID and companion-groups partitions (APPF-23: a pair is one row).
+        ...BILL_COMPANION_ENVIRONMENT,
+        RECENT_ACTIONS_WINDOW_DAYS: String(RECENT_ACTIONS_WINDOW_DAYS),
+      },
+      memorySize: 512,
+      timeout: cdk.Duration.seconds(10),
+    }).alias;
+    iam.Grant.addToPrincipal({
+      grantee: this.fetchRecentActions,
+      actions: ['dynamodb:Query'],
+      resourceArns: [feedbackTable.tableArn, preferencesTable.tableArn],
+    });
+    grantStoreTablePartitions(this.fetchRecentActions, billsManifestTable, ['BatchGetItem'], [
+      BILLS_MANIFEST_GUID_LOOKUP_PK_VALUE,
+    ]);
+    grantCompanionGroupsRead(this, this.fetchRecentActions);
+    billStoreBucket.grantRead(this.fetchRecentActions, 'processed-bills/*');
 
     this.fetchCivicProfile = addProdFunction('FetchCivicProfile', 'fetchCivicProfile', {
       environment: {
@@ -1846,6 +1881,9 @@ export class UserAPIServiceStack extends cdk.Stack {
 
     const billStats = this.userApi.root.addResource('bill-stats');
     gateway.addCognitoMethod(billStats, 'GET', this.fetchBillStats);
+
+    const recentActions = this.userApi.root.addResource('recent-actions');
+    gateway.addCognitoMethod(recentActions, 'GET', this.fetchRecentActions);
 
     const civicScore = this.userApi.root.addResource('civic-score');
     gateway.addCognitoMethod(civicScore, 'GET', this.fetchCivicScore);

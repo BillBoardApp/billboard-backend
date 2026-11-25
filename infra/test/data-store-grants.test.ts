@@ -70,6 +70,7 @@ describe('data store grants (CQ-15)', () => {
   // groups row only, except UserMatcher, which resolves one bill's companion itself. UX-40 L7: FetchFeedback
   // (GET /account-data/votes) batch-reads the bill rows and their guid lookup rows for titles, and no companion row.
   // UX-39d: FetchCongressMemberRecord reads bill rows and their guid lookups only, never a companion row.
+  // UX-35: FetchRecentActions reads the groups row and the guid lookups only, never a BILL row or a link list.
   test('the companion rows are reached only through these partition-scoped grants', () => {
     const scoped = Object.entries(normalizedRolePermissions(stacks)).flatMap(([identity, byResource]) =>
       Object.entries(byResource)
@@ -84,6 +85,8 @@ describe('data store grants (CQ-15)', () => {
       'fn:FetchCongressMemberRecord table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL","BILL_GUID"]}} -> dynamodb:BatchGetItem',
       'fn:FetchFeedback table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL","BILL_GUID"]}} -> dynamodb:BatchGetItem',
       `fn:FetchProcessedBill ${groupsOnly} -> dynamodb:GetItem`,
+      `fn:FetchRecentActions ${groupsOnly} -> dynamodb:GetItem`,
+      'fn:FetchRecentActions table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL_GUID"]}} -> dynamodb:BatchGetItem',
       `fn:PublishBillsManifest ${groupsOnly} -> dynamodb:PutItem`,
       'fn:UserMatcher table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL_COMPANION_DECL"]}} -> dynamodb:Query',
       'fn:UserMatcher table/BillsManifest if {"ForAllValues:StringEquals":{"dynamodb:LeadingKeys":["BILL_COMPANION_GROUPS","BILL_GUID"]}} -> dynamodb:GetItem',

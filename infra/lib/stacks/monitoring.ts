@@ -165,6 +165,7 @@ export const MONITORED_LAMBDA_NAMES: readonly string[] = [
   'SetPreferences',
   'FetchProcessedBill',
   'FetchFeedback',
+  'FetchRecentActions',
   'SetFeedback',
   'FetchBillStats',
   'FetchCivicScore',
