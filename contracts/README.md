@@ -80,10 +80,10 @@ How the schemas map to code:
   `VERIFICATION_*` and `APP_ATTEST_*` in the script) and UX-32's `CIVIC_PROFILE_*` must be accepted or rejected as
   listed there: both spellings of each renamed sub-category and the near-miss spellings; `BillStats` with and without
   `comparison`, a withheld verified split, and the `weighted*` fields old builds need; `limitReason`;
-  `UserCivicProfile` with and without the theme lock's fields and `themeVotes`; `VoteExport` (`VOTE_EXPORT_*`); the
-  App Attest bodies, header grammar, `clientData`,
-  version, ClientMetadata and `Retry-After`. A case may also be a literal value (for a schema with no fixture, such
-  as a header). The script prints how many cases ran.
+  `UserCivicProfile` with and without the theme lock's fields and `themeVotes`; `CivicScore`'s weeks (`CIVIC_SCORE_*`);
+  `VoteExport` (`VOTE_EXPORT_*`); the App Attest bodies, header grammar, `clientData`, version, ClientMetadata and
+  `Retry-After`. A case may also be a literal value (for a schema with no fixture, such as a header). The script
+  prints how many cases ran.
 - Rules a schema cannot express: manifest `count` equals the array length; release artifact names are unique;
   the life-area enum matches `services/src/models/lifeAreas.ts`; the sub-category enum equals the current names in
   `services/src/models/categories.ts` plus the keys of `LEGACY_SUB_CATEGORY_ALIASES` there (read as quoted
@@ -93,8 +93,9 @@ How the schemas map to code:
   the `BillStats` sample has `weighted*` equal to the plain counts in every bucket and a `comparison` derived from
   `totals` and `segments.verified`; the ClientMetadata sample's assertion carries a 32-byte key ID and sign-up
   `clientData`; the `UserCivicProfile` sample's `themeVotes` has no count above `votesUsed`, and its themes at
-  `minThemeVotes` or more are exactly the themes in `axes`, `themesReady` of them; the `VoteExport` sample's reasons
-  are sorted and distinct.
+  `minThemeVotes` or more are exactly the themes in `axes`, `themesReady` of them; the `CivicScore` sample's weeks are
+  consecutive Sundays ending with the week of its last day, with `weeksVotedRecent` the weeks voted in; the `VoteExport`
+  sample's reasons are sorted and distinct.
 - `openapi/user-api.v1.json` validates as OpenAPI 3.1 with its `$ref`s into `schemas/`, and documents exactly the
   routes (method, path and auth) declared in `infra/lib/stacks/user-api-service.ts`. `stackRoutes()` parses that file:
   one `const` per resource from `parent.addResource('segment')`, then `addCognitoMethod`, `addPublicMethod` or
@@ -311,6 +312,25 @@ enough data · 5 of 8 votes"). Builds 1.1 and 1.2 ignore the new field.
 - The sample carries it; the `CIVIC_PROFILE_*` cases accept a body without it and one with every count 0, and reject
   a missing or unknown theme, a negative, fractional or string count, and `null`. Not generated, so services and the
   app type it by hand.
+
+## Weeks you voted (UX-41 concept 3)
+
+App 1.3 shows "Weeks you voted: 6 of the last 8" and a strip of 8 week marks on Profile, in place of the day-streak
+chips. Builds 1.1 and 1.2 require every `CivicScore` key they know and ignore the rest, so both fields are optional
+and every day field stays.
+
+- `CivicScore.recentVoteWeeks`: exactly 8 `{weekStart, count}`, oldest first, the current week last. A week runs
+  Sunday to Saturday in America/New_York (the Weekly Brief's week), also before a user's switch to Eastern days (their
+  days stay UTC days until then; weeks have no streak to protect). `weekStart` is its Sunday; `count` is the bills
+  first voted on in it (`firstVotedAt`, so a changed vote never moves its week), Yea, Nay and Abstain alike, a
+  companion pair once.
+- `CivicScore.weeksVotedRecent`: the weeks of `recentVoteWeeks` with a count above 0, 0 to 8. One vote fills a week.
+- Weeks earn no points (project decision 2026-11-23, D85): the score, rank, honors and the stored record are unchanged.
+- The `CivicScore` sample carries both; the `CIVIC_SCORE_*` cases accept a body without them and one with no vote in
+  8 weeks, and reject 7 or 9 weeks, a week without or with a non-date `weekStart`, a negative count, an undeclared
+  field, `weeksVotedRecent` above 8 or fractional, and `null`. The sample's weeks must be consecutive Sundays ending
+  with the week of its last day, with `weeksVotedRecent` the weeks voted in. Not generated, so the app types it by hand
+  (`CivicScore.swift`).
 
 ## Download my votes (UX-40 L7)
 
