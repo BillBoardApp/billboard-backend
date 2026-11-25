@@ -323,8 +323,10 @@ and every day field stays.
 - `CivicScore.recentVoteWeeks`: exactly 8 `{weekStart, count}`, oldest first, the current week last. A week runs
   Sunday to Saturday in America/New_York (the Weekly Brief's week), also before a user's switch to Eastern days (their
   days stay UTC days until then; weeks have no streak to protect). `weekStart` is its Sunday; `count` is the bills
-  first voted on in it (`firstVotedAt`, so a changed vote never moves its week), Yea, Nay and Abstain alike, a
-  companion pair once.
+  first voted on in it (`firstVotedAt`, so a changed vote never moves its week), Yea, Nay and Abstain alike. A
+  companion pair counts once, in the week of the vote the score keeps for it (on the House bill, the group's primary,
+  when there is one, else the first), the vote its day also comes from; a vote on the other bill in another week does
+  not mark that week.
 - `CivicScore.weeksVotedRecent`: the weeks of `recentVoteWeeks` with a count above 0, 0 to 8. One vote fills a week.
 - Weeks earn no points, and the day-streak bonus is frozen (project decision 2026-11-23, D85 (a)) at the freeze,
   Monday 2026-11-23 00:00 America/New_York. `streakBonus` is 5 x the larger of the best streak on the caller's record
