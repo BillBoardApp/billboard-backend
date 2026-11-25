@@ -418,6 +418,19 @@ describe("who gets it", () => {
     expect(mockWorld.snapshots.get(`old|${WINDOW_ID}`)!.pushClaimedAt).toBeUndefined();
   });
 
+  // UX-28 review: for months almost every device is on 1.1 or 1.2, so the devices are read first and a user with none
+  // that takes the brief costs one device Query and no snapshot read, in each of the day's runs.
+  it("reads no snapshot for a user without a device that takes the brief", async () => {
+    addUser("old", { state: "NY", devices: [{ brief: null }, { id: "off", brief: false }] });
+    addUser("nobrief", { state: "NY", devices: [{ brief: false }], digest: null });
+
+    const result = await runAt(RUN_1030_ET);
+
+    expect(result.users).toEqual(expect.objectContaining({ no_device: 2, no_brief: 0 }));
+    expect(mockWorld.commands.filter((command) => command.__type === "GetItem")).toEqual([]);
+    expect(mockWorld.commands.filter((command) => command.__type === "Query")).toHaveLength(2);
+  });
+
   it.each([
     ["under 18", { adultStatus: "self_reported_under18" }],
     ["not yet attested", { adultStatus: "unknown" }],
