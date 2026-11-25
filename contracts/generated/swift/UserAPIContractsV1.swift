@@ -425,8 +425,10 @@ nonisolated enum UserAPIContractsV1 {
         /// Your bills this week (UX-41 concept 4): the bills the reader voted on whose latest action is dated in the
         /// week, newest action first, at most 20; left out when there are none. A top-level list because apps 1.1 and
         /// 1.2 decode section kinds as a strict enum and ignore unknown top-level keys; app 1.3 shows it first. Each
-        /// item's reason is "You voted on this"; no item carries the vote itself. The sections are unchanged for apps
-        /// 1.1 and 1.2, so a bill listed here can also be in a section; app 1.3 shows it once, here.
+        /// item's reason is "You voted on this"; no item carries the vote itself. It is built from the reader's votes,
+        /// not from the sections, so it can list a bill no section shows, and a brief can hold it with no section (GET
+        /// /weekly-digests/latest serves that brief only to app 1.3 and later). The sections are unchanged for apps 1.1
+        /// and 1.2, so a bill listed here can also be in a section; app 1.3 shows it once, here.
         let yourBills: [WeeklyDigestItem]?
     }
 

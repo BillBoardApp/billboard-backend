@@ -68,6 +68,8 @@ interface BuildOptions {
   watched?: string[];
   votedOn?: string[];
   memberNames?: Record<string, string>;
+  /** The bill types the reader chose; default: all. */
+  contentTypes?: Array<"bills" | "joint_resolutions" | "other_resolutions">;
   /** Companion pairs (APPF-23), House bill first. */
   companions?: Array<[string, string]>;
   /** Collects the guids whose processed bills the builder loads. */
@@ -82,7 +84,7 @@ async function build(options: BuildOptions): Promise<WeeklyDigest | null> {
       trackedLifeAreas: options.lifeAreas ?? [],
       followedMembers: options.followed ?? [],
       watchedBillGuids: options.watched ?? [],
-      selectedBillContentTypes: [],
+      selectedBillContentTypes: options.contentTypes ?? [],
     },
     voteStatesByBillId: new Map(
       (options.votedOn ?? []).map((billId) => [billId.toLowerCase(), { billId, feedback: "Yea" }]),
@@ -509,7 +511,7 @@ describe("your bills this week (yourBills)", () => {
     expect(digest).not.toHaveProperty("yourBills");
   });
 
-  it("loads and lists voted bills ranked past the dozen the sections draw on, up to 20", async () => {
+  it("loads and lists voted bills ranked past the dozen the sections draw on, and lists 20", async () => {
     // Twelve watched bills fill the sections' slots; 25 voted bills rank after them.
     const watched = Array.from({ length: 12 }, (_, index) =>
       entry(`BILLS-119hr${100 + index}`, { billStatus: "Passed" }),
@@ -529,11 +531,84 @@ describe("your bills this week (yourBills)", () => {
       loaded,
     });
 
-    expect(loaded.filter((guid) => guid.startsWith("BILLS-119s"))).toHaveLength(20);
+    expect(loaded.filter((guid) => guid.startsWith("BILLS-119s"))).toHaveLength(25);
     expect(digest!.yourBills).toHaveLength(20);
     const days = digest!.yourBills!.map((item) => item.summary.slice(0, 6));
     expect(days).toEqual([...days].sort((left, right) => Date.parse(`${right} 2026`) - Date.parse(`${left} 2026`)));
     expect(items(digest).some((item) => item.billGuid?.startsWith("BILLS-119s"))).toBe(false);
+  });
+
+  // UX-28 review: Your bills was built from the section candidates, so a voted bill with no bucket of its own never
+  // reached it, and when it was the reader's only match they got no brief and no push.
+  it.each(["Passed", "Failed", "Finalized", "New"] as const)(
+    "lists a voted bill that is %s with no watch, followed member, topic or life area",
+    async (billStatus) => {
+      const digest = await build({
+        items: [entry("BILLS-119hr5", { billStatus, subCategories: [] })],
+        bills: { "BILLS-119hr5": acted("2026-03-19") },
+        topics: [],
+        votedOn: ["BILLS-119hr5"],
+      });
+
+      expect(digest!.yourBills).toEqual([
+        expect.objectContaining({ billGuid: "BILLS-119hr5", reason: "You voted on this" }),
+      ]);
+      // No section shows it, as before: the brief holds Your bills alone, which only app 1.3 is served.
+      expect(digest!.sections).toEqual([]);
+      expect(digest!.summary).toBe("Here is your week in Congress.");
+    },
+  );
+
+  it("lists a voted bill the sections leave out: a ceremonial resolution, or a bill type the reader turned off", async () => {
+    const digest = await build({
+      items: [
+        entry("BILLS-119hres10", { billStatus: "Passed", title: "Recognizing National Farm Safety Week" }),
+        entry("BILLS-119hjres11", { billStatus: "Passed", updatedAt: "2026-03-17T15:00:00.000Z" }),
+      ],
+      bills: {
+        "BILLS-119hres10": acted("2026-03-19", "Resolution agreed to in House."),
+        "BILLS-119hjres11": acted("2026-03-17"),
+      },
+      contentTypes: ["bills"],
+      votedOn: ["BILLS-119hres10", "BILLS-119hjres11"],
+    });
+
+    expect(digest!.yourBills!.map((item) => item.billGuid)).toEqual(["BILLS-119hres10", "BILLS-119hjres11"]);
+    expect(digest!.sections).toEqual([]);
+  });
+
+  it("loads at most 40 voted bills, the most recently updated first", async () => {
+    const voted = Array.from({ length: 45 }, (_, index) =>
+      entry(`BILLS-119s${index + 1}`, {
+        billStatus: "Passed",
+        subCategories: [],
+        updatedAt: new Date(Date.parse("2026-03-15T12:00:00.000Z") + index * 3_600_000).toISOString(),
+      }),
+    );
+    const loaded: string[] = [];
+    const digest = await build({
+      items: voted,
+      bills: Object.fromEntries(voted.map((bill) => [bill.guid, acted("2026-03-19")])),
+      topics: [],
+      votedOn: voted.map((bill) => bill.guid),
+      loaded,
+    });
+
+    expect(new Set(loaded)).toEqual(new Set(voted.slice(5).map((bill) => bill.guid)));
+    expect(digest!.yourBills).toHaveLength(20);
+  });
+
+  it("leaves out a voted bill not updated in the week", async () => {
+    const digest = await build({
+      items: [
+        entry("BILLS-119hr5", { billStatus: "Passed", subCategories: [], updatedAt: "2026-03-10T15:00:00.000Z" }),
+      ],
+      bills: { "BILLS-119hr5": acted("2026-03-19") },
+      topics: [],
+      votedOn: ["BILLS-119hr5"],
+    });
+
+    expect(digest).toBeNull();
   });
 
   it("lists a companion pair once, whichever bill the reader voted on", async () => {

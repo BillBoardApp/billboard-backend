@@ -43,10 +43,13 @@ import {
  * - "Your bills this week" (`yourBills`, UX-41 concept 4, decision D5 (a)): every bill the user voted on whose latest
  *   action is dated in the week, newest action first, at most YOUR_BILLS_MAX. It is a top-level field because apps 1.1
  *   and 1.2 decode section kinds as a strict enum but ignore unknown top-level keys; app 1.3 shows it first. Its items
- *   say "You voted on this" (1.3 words the reader's own vote from its own store); no vote choice is ever written. The
+ *   say "You voted on this" (1.3 words the reader's own vote from its own store); no vote choice is ever written. It is
+ *   built apart from the sections, from the voted bills themselves, so a voted bill no section would show (one that
+ *   passed, failed, became law or is new, with no watch, followed member, topic or life area) is listed too. The
  *   sections are built exactly as before, so 1.1 and 1.2, which never read the list, keep every item they showed: a
  *   bill listed here can also be in a section, and app 1.3 shows it once, here. The field is left out in a week with
- *   no such bill.
+ *   no such bill. A brief can hold Your bills alone, with no section; fetchLatestWeeklyDigest serves that one only to
+ *   app 1.3 and later, since 1.1 and 1.2 would show it empty.
  * - A member is named only by the name the members table stores (REL-46 A4). One who is not there, such as a member
  *   who left Congress, gets no member item and no "Backed by" reason: the brief never shows a bioguide id as a name.
  *   Nor do they count toward a bill's rank, so a bill that only such a member backs is not in the brief unless
@@ -63,6 +66,12 @@ const CONTEXT_TEXT_MAX_CHARS = 300;
 const HYDRATED_CANDIDATES = 12;
 /** The most bills "Your bills this week" lists (UX-41 concept 4): a bound on the snapshot, far above a usual week. */
 export const YOUR_BILLS_MAX = 20;
+/**
+ * The most voted bills whose processed bills are loaded for Your bills, the most recently updated first: only a loaded
+ * bill shows whether its latest action is dated in the week. Twice YOUR_BILLS_MAX, so a busy voter's list is still
+ * full; each bill loads once per run, shared by every user.
+ */
+export const YOUR_BILLS_HYDRATED = 2 * YOUR_BILLS_MAX;
 /** A yourBills item's reason; app 1.3 says the reader's own vote instead ("You voted Yea"). */
 export const YOUR_BILLS_REASON = "You voted on this";
 
@@ -105,7 +114,12 @@ type PriorityBucket =
   | "followed_representatives"
   | "voted_updated"
   | "passed_tracked"
-  | "tracked_movement";
+  | "tracked_movement"
+  /**
+   * UX-41 concept 4: a voted bill nothing else makes the reader's (one that passed, failed, became law or is new, with
+   * no watch, followed member, topic or life area). Only Your bills this week reads it; no section ever sees it.
+   */
+  | "voted_moved";
 
 interface Candidate {
   manifest: BillManifestEntry;
@@ -168,6 +182,7 @@ const PRIORITY_ORDER: PriorityBucket[] = [
   "voted_updated",
   "passed_tracked",
   "tracked_movement",
+  "voted_moved",
 ] as const;
 
 // Finalized (the bill became law, REL-44) ranks first: it is the last and biggest step a bill takes. Until REL-44 no
@@ -972,6 +987,37 @@ function withCeremonial(candidate: Candidate, ceremonial: boolean): Candidate | 
   return members.length > 0 ? companionGroupCandidate(candidate, members) : null;
 }
 
+/** A voted bill nothing else makes the reader's, as Your bills reads it ("voted_moved"; see PriorityBucket). */
+function votedOnly(facts: CandidateFacts): Candidate {
+  return { ...facts, topicMatches: [], lifeAreaMatches: [], inTrackedAreas: false, priorityBucket: "voted_moved" };
+}
+
+/**
+ * Your bills this week (UX-41 concept 4): of `voted` (built apart from the sections), the bills whose latest action is
+ * dated in the week, newest action first, at most YOUR_BILLS_MAX, each saying "You voted on this". A bill is loaded as
+ * it is, with no ceremonial verdict: the reader voted on it, so nothing about it leaves it out.
+ */
+async function buildYourBills(voted: Candidate[], input: WeeklyDigestBuildInput): Promise<WeeklyDigestItem[]> {
+  const loaded = await Promise.all(
+    voted.map(async (candidate): Promise<RankedCandidate> => {
+      const bill = (await input.loadProcessedBill(candidate.manifest)) ?? createPlaceholderBill(candidate.manifest);
+      return { ...candidate, bill };
+    }),
+  );
+  return loaded
+    .map((candidate) => ({ candidate, action: latestActionInWeek(candidate.bill, input.window) }))
+    .filter((entry): entry is { candidate: RankedCandidate; action: WeekAction } => entry.action !== undefined)
+    .sort(
+      (left, right) =>
+        right.action.day.localeCompare(left.action.day) || compareCandidates(left.candidate, right.candidate),
+    )
+    .slice(0, YOUR_BILLS_MAX)
+    .map(({ candidate }) => ({
+      ...makeBillItem(candidate, input.window, input.memberNameById, "movement"),
+      reason: YOUR_BILLS_REASON,
+    }));
+}
+
 export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<WeeklyDigest | null> {
   const companions = input.companionIndex ?? new Map<string, CompanionGroupV1>();
   // The watched, voted and used sets are keyed by bill, except that a companion group's members
@@ -1002,43 +1048,59 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
       .map((memberId) => memberId.toUpperCase())
       .filter(countsAsFollowed);
 
+  /** A manifest row updated in the week, before its matches count; null for any other row. */
+  const factsOf = (item: BillManifestEntry): CandidateFacts | null => {
+    const updatedAt = parseDate(item.updatedAt);
+    if (!updatedAt || updatedAt < input.window.start || updatedAt >= dayAfterWeekEnd) {
+      return null;
+    }
+
+    const sponsoringMemberIds = Array.from(new Set(followedIds(item.sponsors))).sort();
+    return {
+      manifest: item,
+      status: normalizeBillStatus(item.billStatus),
+      updatedAt,
+      watched: watchedBillGuids.has(billKey(item.guid)),
+      userPreviouslyVoted: votedBillKeys.has(billKey(item.guid)),
+      followedAreas: {
+        topics: currentTopicNames(item.subCategories ?? []).filter((value) => trackedTopics.has(normalizeTopic(value))),
+        lifeAreas: (item.lifeAreas ?? []).filter((value) => trackedLifeAreas.has(normalize(value))),
+      },
+      matchingMemberIds: Array.from(new Set([...sponsoringMemberIds, ...followedIds(item.cosponsors)])).sort(),
+      sponsoringMemberIds,
+      // The manifest row has only the headline, which may leave out what makes a resolution more than
+      // ceremonial. So it only ranks the bill last here; its matches all count until the official title,
+      // read once the bill is loaded, says otherwise (ceremonialVerdict).
+      ceremonial: false,
+      looksCeremonial: isCommemorativeResolution({ guid: item.guid, billType: item.billType, title: item.title }),
+    };
+  };
+
   const candidates = input.manifestItems
-    .map((item): Candidate | null => {
-      if (!billTypeMatchesContentPreferences(item.billType, allowedContentTypes)) {
-        return null;
-      }
-
-      const updatedAt = parseDate(item.updatedAt);
-      if (!updatedAt || updatedAt < input.window.start || updatedAt >= dayAfterWeekEnd) {
-        return null;
-      }
-
-      const sponsoringMemberIds = Array.from(new Set(followedIds(item.sponsors))).sort();
-      return classify({
-        manifest: item,
-        status: normalizeBillStatus(item.billStatus),
-        updatedAt,
-        watched: watchedBillGuids.has(billKey(item.guid)),
-        userPreviouslyVoted: votedBillKeys.has(billKey(item.guid)),
-        followedAreas: {
-          topics: currentTopicNames(item.subCategories ?? []).filter((value) =>
-            trackedTopics.has(normalizeTopic(value)),
-          ),
-          lifeAreas: (item.lifeAreas ?? []).filter((value) => trackedLifeAreas.has(normalize(value))),
-        },
-        matchingMemberIds: Array.from(new Set([...sponsoringMemberIds, ...followedIds(item.cosponsors)])).sort(),
-        sponsoringMemberIds,
-        // The manifest row has only the headline, which may leave out what makes a resolution more than
-        // ceremonial. So it only ranks the bill last here; its matches all count until the official title,
-        // read once the bill is loaded, says otherwise (ceremonialVerdict).
-        ceremonial: false,
-        looksCeremonial: isCommemorativeResolution({ guid: item.guid, billType: item.billType, title: item.title }),
-      });
+    .filter((item) => billTypeMatchesContentPreferences(item.billType, allowedContentTypes))
+    .map((item) => {
+      const facts = factsOf(item);
+      return facts ? classify(facts) : null;
     })
     .filter((value): value is Candidate => value !== null);
   const rankedCandidates = collapseCompanionCandidates(candidates, companions).sort(compareCandidates);
 
-  if (rankedCandidates.length === 0) {
+  // UX-41 concept 4: Your bills this week is built apart from the sections, from every bill the reader voted on that
+  // was updated in the week, whatever the ranking makes of it: a voted bill that passed, failed, became law or is new
+  // has no bucket of its own unless it is watched or matches a member, topic or life area. Nor does the content-type
+  // choice or a ceremonial verdict leave it out: the reader voted on it. Companion groups are one bill, as in the
+  // sections; the most recently updated are loaded first (YOUR_BILLS_HYDRATED).
+  const votedCandidates = collapseCompanionCandidates(
+    input.manifestItems
+      .map((item) => (votedBillKeys.has(billKey(item.guid)) ? factsOf(item) : null))
+      .filter((facts): facts is CandidateFacts => facts !== null)
+      .map((facts) => classify(facts) ?? votedOnly(facts)),
+    companions,
+  )
+    .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime() || compareCandidates(left, right))
+    .slice(0, YOUR_BILLS_HYDRATED);
+
+  if (rankedCandidates.length === 0 && votedCandidates.length === 0) {
     return null;
   }
 
@@ -1055,19 +1117,10 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
       .filter((candidate): candidate is RankedCandidate => candidate !== null)
       .sort(compareCandidates);
 
-  const hydratedCandidates = await hydrate(rankedCandidates.slice(0, HYDRATED_CANDIDATES));
-  // UX-41 concept 4: "Your bills this week" lists every voted bill that moved, also those ranked past the dozen the
-  // sections draw on. Their processed bills are loaded too (once per run, shared by every user), up to YOUR_BILLS_MAX.
-  const votedBeyondSections = await hydrate(
-    rankedCandidates
-      .slice(HYDRATED_CANDIDATES)
-      .filter((candidate) => candidate.userPreviouslyVoted)
-      .slice(0, YOUR_BILLS_MAX),
-  );
-
-  if (hydratedCandidates.length === 0 && votedBeyondSections.length === 0) {
-    return null;
-  }
+  const [hydratedCandidates, yourBills] = await Promise.all([
+    hydrate(rankedCandidates.slice(0, HYDRATED_CANDIDATES)),
+    buildYourBills(votedCandidates, input),
+  ]);
 
   const consumed = new Set<string>();
   // A grouped candidate is used under its group's key; otherwise, as before, under its bill's guid.
@@ -1098,22 +1151,6 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
       return makeBillItem(candidate, input.window, input.memberNameById, "attention");
     });
 
-  // UX-41 concept 4: the voted bills with an action dated in the week, newest action first. No section takes notice
-  // of it (see the module comment).
-  const yourBills = [...hydratedCandidates, ...votedBeyondSections]
-    .filter((candidate) => candidate.userPreviouslyVoted)
-    .map((candidate) => ({ candidate, action: latestActionInWeek(candidate.bill, input.window) }))
-    .filter((entry): entry is { candidate: RankedCandidate; action: WeekAction } => entry.action !== undefined)
-    .sort(
-      (left, right) =>
-        right.action.day.localeCompare(left.action.day) || compareCandidates(left.candidate, right.candidate),
-    )
-    .slice(0, YOUR_BILLS_MAX)
-    .map(({ candidate }) => ({
-      ...makeBillItem(candidate, input.window, input.memberNameById, "movement"),
-      reason: YOUR_BILLS_REASON,
-    }));
-
   const movedThisWeek = hydratedCandidates
     .filter((candidate) => !consumed.has(usedKey(candidate)))
     .slice(0, 3)
@@ -1122,8 +1159,12 @@ export async function buildWeeklyDigest(input: WeeklyDigestBuildInput): Promise<
       return makeBillItem(candidate, input.window, input.memberNameById, "movement");
     });
 
-  // Every candidate of the week, not only the hydrated dozen: the counts are the members' real ones (S2).
-  const representatives = buildMemberActivityRows(rankedCandidates, input.memberNameById).slice(0, 3).map(memberItem);
+  // Every candidate of the week, not only the hydrated dozen: the counts are the members' real ones (S2). None when no
+  // loaded candidate is left, as before Your bills: the sections are then empty, and 1.1 and 1.2 get no brief.
+  const representatives =
+    hydratedCandidates.length === 0
+      ? []
+      : buildMemberActivityRows(rankedCandidates, input.memberNameById).slice(0, 3).map(memberItem);
 
   const worthQuickLook = hydratedCandidates
     .filter((candidate) => {

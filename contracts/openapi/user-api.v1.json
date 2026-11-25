@@ -230,7 +230,7 @@
               "application/json": { "schema": { "$ref": "../schemas/entities/weekly-digest.v1.schema.json" } }
             }
           },
-          "204": { "description": "No digest was stored for the caller for the latest published week" },
+          "204": { "description": "No digest was stored for the caller for the latest published week, or the stored one has only yourBills (no section) and the request does not carry X-Billboard-App-Version 1.3 or later (apps 1.1 and 1.2 would show it empty, UX-41 concept 4)" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "500": { "$ref": "#/components/responses/InternalError" }
         },

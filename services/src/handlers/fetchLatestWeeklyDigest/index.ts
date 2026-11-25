@@ -1,7 +1,9 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { WeeklyDigestSnapshotDao } from "../../adapters/weeklyDigestSnapshotDao";
+import type { WeeklyDigest } from "../../models/weeklyDigest";
 import { emptyJsonResponse, getAuthenticatedUserId, jsonResponse } from "../../shared/apiGateway";
+import { APP_VERSION_HEADER, isBelowMinimumVersion, readHeader } from "../../shared/appAttest/wire";
 import { logger } from "../../shared/logger";
 import { emitEmbeddedMetrics } from "../../shared/metrics";
 import { latestPublishedWindow } from "../../shared/weeklyDigestSchedule";
@@ -28,6 +30,17 @@ const countPushOpen = (event: APIGatewayProxyEvent): void => {
   emitEmbeddedMetrics(METRIC_NAMESPACE, [{ name: "WeeklyBriefOpenedFromPush", value: 1 }]);
 };
 
+/**
+ * UX-41 concept 4: a brief can hold Your bills this week alone, with no section (a bill the reader voted on that no
+ * section shows). Apps 1.1 and 1.2 never read `yourBills` and would show it as an empty brief, so they get no brief, as
+ * they did before Your bills; app 1.3 and later (X-Billboard-App-Version) get it.
+ */
+const YOUR_BILLS_ONLY_MIN_APP_VERSION = "1.3";
+
+const servesTo = (event: APIGatewayProxyEvent, digest: WeeklyDigest): boolean =>
+  (digest.sections ?? []).length > 0 ||
+  !isBelowMinimumVersion(readHeader(event, APP_VERSION_HEADER), YOUR_BILLS_ONLY_MIN_APP_VERSION);
+
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   logger.resetContext();
   try {
@@ -40,7 +53,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     const window = latestPublishedWindow(new Date());
     const stored = await snapshotDao.get(userId, window.id);
-    if (!stored) {
+    if (!stored || !servesTo(event, stored)) {
       return emptyJsonResponse();
     }
 
