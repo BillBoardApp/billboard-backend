@@ -1,4 +1,4 @@
-import { type AttributeValue, DynamoDBClient, GetItemCommand, PutItemCommand } from "@aws-sdk/client-dynamodb";
+import { type AttributeValue, DynamoDBClient, GetItemCommand, UpdateItemCommand } from "@aws-sdk/client-dynamodb";
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { loadUserEligibility, toForbiddenResponse, writeEligibilityBlockReason } from "../../shared/adultEligibility";
 
@@ -69,12 +69,6 @@ function attrToBool(attr: AttributeValue | undefined): boolean | null {
   return null;
 }
 
-function attrToString(attr: AttributeValue | undefined): string | null {
-  if (!attr) return null;
-  if (typeof attr.S === "string") return attr.S;
-  return null;
-}
-
 function readSettingsFromItem(item?: Record<string, AttributeValue>): DeviceNotificationSettings {
   return {
     notificationsEnabled: attrToBool(item?.[NOTIFICATIONS_ENABLED_ATTRIBUTE]) ?? DEFAULT_SETTINGS.notificationsEnabled,
@@ -96,6 +90,38 @@ function weeklyBriefSettingOf(
 
 function weeklyBriefSettingOrNone(value: boolean | undefined): Pick<DeviceNotificationSettings, "notifyWeeklyBrief"> {
   return value === undefined ? {} : { notifyWeeklyBrief: value };
+}
+
+/** A switch for `switchesUpdate`: its attribute, the body's value (undefined when left out), and its default if any. */
+type SwitchUpdate = [attribute: string, value: boolean | undefined, defaultValue: boolean | undefined];
+
+/**
+ * The PUT's UpdateItem parts: each switch the body sends is set; one it leaves out is kept, or set to its default on a
+ * row that has none (as the earlier whole-row write stored every default); one with no default (the Weekly Brief flag)
+ * is left alone. Every name goes through a placeholder, and only names the expression uses are passed.
+ */
+function switchesUpdate(switches: readonly SwitchUpdate[], updatedAt: string) {
+  const names: Record<string, string> = { "#updatedAt": "updatedAt" };
+  const values: Record<string, AttributeValue> = { ":updatedAt": { S: updatedAt } };
+  const sets = ["#updatedAt = :updatedAt"];
+  switches.forEach(([attribute, value, defaultValue], index) => {
+    const name = `#s${index}`;
+    if (value !== undefined) {
+      values[`:s${index}`] = { BOOL: value };
+      sets.push(`${name} = :s${index}`);
+    } else if (defaultValue !== undefined) {
+      values[`:d${index}`] = { BOOL: defaultValue };
+      sets.push(`${name} = if_not_exists(${name}, :d${index})`);
+    } else {
+      return;
+    }
+    names[name] = attribute;
+  });
+  return {
+    UpdateExpression: `SET ${sets.join(", ")}`,
+    ExpressionAttributeNames: names,
+    ExpressionAttributeValues: values,
+  };
 }
 
 function responsePayload(deviceId: string, settings: DeviceNotificationSettings) {
@@ -203,67 +229,34 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         });
       }
 
-      const existing = await db.send(
-        new GetItemCommand({
+      // One UpdateItem that sets only the switches, never a whole-row replace: a registerUserDevice call at the same
+      // moment (a new token) keeps its endpoint, and this PUT keeps the switches it sends, the Weekly Brief flag
+      // included. A switch the body leaves out keeps its stored value, or takes its default on a row without one; the
+      // Weekly Brief flag has no default, so a body without it (1.1, 1.2) never creates it.
+      const updated = await db.send(
+        new UpdateItemCommand({
           TableName: TABLE_NAME,
           Key: {
             [PARTITION_KEY]: { S: userId },
             [SORT_KEY]: { S: deviceId },
           },
-          ConsistentRead: true,
+          ...switchesUpdate(
+            [
+              [NOTIFICATIONS_ENABLED_ATTRIBUTE, notificationsEnabled, DEFAULT_SETTINGS.notificationsEnabled],
+              [NOTIFY_NEW_ATTRIBUTE, notifyNew, DEFAULT_SETTINGS.notifyNew],
+              [NOTIFY_UPDATED_ATTRIBUTE, notifyUpdated, DEFAULT_SETTINGS.notifyUpdated],
+              [NOTIFY_ALERT_ATTRIBUTE, notifyAlert, DEFAULT_SETTINGS.notifyAlert],
+              [NOTIFY_PASSED_ATTRIBUTE, notifyPassed, DEFAULT_SETTINGS.notifyPassed],
+              [NOTIFY_FAILED_ATTRIBUTE, notifyFailed, DEFAULT_SETTINGS.notifyFailed],
+              [NOTIFY_WEEKLY_BRIEF_ATTRIBUTE, notifyWeeklyBrief, undefined],
+            ],
+            new Date().toISOString(),
+          ),
+          ReturnValues: "ALL_NEW",
         }),
       );
 
-      const baseSettings = readSettingsFromItem(existing.Item);
-      const nextSettings: DeviceNotificationSettings = {
-        notificationsEnabled: notificationsEnabled ?? baseSettings.notificationsEnabled,
-        notifyNew: notifyNew ?? baseSettings.notifyNew,
-        notifyUpdated: notifyUpdated ?? baseSettings.notifyUpdated,
-        notifyAlert: notifyAlert ?? baseSettings.notifyAlert,
-        notifyPassed: notifyPassed ?? baseSettings.notifyPassed,
-        notifyFailed: notifyFailed ?? baseSettings.notifyFailed,
-        // Written when the body has it, else kept when the row has it; never created by a body without it.
-        ...weeklyBriefSettingOrNone(notifyWeeklyBrief ?? baseSettings.notifyWeeklyBrief),
-      };
-
-      const item: Record<string, AttributeValue> = {
-        [PARTITION_KEY]: { S: userId },
-        [SORT_KEY]: { S: deviceId },
-        [NOTIFICATIONS_ENABLED_ATTRIBUTE]: { BOOL: nextSettings.notificationsEnabled },
-        [NOTIFY_NEW_ATTRIBUTE]: { BOOL: nextSettings.notifyNew },
-        [NOTIFY_UPDATED_ATTRIBUTE]: { BOOL: nextSettings.notifyUpdated },
-        [NOTIFY_ALERT_ATTRIBUTE]: { BOOL: nextSettings.notifyAlert },
-        [NOTIFY_PASSED_ATTRIBUTE]: { BOOL: nextSettings.notifyPassed },
-        [NOTIFY_FAILED_ATTRIBUTE]: { BOOL: nextSettings.notifyFailed },
-        ...(nextSettings.notifyWeeklyBrief === undefined
-          ? {}
-          : { [NOTIFY_WEEKLY_BRIEF_ATTRIBUTE]: { BOOL: nextSettings.notifyWeeklyBrief } }),
-        updatedAt: { S: new Date().toISOString() },
-      };
-
-      const existingPlatform = attrToString(existing.Item?.platform);
-      if (existingPlatform) {
-        item.platform = { S: existingPlatform };
-      }
-
-      const existingPushToken = attrToString(existing.Item?.pushToken);
-      if (existingPushToken) {
-        item.pushToken = { S: existingPushToken };
-      }
-
-      const existingEndpointArn = attrToString(existing.Item?.endpointArn);
-      if (existingEndpointArn) {
-        item.endpointArn = { S: existingEndpointArn };
-      }
-
-      await db.send(
-        new PutItemCommand({
-          TableName: TABLE_NAME,
-          Item: item,
-        }),
-      );
-
-      return json(200, responsePayload(deviceId, nextSettings));
+      return json(200, responsePayload(deviceId, readSettingsFromItem(updated.Attributes)));
     }
 
     return json(405, { error: "Method not allowed" });

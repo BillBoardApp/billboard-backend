@@ -10,15 +10,29 @@ jest.mock("@aws-sdk/client-dynamodb", () => {
     DynamoDBClient: jest.fn(() => ({ send: mockSend })),
     GetItemCommand: jest.fn((input) => ({ input })),
     PutItemCommand: jest.fn((input) => ({ input })),
+    UpdateItemCommand: jest.fn((input) => ({ input })),
     __mockSendDynamo: mockSend,
   };
 });
 
+import type { AttributeValue } from "@aws-sdk/client-dynamodb";
 import { asApiGatewayEvent } from "./fixtures/awsEvents";
+import { applySetUpdate, type SetUpdateInput } from "./fixtures/dynamoUpdate";
 import { handler } from "../../src/handlers/deviceNotificationSettings";
+
+type Row = Record<string, AttributeValue>;
 
 describe("deviceNotificationSettings handler", () => {
   const { __mockSendDynamo: mockDynamoSend } = jest.requireMock("@aws-sdk/client-dynamodb");
+  const { PutItemCommand, UpdateItemCommand } = jest.requireMock("@aws-sdk/client-dynamodb");
+  /** The PUT's UpdateItem answered as DynamoDB would on `row` (undefined: no row yet), with ReturnValues ALL_NEW. */
+  const updateOn =
+    (row: Row | undefined) =>
+    async ({ input }: { input: SetUpdateInput }) => ({ Attributes: applySetUpdate(row, input) });
+  /** The PUT's UpdateItem input: the call after the eligibility read. */
+  const updateInput = (): SetUpdateInput & { ReturnValues?: string } => mockDynamoSend.mock.calls[1][0].input;
+  /** The names the PUT's UpdateItem writes. */
+  const writtenNames = (): string[] => Object.values(updateInput().ExpressionAttributeNames ?? {});
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -64,28 +78,26 @@ describe("deviceNotificationSettings handler", () => {
   });
 
   it("updates settings and preserves existing endpoint fields", async () => {
+    const stored: Row = {
+      user_id: { S: "user-1" },
+      device_id: { S: "device-1" },
+      platform: { S: "ios" },
+      pushToken: { S: "push-abc" },
+      endpointArn: { S: "arn:aws:sns:us-east-1:123:endpoint/APNS/app/device-1" },
+      notificationsEnabled: { BOOL: true },
+      notifyNew: { BOOL: true },
+      notifyUpdated: { BOOL: true },
+      notifyAlert: { BOOL: true },
+      notifyPassed: { BOOL: true },
+      notifyFailed: { BOOL: false },
+    };
     mockDynamoSend
       .mockResolvedValueOnce({
         Item: {
           adultStatus: { S: "attested_adult" },
         },
       })
-      .mockResolvedValueOnce({
-        Item: {
-          user_id: { S: "user-1" },
-          device_id: { S: "device-1" },
-          platform: { S: "ios" },
-          pushToken: { S: "push-abc" },
-          endpointArn: { S: "arn:aws:sns:us-east-1:123:endpoint/APNS/app/device-1" },
-          notificationsEnabled: { BOOL: true },
-          notifyNew: { BOOL: true },
-          notifyUpdated: { BOOL: true },
-          notifyAlert: { BOOL: true },
-          notifyPassed: { BOOL: true },
-          notifyFailed: { BOOL: false },
-        },
-      })
-      .mockResolvedValueOnce({});
+      .mockImplementationOnce(updateOn(stored));
 
     const result = await handler(
       asApiGatewayEvent({
@@ -110,13 +122,77 @@ describe("deviceNotificationSettings handler", () => {
       notify_failed: false,
     });
 
-    const putInput = mockDynamoSend.mock.calls[2][0].input;
-    expect(putInput.Item.platform.S).toBe("ios");
-    expect(putInput.Item.pushToken.S).toBe("push-abc");
-    expect(putInput.Item.endpointArn.S).toContain("endpoint/APNS/app/device-1");
-    expect(putInput.Item.notificationsEnabled.BOOL).toBe(false);
-    expect(putInput.Item.notifyNew.BOOL).toBe(false);
-    expect(putInput.Item.notifyFailed.BOOL).toBe(false);
+    const written = applySetUpdate(stored, updateInput());
+    expect(written.platform.S).toBe("ios");
+    expect(written.pushToken.S).toBe("push-abc");
+    expect(written.endpointArn.S).toContain("endpoint/APNS/app/device-1");
+    expect(written.notificationsEnabled.BOOL).toBe(false);
+    expect(written.notifyNew.BOOL).toBe(false);
+    expect(written.notifyFailed.BOOL).toBe(false);
+    expect(mockDynamoSend).toHaveBeenCalledTimes(2);
+  });
+
+  // UX-28 review: a whole-row PutItem built from an earlier read could undo a registerUserDevice write that landed in
+  // between (or be undone by it). The PUT now sets only the switches, in one UpdateItem.
+  it("writes only the switches, in one UpdateItem, never the registration fields", async () => {
+    mockDynamoSend.mockResolvedValueOnce({ Item: { adultStatus: { S: "attested_adult" } } }).mockImplementationOnce(
+      updateOn({
+        user_id: { S: "user-1" },
+        device_id: { S: "device-1" },
+        endpointArn: { S: "arn:aws:sns:us-east-1:123:endpoint/APNS/app/device-1" },
+      }),
+    );
+
+    await handler(
+      asApiGatewayEvent({
+        httpMethod: "PUT",
+        body: JSON.stringify({ device_id: "device-1", notify_new: false }),
+        requestContext: { authorizer: { jwt: { claims: { sub: "user-1" } } } },
+      }),
+    );
+
+    expect(UpdateItemCommand).toHaveBeenCalledTimes(1);
+    expect(PutItemCommand).not.toHaveBeenCalled();
+    expect(updateInput().ReturnValues).toBe("ALL_NEW");
+    expect(writtenNames()).toEqual(
+      expect.not.arrayContaining(["platform", "pushToken", "endpointArn", "notifyWeeklyBrief"]),
+    );
+    expect(updateInput().UpdateExpression).toContain("if_not_exists");
+  });
+
+  it("stores the defaults on a row that has none, and the switches the body sends", async () => {
+    mockDynamoSend
+      .mockResolvedValueOnce({ Item: { adultStatus: { S: "attested_adult" } } })
+      .mockImplementationOnce(updateOn(undefined));
+
+    const result = await handler(
+      asApiGatewayEvent({
+        httpMethod: "PUT",
+        body: JSON.stringify({ device_id: "device-1", notify_passed: false }),
+        requestContext: { authorizer: { jwt: { claims: { sub: "user-1" } } } },
+      }),
+    );
+
+    expect(JSON.parse(result.body)).toEqual({
+      device_id: "device-1",
+      notifications_enabled: true,
+      notify_new: true,
+      notify_updated: true,
+      notify_alert: true,
+      notify_passed: false,
+      notify_failed: true,
+    });
+    expect(applySetUpdate(undefined, updateInput())).toEqual({
+      user_id: { S: "user-1" },
+      device_id: { S: "device-1" },
+      notificationsEnabled: { BOOL: true },
+      notifyNew: { BOOL: true },
+      notifyUpdated: { BOOL: true },
+      notifyAlert: { BOOL: true },
+      notifyPassed: { BOOL: false },
+      notifyFailed: { BOOL: true },
+      updatedAt: { S: expect.any(String) },
+    });
   });
 
   it("returns 400 when boolean fields are invalid", async () => {
@@ -146,7 +222,7 @@ describe("deviceNotificationSettings handler", () => {
   describe("the Weekly Brief flag (notify_weekly_brief)", () => {
     const signedIn = { authorizer: { jwt: { claims: { sub: "user-1" } } } };
     const adult = { Item: { adultStatus: { S: "attested_adult" } } };
-    const storedRow = (extra: Record<string, unknown> = {}) => ({
+    const storedRow = (extra: Row = {}): { Item: Row } => ({
       Item: {
         user_id: { S: "user-1" },
         device_id: { S: "device-1" },
@@ -178,7 +254,10 @@ describe("deviceNotificationSettings handler", () => {
           requestContext: signedIn,
         }),
       );
-    const putItem = () => mockDynamoSend.mock.calls[2][0].input.Item;
+    /** The row the PUT leaves when the stored row is `stored`. */
+    const written = (stored: { Item: Row }) => applySetUpdate(stored.Item, updateInput());
+    const putOn = (stored: { Item: Row }) =>
+      mockDynamoSend.mockResolvedValueOnce(adult).mockImplementationOnce(updateOn(stored.Item));
 
     it("is left out of GET while the row has never stored it", async () => {
       mockDynamoSend.mockResolvedValueOnce(storedRow());
@@ -200,36 +279,35 @@ describe("deviceNotificationSettings handler", () => {
     });
 
     it("is never created by a PUT without it (as 1.1 and 1.2 send)", async () => {
-      mockDynamoSend.mockResolvedValueOnce(adult).mockResolvedValueOnce(storedRow()).mockResolvedValueOnce({});
+      const stored = storedRow();
+      putOn(stored);
 
       const result = await put({ notify_new: true });
 
       expect(result.statusCode).toBe(200);
       expect(JSON.parse(result.body)).not.toHaveProperty("notify_weekly_brief");
-      expect(putItem()).not.toHaveProperty("notifyWeeklyBrief");
-      expect(putItem().notifyNew).toEqual({ BOOL: true });
+      expect(written(stored)).not.toHaveProperty("notifyWeeklyBrief");
+      expect(writtenNames()).not.toContain("notifyWeeklyBrief");
+      expect(written(stored).notifyNew).toEqual({ BOOL: true });
     });
 
     it.each([true, false])("keeps a stored value (%s) through a PUT without it", async (stored) => {
-      mockDynamoSend
-        .mockResolvedValueOnce(adult)
-        .mockResolvedValueOnce(storedRow({ notifyWeeklyBrief: { BOOL: stored } }))
-        .mockResolvedValueOnce({});
+      const row = storedRow({ notifyWeeklyBrief: { BOOL: stored } });
+      putOn(row);
 
       const result = await put({ notifications_enabled: false });
 
       expect(JSON.parse(result.body)).toEqual(
         expect.objectContaining({ notifications_enabled: false, notify_weekly_brief: stored }),
       );
-      expect(putItem().notifyWeeklyBrief).toEqual({ BOOL: stored });
-      expect(putItem().notificationsEnabled).toEqual({ BOOL: false });
+      expect(writtenNames()).not.toContain("notifyWeeklyBrief");
+      expect(written(row).notifyWeeklyBrief).toEqual({ BOOL: stored });
+      expect(written(row).notificationsEnabled).toEqual({ BOOL: false });
     });
 
     it("stores a PUT carrying only the flag and leaves the other switches and the endpoint as they were", async () => {
-      mockDynamoSend
-        .mockResolvedValueOnce(adult)
-        .mockResolvedValueOnce(storedRow({ notifyWeeklyBrief: { BOOL: true } }))
-        .mockResolvedValueOnce({});
+      const row = storedRow({ notifyWeeklyBrief: { BOOL: true } });
+      putOn(row);
 
       const result = await put({ notify_weekly_brief: false });
 
@@ -244,7 +322,7 @@ describe("deviceNotificationSettings handler", () => {
         notify_failed: true,
         notify_weekly_brief: false,
       });
-      expect(putItem()).toEqual(
+      expect(written(row)).toEqual(
         expect.objectContaining({
           notifyWeeklyBrief: { BOOL: false },
           notifyNew: { BOOL: false },
@@ -255,12 +333,13 @@ describe("deviceNotificationSettings handler", () => {
     });
 
     it("creates it on a device that never had it when the PUT sends it", async () => {
-      mockDynamoSend.mockResolvedValueOnce(adult).mockResolvedValueOnce(storedRow()).mockResolvedValueOnce({});
+      const row = storedRow();
+      putOn(row);
 
       const result = await put({ notify_weekly_brief: true });
 
       expect(JSON.parse(result.body).notify_weekly_brief).toBe(true);
-      expect(putItem().notifyWeeklyBrief).toEqual({ BOOL: true });
+      expect(written(row).notifyWeeklyBrief).toEqual({ BOOL: true });
     });
 
     it.each(["true", 1, null])("rejects %p as the flag and writes nothing", async (value) => {
@@ -276,13 +355,12 @@ describe("deviceNotificationSettings handler", () => {
 
   it("allows updates when adult attestation is still unknown", async () => {
     mockDynamoSend.mockResolvedValueOnce({});
-    mockDynamoSend.mockResolvedValueOnce({
-      Item: {
+    mockDynamoSend.mockImplementationOnce(
+      updateOn({
         user_id: { S: "user-1" },
         device_id: { S: "device-1" },
-      },
-    });
-    mockDynamoSend.mockResolvedValueOnce({});
+      }),
+    );
 
     const result = await handler(
       asApiGatewayEvent({
