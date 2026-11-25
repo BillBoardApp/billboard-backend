@@ -11,11 +11,12 @@ import { weeklyBriefPushCopy } from "../../shared/weeklyBriefPushCopy";
 import { latestPublishedWindow, WEEKLY_DIGEST_TIME_ZONE } from "../../shared/weeklyDigestSchedule";
 
 /*
- * The Sunday Weekly Brief push (UX-28). EventBridge Scheduler runs it hourly on Sunday from 10:30 AM to 5:30 PM New
+ * The Sunday Weekly Brief push (UX-28). EventBridge Scheduler runs it hourly on Sunday from 10:30 AM to 6:30 PM New
  * York (infra WEEKLY_BRIEF_PUSH_SCHEDULE_EXPRESSION), after GenerateWeeklyDigests has stored the week's briefs at 10:00.
  * Each run sends the brief to every user who has one this week, unsent, and is outside their quiet hours (UX-27, S5):
  * 10:30 Eastern for Eastern, Central and Mountain users, 11:30 for Pacific (8:30 AM there), later runs for Alaska and
- * Hawaii, and the 5:30 PM run, Monday 8:30 AM there, for Guam while New York keeps standard time.
+ * Hawaii, and Monday 8:30 AM for Guam: the 5:30 PM run while New York keeps standard time, the 6:30 PM run while it
+ * keeps daylight time.
  *
  * - Who: users not being deleted, who attested they are 18 or older, with this week's brief. Only their devices with an
  *   endpoint, notifications not turned off and notifyWeeklyBrief exactly true get it: only app 1.3 writes that flag, so
@@ -38,11 +39,11 @@ import { latestPublishedWindow, WEEKLY_DIGEST_TIME_ZONE } from "../../shared/wee
 const METRIC_NAMESPACE = "BillBoard/WeeklyDigest";
 /** Users worked on at once. */
 export const WEEKLY_BRIEF_PUSH_USER_CONCURRENCY = 5;
-/** No run sends more than this long after the week's release (10:00 New York): the last scheduled run is at 17:30. */
+/** No run sends more than this long after the week's release (10:00 New York): the last scheduled run is at 18:30. */
 export const WEEKLY_BRIEF_PUSH_MAX_DELAY_MS = 12 * 60 * 60 * 1000;
 /** Lambda time kept in hand: no new user starts once less than this remains. */
 export const WEEKLY_BRIEF_PUSH_TIME_RESERVE_MS = 30_000;
-const DEFAULT_LAST_RUN_HOUR = 17;
+const DEFAULT_LAST_RUN_HOUR = 18;
 
 const PII_TABLE_NAME = process.env.PII_TABLE_NAME;
 const PII_PARTITION_KEY = process.env.PII_PARTITION_KEY ?? "userId";
@@ -70,7 +71,7 @@ const deviceDao = new UserDeviceDao(dynamo, {
 
 const isOn = (value: string | undefined): boolean => value?.trim() === "on";
 
-/** The New York hour of the last scheduled run (17 for 17:30); a run in or after that hour is the last of the day. */
+/** The New York hour of the last scheduled run (18 for 18:30); a run in or after that hour is the last of the day. */
 const lastRunHour = (): number => {
   const parsed = Number.parseInt(process.env.WEEKLY_BRIEF_PUSH_LAST_RUN_HOUR ?? "", 10);
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 23 ? parsed : DEFAULT_LAST_RUN_HOUR;

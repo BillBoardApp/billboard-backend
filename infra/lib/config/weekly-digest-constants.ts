@@ -17,12 +17,15 @@ export const WEEKLY_DIGEST_DLQ_RETENTION_DAYS = 14;
 export const WEEKLY_DIGEST_METRIC_NAMESPACE = 'BillBoard/WeeklyDigest';
 
 // UX-28: the Sunday Weekly Brief push (WeeklyBriefPush). EventBridge Scheduler runs it hourly on Sunday from 10:30 AM
-// to 5:30 PM in WEEKLY_DIGEST_CANONICAL_PUBLISH_TIMEZONE, after GenerateWeeklyDigests (10:00), and each user gets it at
+// to 6:30 PM in WEEKLY_DIGEST_CANONICAL_PUBLISH_TIMEZONE, after GenerateWeeklyDigests (10:00), and each user gets it at
 // the first run outside their quiet hours (UX-27). The function reads the last run's hour to emit
 // WeeklyBriefPushesUnsent, so both come from these numbers.
+// The last run is 6:30 PM so Guam and the Northern Mariana Islands get it all year (D3: Monday morning there). While
+// New York keeps daylight time, 5:30 PM is 7:30 AM Monday in Guam, still quiet hours, and 6:30 PM is 8:30 AM; in
+// standard time they get it at 5:30 PM. 6:30 PM is before Eastern quiet hours and 8.5 hours after the release.
 export const WEEKLY_BRIEF_PUSH_RUN_MINUTE = 30;
 export const WEEKLY_BRIEF_PUSH_FIRST_RUN_HOUR = 10;
-export const WEEKLY_BRIEF_PUSH_LAST_RUN_HOUR = 17;
+export const WEEKLY_BRIEF_PUSH_LAST_RUN_HOUR = 18;
 export const WEEKLY_BRIEF_PUSH_SCHEDULE_EXPRESSION = `cron(${WEEKLY_BRIEF_PUSH_RUN_MINUTE} ${WEEKLY_BRIEF_PUSH_FIRST_RUN_HOUR}-${WEEKLY_BRIEF_PUSH_LAST_RUN_HOUR} ? * SUN *)`;
 // true passes WEEKLY_BRIEF_PUSH=on. Safe from the first deploy: only a device whose row says notifyWeeklyBrief true gets
 // the push, and only app 1.3 writes that. false passes 'off': every run sends nothing (the switch).

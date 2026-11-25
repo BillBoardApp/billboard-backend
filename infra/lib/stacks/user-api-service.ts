@@ -230,7 +230,7 @@ export class UserAPIServiceStack extends cdk.Stack {
   public readonly fetchLatestWeeklyDigest: lambda.IFunction;
   public readonly generateWeeklyDigests: lambda.IFunction;
   public readonly weeklyDigestWorker: lambda.IFunction;
-  /** UX-28: the Sunday Weekly Brief push, hourly 10:30 to 17:30 New York (WeeklyBriefPushSchedule). */
+  /** UX-28: the Sunday Weekly Brief push, hourly 10:30 to 18:30 New York (WeeklyBriefPushSchedule). */
   public readonly weeklyBriefPush: lambda.IFunction;
   public readonly accountData: lambda.IFunction;
   public readonly accountDataStatus: lambda.IFunction;
@@ -1435,10 +1435,10 @@ export class UserAPIServiceStack extends cdk.Stack {
     );
     grantScheduledJobFailuresSend(weeklyBriefPushSchedulerRole);
 
-    // UX-28, decision D3 (a): hourly on Sunday from 10:30 to 17:30 New York, so each user gets the brief at the first
+    // UX-28, decision D3 (a): hourly on Sunday from 10:30 to 18:30 New York, so each user gets the brief at the first
     // run outside their quiet hours. A run that cannot be delivered goes to ScheduledJobFailures.
     new scheduler.CfnSchedule(this, 'WeeklyBriefPushSchedule', {
-      description: 'Sunday Weekly Brief push, hourly 10:30 AM to 5:30 PM America/New_York (UX-28).',
+      description: 'Sunday Weekly Brief push, hourly 10:30 AM to 6:30 PM America/New_York (UX-28).',
       flexibleTimeWindow: {
         mode: 'OFF',
       },

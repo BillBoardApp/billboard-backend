@@ -5,7 +5,7 @@ import { applyTestEnv } from "./fixtures/env";
 import { logLines } from "./logLines";
 
 /*
- * UX-28: the Sunday Weekly Brief push. Hourly runs from 10:30 AM to 5:30 PM New York send each user's brief once, at the
+ * UX-28: the Sunday Weekly Brief push. Hourly runs from 10:30 AM to 6:30 PM New York send each user's brief once, at the
  * first run outside their quiet hours, to the devices that took it (notifyWeeklyBrief exactly true: app 1.3 only).
  * The tables and SNS are in memory; DynamoDB conditions are evaluated as written (fixtures/dynamoCondition.ts).
  */
@@ -193,7 +193,7 @@ const loadHandler = (env: Record<string, string | undefined> = {}): HandlerModul
     CANONICAL_PUBLISH_MINUTE: "0",
     QUIET_HOURS: "on",
     WEEKLY_BRIEF_PUSH: "on",
-    WEEKLY_BRIEF_PUSH_LAST_RUN_HOUR: "17",
+    WEEKLY_BRIEF_PUSH_LAST_RUN_HOUR: "18",
     AWS_LAMBDA_LOG_FORMAT: undefined,
     ...env,
   });
@@ -258,27 +258,48 @@ describe("when it arrives (D3: the first run outside the user's quiet hours)", (
     expect(publishedTo()).toEqual([arn("hi", "d1")]);
   });
 
-  it("reaches Guam at the 5:30 PM ET run, Monday 8:30 AM there", async () => {
+  it("reaches Guam at the 5:30 PM ET run in standard time, Monday 8:30 AM there", async () => {
     addUser("gu", { state: "GU" });
 
     await runAt("2026-11-22T21:30:00.000Z");
     expect(publishedTo()).toEqual([]);
 
-    const last = await runAt("2026-11-22T22:30:00.000Z");
+    const fiveThirty = await runAt("2026-11-22T22:30:00.000Z");
+    expect(publishedTo()).toEqual([arn("gu", "d1")]);
+    expect(fiveThirty.lastRun).toBe(false);
+
+    const last = await runAt("2026-11-22T23:30:00.000Z");
     expect(publishedTo()).toEqual([arn("gu", "d1")]);
     expect(last.lastRun).toBe(true);
+    expect(last.users.already_sent).toBe(1);
     expect(metric("WeeklyBriefPushesUnsent")).toEqual([0]);
   });
 
-  it("counts a brief still held at the last run as unsent (Guam on a summer Sunday, 7:30 AM there)", async () => {
-    // Sunday 2026-07-12, Eastern daylight time: released at 14:00Z, last run at 21:30Z.
+  it("reaches Guam at the 6:30 PM ET last run on a summer Sunday, Monday 8:30 AM there", async () => {
+    // Sunday 2026-07-12, Eastern daylight time: released at 14:00Z; 21:30Z (5:30 PM) is 7:30 AM Monday in Guam, still
+    // quiet hours, and the last run, 22:30Z (6:30 PM), is 8:30 AM there.
     addUser("gu", { state: "GU", digest: { ...brief(["Clean Water Act"]), id: "2026-07-12T14:00:00.000Z" } });
     mockWorld.snapshots.set("gu|2026-07-12T14:00:00.000Z", {
       ...mockWorld.snapshots.get(`gu|${WINDOW_ID}`)!,
       publishedAt: { S: "2026-07-12T14:00:00.000Z" },
     });
 
-    const last = await runAt("2026-07-12T21:30:00.000Z");
+    const fiveThirty = await runAt("2026-07-12T21:30:00.000Z");
+    expect(publishedTo()).toEqual([]);
+    expect(fiveThirty.users.held_quiet_hours).toBe(1);
+    expect(fiveThirty.lastRun).toBe(false);
+
+    const last = await runAt("2026-07-12T22:30:00.000Z");
+    expect(publishedTo()).toEqual([arn("gu", "d1")]);
+    expect(last.lastRun).toBe(true);
+    expect(metric("WeeklyBriefPushesUnsent")).toEqual([0]);
+  });
+
+  it("counts a brief still held at the last run as unsent", async () => {
+    addUser("gu", { state: "GU" });
+
+    // With QUIET_HOURS on and a last run set at 15:30 New York (20:30Z), 6:30 AM Monday in Guam.
+    const last = await runAt("2026-11-22T20:30:00.000Z", { WEEKLY_BRIEF_PUSH_LAST_RUN_HOUR: "15" });
 
     expect(publishedTo()).toEqual([]);
     expect(last.lastRun).toBe(true);
@@ -537,7 +558,7 @@ describe("failures", () => {
   it("stops starting users when the Lambda is about to time out, counts them unsent on the last run, and throws", async () => {
     addUser("gu", { state: "GU" });
 
-    await expect(runAt("2026-11-22T22:30:00.000Z", {}, { getRemainingTimeInMillis: () => 10_000 })).rejects.toThrow(
+    await expect(runAt("2026-11-22T23:30:00.000Z", {}, { getRemainingTimeInMillis: () => 10_000 })).rejects.toThrow(
       /could not finish 1 of 1 users/,
     );
 
