@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.billboard/schemas/entities/recent-actions.v1.schema.json",
+  "title": "RecentActionsV1",
+  "description": "GET /recent-actions (UX-35): the caller's bills with an action in Congress inside the window, newest first. A bill is the caller's when they voted Yea, Nay or Abstain on it (never an Updates dismissal from app 1.0 or 1.1) or watch it, on either member of a companion group. One row per bill (a companion group is one bill), at most 50. Only the caller's own vote is ever in it: no count, tally or other user's vote.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["generatedAt", "windowDays", "items"],
+  "properties": {
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the server built the list."
+    },
+    "windowDays": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "How many days back the actions reach (30 today): an action dated on or after that many Eastern calendar days before generatedAt's."
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "#/$defs/recentActionItem" },
+      "description": "Newest action first, then by title. Empty when the caller has no bill with an action in the window."
+    }
+  },
+  "$defs": {
+    "recentActionItem": {
+      "title": "RecentActionItemV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "billGuid",
+        "congress",
+        "billType",
+        "billNumber",
+        "officialNumber",
+        "title",
+        "action",
+        "watched"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The row's identity: the bill's plain guid, the action's day and its wording. A newer action gives a new id, so a row cleared on the device comes back with it. Opaque: do not parse it."
+        },
+        "billGuid": {
+          "type": "string",
+          "pattern": "^BILLS-\\d+(hconres|hjres|hres|hr|sconres|sjres|sres|s)\\d+$",
+          "description": "The plain guid of the bill whose action this is. For a companion group, the member with the latest action; the group is one row either way."
+        },
+        "congress": {
+          "type": "string",
+          "pattern": "^\\d+$"
+        },
+        "billType": {
+          "title": "RecentActionBillTypeV1",
+          "type": "string",
+          "enum": ["hr", "s", "hjres", "sjres", "hconres", "sconres", "hres", "sres"]
+        },
+        "billNumber": {
+          "type": "string",
+          "pattern": "^\\d+$"
+        },
+        "officialNumber": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The bill's number as the apps show it: \"H.R. 77\", \"S.J.Res. 213\"."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The bill's plain-language headline, as on its bill page."
+        },
+        "billStatus": {
+          "title": "BillStatusV1",
+          "type": "string",
+          "enum": ["New", "Updated", "Passed", "Failed", "Finalized"]
+        },
+        "vetoed": {
+          "type": "boolean",
+          "const": true,
+          "description": "Only as true, when the bill's veto stands (billOutcomes.ts deriveBillVetoedFromActions); absent otherwise. billStatus keeps its value."
+        },
+        "action": { "$ref": "#/$defs/recentAction" },
+        "yourVote": {
+          "title": "RecentActionVoteV1",
+          "type": "string",
+          "enum": ["Yea", "Nay", "Abstain"],
+          "description": "The caller's own vote on the bill as the server stores it (on the group's primary when they voted on both members); absent when they only watch it. Never anyone else's."
+        },
+        "votedOn": {
+          "type": "string",
+          "format": "date",
+          "description": "The Eastern calendar day the caller's vote was last saved (the vote shown, not the first one), when known."
+        },
+        "voteTiming": { "$ref": "#/$defs/recentActionVoteTiming" },
+        "watched": {
+          "type": "boolean",
+          "description": "Whether the caller watches the bill (either member of a companion group)."
+        }
+      }
+    },
+    "recentAction": {
+      "title": "RecentActionV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["date", "text"],
+      "properties": {
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "The action's day as Congress dates it."
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "What happened, in a push's words: \"Passed the House\", \"Became law\", \"House vote fell short of two-thirds\", or Congress's text without record references and a final period."
+        },
+        "actionCode": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The Library of Congress or chamber code of the action, when it has one."
+        }
+      }
+    },
+    "recentActionVoteTiming": {
+      "title": "RecentActionVoteTimingV1",
+      "description": "UX-41 concept 2: how long before a chamber's roll call the caller voted. Present only when the bill (either member of a companion group) has a recorded House or Senate vote inside the window, the latest one, on an Eastern day after the one the caller's vote shown was last saved. Absent when the vote came the same day or later, was changed or saved again on or after that day, or has no time. Describes yourVote: a client showing another vote (one not saved yet) leaves it out.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chamber", "rollCallDate", "daysBefore"],
+      "properties": {
+        "chamber": {
+          "title": "RecentActionChamberV1",
+          "type": "string",
+          "enum": ["House", "Senate"]
+        },
+        "rollCallDate": {
+          "type": "string",
+          "format": "date",
+          "description": "The roll call's day as Congress dates it."
+        },
+        "daysBefore": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Calendar days from votedOn to rollCallDate."
+        }
+      }
+    }
+  }
+}

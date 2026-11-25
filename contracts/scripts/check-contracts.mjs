@@ -212,6 +212,58 @@ const YOUR_BILLS_MUST_REJECT = [
   ],
 ];
 
+// ── Recent actions (UX-35) ──
+// GET /recent-actions carries only the caller's own vote: an item never has a count, a tally or another user's vote,
+// and the list itself has no count. Rows are plain guids, at most 50, and the vote timing (UX-41 concept 2) is at least
+// one day. An item with only a watch, and an empty list, must validate.
+const RECENT_ACTIONS = "schemas/entities/recent-actions.v1.schema.json";
+const withRecentItems = (edit) => (list) => ({ ...list, items: list.items.map(edit) });
+const withoutVote = ({ yourVote, votedOn, voteTiming, ...item }) => item;
+const RECENT_ACTIONS_MUST_ACCEPT = [
+  [RECENT_ACTIONS, "an empty list", (list) => ({ ...list, items: [] })],
+  [RECENT_ACTIONS, "items without a vote (watched only)", withRecentItems(withoutVote)],
+  [RECENT_ACTIONS, "items without billStatus", withRecentItems(({ billStatus, ...item }) => item)],
+  [
+    RECENT_ACTIONS,
+    "an action without actionCode",
+    withRecentItems(({ action: { actionCode, ...action }, ...item }) => ({ ...item, action })),
+  ],
+];
+const RECENT_ACTIONS_MUST_REJECT = [
+  [RECENT_ACTIONS, "a voteCount on an item", withRecentItems((item) => ({ ...item, voteCount: 12 }))],
+  [RECENT_ACTIONS, "a Yea and Nay tally on an item", withRecentItems((item) => ({ ...item, yea: 8, nay: 4 }))],
+  [
+    RECENT_ACTIONS,
+    "another user's vote on an item",
+    withRecentItems((item) => ({ ...item, votes: [{ vote: "Nay" }] })),
+  ],
+  [RECENT_ACTIONS, "a count beside the items", (list) => ({ ...list, count: list.items.length })],
+  [
+    RECENT_ACTIONS,
+    "a vote other than Yea, Nay or Abstain",
+    withRecentItems((item) => ({ ...item, yourVote: "Present" })),
+  ],
+  [RECENT_ACTIONS, "a suffixed billGuid", withRecentItems((item) => ({ ...item, billGuid: `${item.billGuid}ih` }))],
+  [
+    RECENT_ACTIONS,
+    "an action date that is not a calendar day",
+    withRecentItems((item) => ({ ...item, action: { ...item.action, date: "Nov 19" } })),
+  ],
+  [
+    RECENT_ACTIONS,
+    "an action without text",
+    withRecentItems((item) => ({ ...item, action: { date: item.action.date } })),
+  ],
+  [
+    RECENT_ACTIONS,
+    "a vote timing of 0 days",
+    (list) => ({ ...list, items: [{ ...list.items[0], voteTiming: { ...list.items[0].voteTiming, daysBefore: 0 } }] }),
+  ],
+  [RECENT_ACTIONS, "vetoed false", withRecentItems((item) => ({ ...item, vetoed: false }))],
+  [RECENT_ACTIONS, "an item without watched", withRecentItems(({ watched, ...item }) => item)],
+  [RECENT_ACTIONS, "51 items", (list) => ({ ...list, items: Array.from({ length: 51 }, () => list.items[0]) })],
+];
+
 // ── Member facts (REL-52, REL-46) ──
 // A member with no 119th counts (REL-46) or whose stats could not be read has none of the three 119th counts (no 0 for
 // a member with no 119th counts or for an unknown count; a row with zeros keeps them), and a senator's per-Congress
@@ -887,6 +939,7 @@ const MUST_REJECT = [
   ...SPONSOR_MUST_REJECT,
   ...RECORD_MUST_REJECT,
   ...YOUR_BILLS_MUST_REJECT,
+  ...RECENT_ACTIONS_MUST_REJECT,
   ...LABEL_MUST_REJECT,
   ...STATS_MUST_REJECT,
   ...VERIFICATION_MUST_REJECT,
@@ -985,6 +1038,7 @@ const MUST_ACCEPT = [
   ],
   ...VETOED_MUST_ACCEPT,
   ...YOUR_BILLS_MUST_ACCEPT,
+  ...RECENT_ACTIONS_MUST_ACCEPT,
   ...MEMBER_MUST_ACCEPT,
   ...SPONSOR_MUST_ACCEPT,
   ...RECORD_MUST_ACCEPT,

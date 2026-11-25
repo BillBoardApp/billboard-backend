@@ -29,6 +29,7 @@ const OUTPUTS = [
       entity("congress-member-civic-profile"),
       entity("congress-member-record"),
       entity("weekly-digest"),
+      entity("recent-actions"),
       "openapi/user-api.v1.json#/components/schemas/ApiError",
     ],
   },
@@ -50,6 +51,7 @@ const OUTPUTS = [
       entity("congress-member-record"),
       entity("weekly-digest"),
       entity("processed-bill"),
+      entity("recent-actions"),
     ],
   },
 ];
