@@ -21,7 +21,8 @@ export const truncateUtf8 = (value: string, maxBytes: number): string => {
 
   let end = normalized.length;
   while (end > 0) {
-    const candidate = `${normalized.slice(0, end).trimEnd()}${ELLIPSIS}`;
+    // Periods and spaces at the cut are dropped, so a cut after "U.S." reads "U.S..." never "U.S....".
+    const candidate = `${normalized.slice(0, end).replace(/[\s.]+$/, "")}${ELLIPSIS}`;
     if (Buffer.byteLength(candidate, "utf8") <= maxBytes) {
       return candidate;
     }

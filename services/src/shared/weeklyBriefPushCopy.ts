@@ -8,12 +8,12 @@ import { formatWeeklyDigestShortRange } from "./weeklyDigestSchedule";
  * - Title: "Weekly Brief · Nov 15–21", the week as app 1.3's front page docket gives it ("Oct 25–Nov 1" across months).
  * - Body: "Includes {bill}." for one bill, "Includes {bill 1} and {bill 2}." for two, "Includes {bill 1}, {bill 2}, and
  *   {N} more." for three or more, the bills in app 1.3's page order (Your bills this week first, then the sections)
- *   with member items skipped and each bill once. A title is named once: a later bill with the same title as one
- *   already named (two unrelated bills can share a short title) is counted in "N more", never named twice, so the
- *   body reads "Includes SAVE Act and 1 more.", not "Includes SAVE Act and SAVE Act." So a brief with Your bills names the reader's own bills first; the
+ *   with member items skipped and each bill once. So a brief with Your bills names the reader's own bills first; the
  *   proposed count of them ("2 bills you voted on moved this week.") is not used (project decision 2026-11-25). Listed
- *   titles are cut to 36 bytes with "...", as userNotifier's example titles are; a lone title gets the whole body. The
- *   body stays within 160 bytes, as a bill push's does.
+ *   titles are cut to 36 bytes with "...", as userNotifier's example titles are; a lone title gets the whole body. A
+ *   title is named once: a later bill whose title reads the same as listed (cut to 36 bytes, any letter case) is
+ *   counted in "N more", never named again, so two unrelated bills that share a short title give "Includes SAVE Act
+ *   and 1 more.", not "Includes SAVE Act and SAVE Act." The body stays within 160 bytes, as a bill push's does.
  * - A brief with no bill item (only members you follow) says its own headline instead.
  * The words come only from the user's own brief: bill titles and the headline. Nothing here reads anyone's vote.
  */
@@ -22,7 +22,6 @@ export const WEEKLY_BRIEF_PUSH_BODY_MAX_BYTES = 160;
 /** A listed bill title's length in the body, as in userNotifier's exampleTitlesBody. */
 export const WEEKLY_BRIEF_LISTED_TITLE_MAX_BYTES = 36;
 const INCLUDES = "Includes ";
-const ELLIPSIS = "...";
 
 export interface WeeklyBriefPushCopy {
   title: string;
@@ -56,8 +55,11 @@ export const weeklyBriefBillTitles = (digest: Pick<WeeklyDigest, "sections" | "y
 export const weeklyBriefPushTitle = (weekStart: Date, weekEnd: Date): string =>
   `Weekly Brief · ${formatWeeklyDigestShortRange(weekStart, weekEnd)}`;
 
-/** A sentence's closing period, left off after a cut title's "..." so it never reads "....". */
-const closed = (text: string): string => (text.endsWith(ELLIPSIS) ? text : `${text}.`);
+/**
+ * A sentence's closing period, left off when the text already ends a sentence: after a cut title's "...", and after a
+ * title that ends in ".", "?" or "!" (official titles such as "..., and for other purposes."), so it never reads "..".
+ */
+const closed = (text: string): string => (/[.?!]$/.test(text) ? text : `${text}.`);
 
 export const weeklyBriefPushBody = (digest: Pick<WeeklyDigest, "sections" | "summary" | "yourBills">): string => {
   const titles = weeklyBriefBillTitles(digest);
