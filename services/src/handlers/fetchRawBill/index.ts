@@ -71,12 +71,15 @@ import {
   billAnswerUpdateMs,
   decideOlderCopyRecheck,
   isOlderThanListing,
+  isRecheckSuperseded,
   olderCopyRecheckOf,
   parseOlderCopyRecheckMode,
   pollerListingTimeMs,
+  storedCopyListedAtMs,
   storedCopyUpdateMs,
   type OlderCopyRecheck,
   type OlderCopyRecheckMode,
+  type OlderCopyRecheckOutcome,
 } from "./olderCopy";
 
 const BUCKET_NAME = process.env.BUCKET_NAME!;
@@ -201,12 +204,13 @@ const FETCH_RETRY_ON = FETCH_RETRY_LADDER !== null;
 /**
  * REL-56 (2026-11-21): a poller message whose fetched bill answer is older than its listing (olderCopy.ts). Under
  * OLDER_COPY_RECHECK "on" it is sent again to UpdatedBillsQueue (TEXT_RETRY_QUEUE_URL, as the text retry) after
- * OLDER_COPY_RECHECK_DELAY_SECONDS (SQS allows 900 at most), at most OLDER_COPY_MAX_RECHECKS times; a listed row's
- * time is at most OLDER_COPY_LISTING_WINDOW_SECONDS before the run that listed it.
+ * OLDER_COPY_RECHECK_DELAY_SECONDS (SQS allows 900 at most), at most OLDER_COPY_MAX_RECHECKS times (5 since
+ * 2026-11-25: 75 minutes; it was 2, olderCopy.ts); a listed row's time is at most OLDER_COPY_LISTING_WINDOW_SECONDS
+ * before the run that listed it.
  */
 const OLDER_COPY_RECHECK_MODE: OlderCopyRecheckMode = parseOlderCopyRecheckMode(process.env.OLDER_COPY_RECHECK);
 const OLDER_COPY_RECHECK_DELAY_SECONDS = positiveIntegerEnv("OLDER_COPY_RECHECK_DELAY_SECONDS", 900, 900);
-const OLDER_COPY_MAX_RECHECKS = positiveIntegerEnv("OLDER_COPY_MAX_RECHECKS", 2, 5);
+const OLDER_COPY_MAX_RECHECKS = positiveIntegerEnv("OLDER_COPY_MAX_RECHECKS", 5, 5);
 const OLDER_COPY_LISTING_WINDOW_SECONDS = positiveIntegerEnv("OLDER_COPY_LISTING_WINDOW_SECONDS", 480, 86_400);
 
 const s3 = new S3Client({});
@@ -1056,22 +1060,30 @@ const handleOlderCopy = async (
   });
 };
 
-/** The update time of the stored raw bill, or null when there is none or it cannot be read (logged). */
-const readStoredUpdateMs = async (guid: string): Promise<number | null> => {
+/** The stored raw bill (null when there is none), or undefined when it cannot be read (logged). */
+const readStoredRawBill = async (guid: string): Promise<unknown> => {
   try {
-    return storedCopyUpdateMs((await rawBillDao.getRevisionByGuid(guid)).value);
+    return (await rawBillDao.getRevisionByGuid(guid)).value;
   } catch (error) {
     logger.warn("Could not read the stored raw bill for an older-copy re-check; using the update time it carries", {
       error,
     });
-    return null;
+    return undefined;
   }
 };
 
+/** Counts a re-check: RawBillOlderCopyRecheck, and once more with its Outcome. */
+const putRecheckMetrics = (outcome: OlderCopyRecheckOutcome): Promise<void> =>
+  putMetrics(METRIC_NAMESPACE, [
+    { name: "RawBillOlderCopyRecheck", value: 1 },
+    { name: "RawBillOlderCopyRecheck", value: 1, dimensions: { Outcome: outcome } },
+  ]);
+
 /**
- * A re-check (olderCopyRecheck, under "on"): reads the bill's own answer (one congress.gov call) and decides with the
- * stored copy (decideOlderCopyRecheck). Returns the answer when the bill is to be fetched in full ("newer"); otherwise
- * sends the next re-check ("still_older") or stops, and returns null: nothing is stored or sent on.
+ * A re-check (olderCopyRecheck, under "on"): reads the stored copy first and stops with no call when it holds a later
+ * listing ("superseded", isRecheckSuperseded); otherwise reads the bill's own answer (one congress.gov call) and
+ * decides with the stored copy (decideOlderCopyRecheck). Returns the answer when the bill is to be fetched in full
+ * ("newer"); otherwise sends the next re-check ("still_older") or stops, and returns null: nothing is stored or sent on.
  */
 const recheckOlderCopy = async (
   feedItem: FeedItem,
@@ -1082,13 +1094,26 @@ const recheckOlderCopy = async (
   correlationId: string,
   clock: RequestClock,
 ): Promise<Record<string, unknown> | null> => {
+  const stored = await readStoredRawBill(guid);
+  const storedListedAtMs = storedCopyListedAtMs(stored);
+  if (isRecheckSuperseded(storedListedAtMs, listedAtMs)) {
+    await putRecheckMetrics("superseded");
+    logger.info("A later listing of the bill was stored since; it checks the bill itself, so this re-check stops", {
+      event: "older_copy_recheck",
+      outcome: "superseded",
+      recheckAttempt: recheck.attempt,
+      maxRechecks: OLDER_COPY_MAX_RECHECKS,
+      listedAt: isoOf(listedAtMs),
+      storedListedAt: isoOf(storedListedAtMs),
+    });
+    return null;
+  }
   const answer = await fetchFromCongressAPI(billAnswerUrl(billId), clock).catch((error: unknown) => {
     throw new BillEndpointError("bill", `Failed to fetch bill endpoint: ${errorMessage(error)}`, { cause: error });
   });
   await emitCoreApiCallsMetric(1);
   const answerUpdateMs = billAnswerUpdateMs(answer);
-  const storedUpdateMs =
-    (await readStoredUpdateMs(guid)) ?? (recheck.updateDate ? Date.parse(recheck.updateDate) : null);
+  const storedUpdateMs = storedCopyUpdateMs(stored) ?? (recheck.updateDate ? Date.parse(recheck.updateDate) : null);
   const outcome = decideOlderCopyRecheck({
     answerUpdateMs,
     storedUpdateMs,
@@ -1097,10 +1122,7 @@ const recheckOlderCopy = async (
     attempt: recheck.attempt,
     maxRechecks: OLDER_COPY_MAX_RECHECKS,
   });
-  await putMetrics(METRIC_NAMESPACE, [
-    { name: "RawBillOlderCopyRecheck", value: 1 },
-    { name: "RawBillOlderCopyRecheck", value: 1, dimensions: { Outcome: outcome } },
-  ]);
+  await putRecheckMetrics(outcome);
   const fields = {
     event: "older_copy_recheck",
     outcome,
