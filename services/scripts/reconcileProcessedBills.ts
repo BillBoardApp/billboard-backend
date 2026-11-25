@@ -13,7 +13,9 @@
 //
 // --apply: plans again, then sends {"guid": ...} to BillDifferQueue (correlation id
 // reconcile:<run start>:<guid>) for the patch and summarize plans only (or the kinds --plans names),
-// paced by --rate. It never writes to S3: billDiffer re-plans each bill when its message arrives and
+// paced by --rate. A patch that only adds a field processed bills gained since they were written
+// (ADDED_FIELDS: sponsorDetails, REL-46 5.3) is counted on its own line and sent only with
+// --added-fields: until backfill:sponsor-details has run, nearly every bill plans one. It never writes to S3: billDiffer re-plans each bill when its message arrives and
 // does the write or the summary send itself, so a bill that changed in between is handled from its
 // newer state. Run it only once the deployed BillDiffer, BillSummarizer and EnrichOfficialVotes are the
 // ones that carry this rule, inside a quiet window of the notification path (RUNBOOK 4.1). Ends with
@@ -30,8 +32,10 @@ import { ProcessedBillDao } from "../src/adapters/processedBillDao";
 import type { RawBill } from "../src/models/bill";
 import { latestNewBillOutcomeAction } from "../src/shared/billOutcomes";
 import {
+  ADDED_FIELDS,
   VISIBLE_FIELDS,
   isActionablePlan,
+  isAddedFieldsOnlyPatch,
   legacyAnchorHash,
   needsLegacyAnchor,
   planReconcile,
@@ -69,6 +73,8 @@ export interface CliOptions {
   rate: number;
   /** --plans: the actionable plan kinds --apply sends (null: all of them). */
   plans: ReconcilePlanKind[] | null;
+  /** --added-fields: --apply also sends the patches that only add an ADDED_FIELDS field (left out otherwise). */
+  addedFields: boolean;
 }
 
 export const DEFAULT_CONCURRENCY = 8;
@@ -92,6 +98,7 @@ export const parseArgs = (argv: readonly string[]): CliOptions => {
     concurrency: DEFAULT_CONCURRENCY,
     rate: DEFAULT_RATE,
     plans: null,
+    addedFields: false,
   };
   const readValue = (flag: string, raw: string | undefined): string => {
     if (!raw || raw.startsWith("--")) throw new Error(`${flag} needs a value`);
@@ -109,6 +116,7 @@ export const parseArgs = (argv: readonly string[]): CliOptions => {
     if (arg === "--help" || arg === "-h") options.help = true;
     else if (arg === "--apply") options.apply = true;
     else if (arg === "--dry-run") options.apply = false;
+    else if (arg === "--added-fields") options.addedFields = true;
     else if (arg === "--guid") {
       const guid = plainGuid(readValue(arg, argv[(index += 1)]));
       if (!guid) throw new Error("--guid needs a bill guid such as BILLS-119hr1400");
@@ -161,6 +169,8 @@ const USAGE = [
   "                     Never writes to S3. Run it inside a RUNBOOK 4.1 quiet window.",
   "  --plans <kinds>    With --apply, send only these plans: patch, summarize_missing, summarize_text_changed",
   "                     (comma-separated), e.g. --plans patch",
+  "  --added-fields     With --apply, also send the patches that only add a field bills gained since they were",
+  "                     written (sponsorDetails); left out otherwise (backfill:sponsor-details sends its own)",
   "  --guid <guid>      Only this bill (repeatable; a text-version suffix is ignored)",
   "  --guids-file <f>   Bills listed in a file: first tab-separated column, # lines skipped; a file that",
   "                     lists no bill stops the run",
@@ -201,11 +211,15 @@ const listRawKeys = async (s3: Sender, bucket: string, prefix: string): Promise<
   return keys.sort();
 };
 
-/** One planned bill. `outcome` / `status` are set for a patch that adds a passed or failed action or changes billStatus. */
+/**
+ * One planned bill. `outcome` / `status` are set for a patch that adds a passed or failed action or changes billStatus,
+ * `addedFieldsOnly` for a patch that only adds an ADDED_FIELDS field the processed bill lacks.
+ */
 export interface PlannedBill {
   key: string;
   guid: string;
   plan: ReconcilePlan;
+  addedFieldsOnly?: true;
   outcome?: { kind: "passed" | "failed"; text?: string; actionDate?: string };
   status?: { from: string; to: string };
 }
@@ -227,7 +241,12 @@ const planOne = async (
     ? await legacyAnchorHash(storage, key, raw, processed?.lastModified)
     : undefined;
   const plan = planReconcile({ processed, raw, messageGuid: guid, anchorHash });
-  const planned: PlannedBill = { key, guid: plan.guid, plan };
+  const planned: PlannedBill = {
+    key,
+    guid: plan.guid,
+    plan,
+    ...(isAddedFieldsOnlyPatch(processed?.bill, plan) ? { addedFieldsOnly: true as const } : {}),
+  };
   // A patch, or the pre-summary patch of a text change.
   if (processed && plan.next) {
     const outcome = latestNewBillOutcomeAction(processed.bill.actions, plan.next.actions);
@@ -319,6 +338,8 @@ const printReport = (scan: ScanResult, log: Log): void => {
   log(
     `text decided by: ${["source-hash", "legacy-anchor", "assumed"].map((by) => `${by}=${decided[by] ?? 0}`).join(" ")}`,
   );
+  const addedOnly = scan.planned.filter((bill) => bill.addedFieldsOnly).length;
+  log(`patches that only add a field bills gained since they were written (${ADDED_FIELDS.join(", ")}): ${addedOnly}`);
   for (const kind of ["summarize_missing", "summarize_text_changed"] as const) {
     const guids = scan.planned.filter((bill) => bill.plan.kind === kind).map((bill) => bill.guid);
     log(`${kind} (${guids.length})${guids.length > 0 ? `: ${guids.join(", ")}` : ""}`);
@@ -384,10 +405,14 @@ export const runReconcile = async ({
 
   const scan = await scanBills(s3, config, options, { log, ...(readFile ? { readFile } : {}) });
   printReport(scan, log);
-  const actionable = scan.planned.filter(
+  const kindSent = scan.planned.filter(
     (bill) => isActionablePlan(bill.plan.kind) && (!options.plans || options.plans.includes(bill.plan.kind)),
   );
-  const sending = options.plans ? `${options.plans.join(", ")} plans only` : "patch and summarize plans";
+  const addedLeftOut = options.addedFields ? 0 : kindSent.filter((bill) => bill.addedFieldsOnly).length;
+  const actionable = options.addedFields ? kindSent : kindSent.filter((bill) => !bill.addedFieldsOnly);
+  const sending =
+    (options.plans ? `${options.plans.join(", ")} plans only` : "patch and summarize plans") +
+    (addedLeftOut > 0 ? `; ${addedLeftOut} patches that only add a field left out, see --added-fields` : "");
 
   if (!options.apply) {
     log(`Dry run: would send ${actionable.length} guids (${sending}) to ${queueUrl}.`);
