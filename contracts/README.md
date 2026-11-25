@@ -414,7 +414,8 @@ gets `UserAPIContractsV1.RecentActions` with `./scripts/syncContracts.sh`):
   "Motion to reconsider laid on the table" only when the window has nothing else, and on the latest day the bill's own
   outcome ("Passed the House") before the other lines. Newest first, then by title, at most 50. Nothing to show is
   `200` with `items: []`.
-- `id` is the guid, the day and the wording, so a newer action gives a new id. `billStatus` and `vetoed` are the bill's
+- `id` is the bill's key (a group's primary guid, as the app keys the group's card), the day and the wording, so only a
+  newer action gives a new id, never a change in which member the row shows. `billStatus` and `vetoed` are the bill's
   as everywhere else (for a group, the member the row shows).
 - `watched` comes from the caller's Watch rows. The Bill row a vote saves has the same key as the bill's Watch row and
   replaces it, so right after a vote on a watched bill `watched` can be false until the watch is saved again: the app
