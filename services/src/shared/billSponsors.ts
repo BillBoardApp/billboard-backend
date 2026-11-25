@@ -26,7 +26,21 @@ export const extractSponsorIdsFromRawBill = (rawBill: RawBill): string[] => {
 const toTrimmedString = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 
 // congress.gov's titles before a sponsor's fullName ("Rep. Smith, John [R-TX-7]").
-const FULL_NAME_TITLE = /^(?:rep|sen|del|resident commissioner)\.?(?:\s+|$)/i;
+const FULL_NAME_TITLE = /^(rep|sen|del|resident\s+commissioner)\.?(?:\s+|$)/i;
+
+/** The contract's title for each of congress.gov's, so a client can say Representative, Delegate and so on. */
+const TITLES: Readonly<Record<string, NonNullable<BillSponsorDetail["title"]>>> = {
+  rep: "Rep",
+  sen: "Sen",
+  del: "Del",
+  "resident commissioner": "ResComm",
+};
+
+/** The title before fullName, or undefined when it has none of these. */
+const sponsorTitleOf = (entry: UnknownRecord): BillSponsorDetail["title"] => {
+  const match = toTrimmedString(entry.fullName).match(FULL_NAME_TITLE);
+  return match ? TITLES[match[1].toLowerCase().replace(/\s+/g, " ")] : undefined;
+};
 
 /**
  * "First Last" from firstName and lastName, else from fullName without its title and its "[R-TX-7]" bracket, turned
@@ -53,7 +67,10 @@ const sponsorNameOf = (entry: UnknownRecord): string => {
  */
 const PARTY_LETTERS: Readonly<Record<string, BillSponsorDetail["party"]>> = { D: "D", R: "R", I: "I", ID: "I" };
 
-/** A House seat as the members manifest writes it: two digits, "00" at-large. Null for a senator, who has no district. */
+/**
+ * A House seat as the members manifest writes it: two digits, "00" at-large. Null for a senator, who has no district,
+ * and for a value it cannot read (the contract tells clients to treat that as unknown on a House bill).
+ */
 const sponsorDistrictOf = (value: unknown): string | null => {
   if (typeof value === "number" && Number.isInteger(value) && value >= 0) return String(value).padStart(2, "0");
   const text = toTrimmedString(value);
@@ -76,11 +93,13 @@ export const extractSponsorDetailsFromRawBill = (rawBill: RawBill): BillSponsorD
     const bioguideId = toTrimmedString(entry.bioguideId);
     const name = sponsorNameOf(entry);
     if (!bioguideId || !name) continue;
+    const title = sponsorTitleOf(entry);
     const party = PARTY_LETTERS[toTrimmedString(entry.party).toUpperCase()];
     const state = toTrimmedString(entry.state).toUpperCase();
     details.push({
       bioguideId,
       name,
+      ...(title ? { title } : {}),
       ...(party ? { party } : {}),
       ...(/^[A-Z]{2}$/.test(state) ? { state } : {}),
       district: sponsorDistrictOf(entry.district),

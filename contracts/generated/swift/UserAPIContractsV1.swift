@@ -460,12 +460,17 @@ nonisolated enum UserAPIContractsV1 {
         let bioguideId: String
         /// First and last name, such as Jane Doe.
         let name: String
+        /// The title Congress.gov gives the sponsor on the bill: Rep (Representative), Sen (Senator), Del (Delegate) or
+        /// ResComm (Resident Commissioner). Absent when Congress.gov gives none; the sponsor's chamber is then the
+        /// bill's (a House bill type such as hr or hres has a House sponsor).
+        let title: String?
         /// The party letter. Congress.gov's ID (Independent Democrat) is I; absent for any other code.
         let party: String?
         /// The two-letter code of the state or territory.
         let state: String?
-        /// A House seat in two digits, as the members manifest writes it (00 for an at-large seat or a delegate); null
-        /// for a senator.
+        /// A House seat in two digits, as the members manifest writes it (00 for an at-large seat or a delegate). Null
+        /// for a senator, and for a House sponsor whose seat Congress.gov gives in no form read here, which clients
+        /// treat as unknown, not as the Senate.
         let district: String?
     }
 

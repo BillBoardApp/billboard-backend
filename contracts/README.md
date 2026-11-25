@@ -171,17 +171,21 @@ A bill keeps naming its sponsor after the sponsor leaves the members manifest (t
 2027-01-03). Optional and additive: builds 1.1 and 1.2 ignore it, and the bills manifest does not change.
 
 - `ProcessedBill.sponsorDetails` (`$defs/sponsorDetail`, title `BillSponsorDetailV1`): one entry per sponsor, in the
-  order of `sponsors`, with `bioguideId` and `name` (first and last name) always, `party` (`D`, `R` or `I`; congress.gov's
-  `ID` is `I`, any other code is left out), `state` (two letters) and `district` (two digits as the members manifest
-  writes it, `00` at-large or for a delegate; `null` for a senator). Stored, so `validate:live` checks it: billSummarizer
+  order of `sponsors`, with `bioguideId` and `name` (first and last name) always, `title` (`Rep`, `Sen`, `Del` or
+  `ResComm`, the title congress.gov puts before the sponsor's name, so a client can say Representative, Senator, Delegate
+  or Resident Commissioner; absent when congress.gov gives none, and the chamber is then the bill type's), `party` (`D`,
+  `R` or `I`; congress.gov's `ID` is `I`, any other code is left out), `state` (two letters) and `district` (two digits
+  as the members manifest writes it, `00` at-large or for a delegate; `null` for a senator, and for a House sponsor
+  whose seat congress.gov gives in no form read here, which clients treat as unknown). Stored, so `validate:live` checks it: billSummarizer
   and billDiffer write it from the raw bill (`services/src/shared/billSponsors.ts`), and a bill built before it gets it
   from billDiffer's next message (`ADDED_FIELDS`) or `npm run backfill:sponsor-details`. Absent when congress.gov gives
   no name.
 - Clients show it only for a sponsor missing from the members manifest; a sponsor who moved chambers keeps the seat the
   bill lists.
-- `check-contracts.mjs` accepts a bill without it, a senator (`district: null`), an entry with only `bioguideId` and
-  `name`, and an at-large seat, and rejects another party letter, a one-digit district, a state name, a missing or
-  empty name, a name for an id and an extra key.
+- `check-contracts.mjs` accepts a bill without it, a senator (`district: null`), a delegate and a resident
+  commissioner, an entry with only `bioguideId` and `name`, and an at-large seat, and rejects another party letter, a
+  title spelled out or with its dot, a one-digit district, a state name, a missing or empty name, a name for an id and
+  an extra key.
 - Generated: `BillSponsorDetailV1` and `ProcessedBillV1.sponsorDetails?` in TypeScript;
   `UserAPIContractsV1.BillSponsorDetail` and `ProcessedBill.sponsorDetails` in Swift.
 

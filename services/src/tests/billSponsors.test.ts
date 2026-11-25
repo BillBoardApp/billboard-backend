@@ -48,7 +48,25 @@ describe("billSponsors (REL-28)", () => {
       });
 
       expect(extractSponsorDetailsFromRawBill(bill)).toEqual([
-        { bioguideId: "D000001", name: "Jane Doe", party: "R", state: "TX", district: "07" },
+        { bioguideId: "D000001", name: "Jane Doe", title: "Rep", party: "R", state: "TX", district: "07" },
+      ]);
+    });
+
+    it("keeps the title congress.gov puts before the name, so clients can say Delegate or Resident Commissioner", () => {
+      const bill = sponsoredBy(
+        { bioguideId: "D000005", fullName: "Del. Norton, Eleanor [D-DC-At Large]", state: "DC" },
+        { bioguideId: "D000006", fullName: "Resident  Commissioner Ruiz, Ana [R-PR-At Large]", state: "PR" },
+        { bioguideId: "D000007", fullName: "sen. Lee, Pat [R-UT]", state: "UT" },
+        { bioguideId: "D000008", fullName: "Dr. Who, Al", state: "OH" },
+        { bioguideId: "D000009", firstName: "No", lastName: "Title" },
+      );
+
+      expect(extractSponsorDetailsFromRawBill(bill).map((detail) => detail.title)).toEqual([
+        "Del",
+        "ResComm",
+        "Sen",
+        undefined,
+        undefined,
       ]);
     });
 
