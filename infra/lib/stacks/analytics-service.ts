@@ -153,8 +153,19 @@ export class AnalyticsServiceStack extends cdk.Stack {
     storeTable(this, 'congressMemberStats').grantReadWriteData(congressMemberStatsFn);
     storeTable(this, 'congressMemberVoteProfiles').grantReadWriteData(congressMemberStatsFn);
     storeTable(this, 'congressMemberLegislativeProfiles').grantReadWriteData(congressMemberStatsFn);
-    // UX-39d: puts and deletes a bill's record rows (BatchWriteItem), found through the bill guid index (Query).
-    storeTable(this, 'congressMemberVoteRecord').grantReadWriteData(congressMemberStatsFn);
+    // UX-39d: puts and deletes a bill's record rows (BatchWriteItem), found through the bill guid index (Query), and
+    // nothing else: it never reads a member's record or scans the table.
+    const voteRecordTable = storeTable(this, 'congressMemberVoteRecord');
+    iam.Grant.addToPrincipal({
+      grantee: congressMemberStatsFn,
+      actions: ['dynamodb:BatchWriteItem'],
+      resourceArns: [voteRecordTable.tableArn],
+    });
+    iam.Grant.addToPrincipal({
+      grantee: congressMemberStatsFn,
+      actions: ['dynamodb:Query'],
+      resourceArns: [`${voteRecordTable.tableArn}/index/${CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_NAME}`],
+    });
 
     // ── BillStatsAggregator ───────────────────────────────────────────────────
 

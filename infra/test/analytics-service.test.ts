@@ -167,7 +167,7 @@ describe("AnalyticsServiceStack", () => {
       "table/CongressMemberVoteProfiles",
       "table/CongressMemberVoteProfiles/index/*",
       "table/CongressMemberVoteRecord",
-      "table/CongressMemberVoteRecord/index/*",
+      "table/CongressMemberVoteRecord/index/BillGuidIndex",
       "table/CongressMembersManifest",
       "table/CongressMembersStats",
     ]);
@@ -180,8 +180,12 @@ describe("AnalyticsServiceStack", () => {
       "table/CongressMemberVoteProfiles",
       "table/CongressMemberVoteProfiles/index/*",
       "table/CongressMemberVoteRecord",
-      "table/CongressMemberVoteRecord/index/*",
       "table/CongressMembersStats",
+    ]);
+    // UX-39d: the member vote record only as the writer uses it: batch puts and deletes, and the bill guid index.
+    expect(access("CongressMemberStats")["table/CongressMemberVoteRecord"]).toEqual(["dynamodb:BatchWriteItem"]);
+    expect(access("CongressMemberStats")["table/CongressMemberVoteRecord/index/BillGuidIndex"]).toEqual([
+      "dynamodb:Query",
     ]);
 
     const aggregator = access("BillStatsAggregator");
