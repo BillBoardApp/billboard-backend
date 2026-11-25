@@ -337,8 +337,9 @@ const isAddedField = (field: VisibleField): field is (typeof ADDED_FIELDS)[numbe
 
 /**
  * True for a patch that only adds ADDED_FIELDS fields the processed bill lacks: the bill is behind on nothing else
- * (reason added_fields, or derived_fields_changed when that field is all that differs). Until backfill:sponsor-details
- * has run, nearly every bill plans one, so reconcile:processed-bills reports them apart and sends them only when asked.
+ * (reason added_fields, or derived_fields_changed when that field is all that differs). Nearly every bill plans one
+ * until billDiffer next writes it, since backfill:sponsor-details sends only the bills whose sponsor has left, so
+ * reconcile:processed-bills reports them apart and sends them only when asked.
  */
 export const isAddedFieldsOnlyPatch = (
   processed: ProcessedBillDocument | null | undefined,

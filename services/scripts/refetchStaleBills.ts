@@ -2134,6 +2134,9 @@ export const defaultHttpGet = async (url: string): Promise<HttpTextResponse> => 
  * Dry run only: for each bill, GovInfo's XML of its newest text version (one request every PREDICT_INTERVAL_MS), then
  * planReconcile on a copy of its raw bill holding that text (fetched now, no version id), against its processed bill
  * as BillDiffer reads it. Derived fields are compared as stored, since the refetch's other endpoints are not called.
+ * A processed bill without sponsorDetails (ADDED_FIELDS) predicts a patch that adds it even when nothing else differs,
+ * so the patch count includes those bills until billDiffer next writes them; backfill:sponsor-details reaches only
+ * the bills whose sponsor has left.
  */
 export const predictTextRecovery = async ({
   s3,
