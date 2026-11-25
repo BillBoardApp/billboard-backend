@@ -102,6 +102,7 @@ const fakeTables = (
     stats?: Item | null;
     manifest?: Record<string, Item>;
     manifestFails?: boolean;
+    recordUnprocessed?: boolean;
   } = {},
 ) => {
   const votes = options.votes ?? VOTES;
@@ -116,6 +117,15 @@ const fakeTables = (
       return { Items: votes.slice(start, start + (input.Limit ?? votes.length)) };
     }
     if (command.kind === "GetItem") return options.stats === null ? {} : { Item: options.stats ?? STATS };
+    const recordKeys = input.RequestItems!.CongressMemberVoteRecord?.Keys;
+    if (recordKeys) {
+      if (options.recordUnprocessed) {
+        return { Responses: { CongressMemberVoteRecord: [] }, UnprocessedKeys: input.RequestItems };
+      }
+      const wanted = new Set(recordKeys.map((key) => `${key.bioguideId.S}|${key.billKey.S}`));
+      const items = votes.filter((row) => wanted.has(`${row.bioguideId.S}|${row.billKey.S}`));
+      return { Responses: { CongressMemberVoteRecord: items } };
+    }
     if (options.manifestFails) throw new Error("ProvisionedThroughputExceededException");
     const keys = input.RequestItems!.BillsManifest.Keys;
     const items = keys.flatMap((key) => {
@@ -162,6 +172,10 @@ beforeEach(() => {
     { replace: true, base: originalEnv },
   );
   jest.spyOn(Date, "now").mockReturnValue(IN_THE_120TH);
+  jest.spyOn(global, "setTimeout").mockImplementation(((callback: () => void) => {
+    callback();
+    return 0;
+  }) as unknown as typeof setTimeout);
   jest.spyOn(console, "warn").mockImplementation(() => undefined);
   jest.spyOn(console, "error").mockImplementation(() => undefined);
   handler = require("../handlers/fetchCongressMemberRecord").handler;
@@ -365,6 +379,106 @@ describe("fetchCongressMemberRecord (UX-39d)", () => {
       "BILLS-119hr10",
     ]);
     expect(body(result).sponsoredBillCount).toBe(4);
+  });
+
+  describe("billGuids: the member's votes on given bills (UX-18 'voted alike')", () => {
+    const BOTH_CHAMBERS: Item[] = [
+      ...VOTES,
+      voteRow("2027-01-20", "BILLS-120hr5", "Nay", {}, "Senate"),
+      voteRow("2026-09-01", "BILLS-119s3", "Yea", {}, "Senate"),
+    ];
+
+    it("reads both chambers' rows of each bill and serves them newest first, with no cursor or sponsored bills", async () => {
+      fakeTables({ votes: BOTH_CHAMBERS });
+
+      const result = await request({ bioguideId: "A000001", billGuids: "BILLS-119hr77, BILLS-120hr5,BILLS-119hr1" });
+
+      expect(result.statusCode).toBe(200);
+      expect(body(result)).toEqual({
+        bioguideId: "A000001",
+        votes: [
+          {
+            billGuid: "BILLS-120hr5",
+            congress: "120",
+            billType: "hr",
+            billNumber: "5",
+            title: "Extends school meals",
+            chamber: "Senate",
+            position: "Nay",
+            votedOn: "2027-01-20",
+          },
+          {
+            billGuid: "BILLS-120hr5",
+            congress: "120",
+            billType: "hr",
+            billNumber: "5",
+            title: "Extends school meals",
+            chamber: "House",
+            position: "Yea",
+            votedOn: "2027-01-15",
+            actionText: "On passage Passed: 300 - 120",
+          },
+          {
+            billGuid: "BILLS-119hr77",
+            congress: "119",
+            billType: "hr",
+            billNumber: "77",
+            title: "Changes the rules for small farms",
+            chamber: "House",
+            position: "Nay",
+            votedOn: "2026-10-01",
+            actionText: "On motion to recommit Failed",
+          },
+        ],
+      });
+      const [batch] = commands("BatchGetItem");
+      expect(batch.input.RequestItems!.CongressMemberVoteRecord.Keys).toEqual(
+        ["BILLS-119hr77", "BILLS-120hr5", "BILLS-119hr1"].flatMap((guid) =>
+          ["House", "Senate"].map((chamber) => ({
+            bioguideId: { S: "A000001" },
+            billKey: { S: `${guid}#${chamber}` },
+          })),
+        ),
+      );
+      expect(commands("Query")).toEqual([]);
+      expect(commands("GetItem")).toEqual([]);
+    });
+
+    it("reads 100 bills in two batches of 100 keys", async () => {
+      fakeTables({ votes: [] });
+      const guids = Array.from({ length: 100 }, (_, index) => `BILLS-119hr${index + 1}`);
+
+      const result = await request({ bioguideId: "A000001", billGuids: guids.join(",") });
+
+      expect(body(result)).toEqual({ bioguideId: "A000001", votes: [] });
+      expect(
+        commands("BatchGetItem").map((command) => command.input.RequestItems!.CongressMemberVoteRecord.Keys.length),
+      ).toEqual([100, 100]);
+    });
+
+    it("answers 500 rather than a partial answer when the record cannot be read in full", async () => {
+      fakeTables({ recordUnprocessed: true });
+
+      const result = await request({ bioguideId: "A000001", billGuids: "BILLS-119hr77" });
+
+      expect(result.statusCode).toBe(500);
+      expect(body(result).error).toBe("INTERNAL_ERROR");
+    });
+
+    it.each([
+      [{ billGuids: "" }],
+      [{ billGuids: "BILLS-119hr77ih" }],
+      [{ billGuids: "BILLS-119hr77,hr5" }],
+      [{ billGuids: Array.from({ length: 101 }, (_, index) => `BILLS-119hr${index + 1}`).join(",") }],
+      [{ billGuids: "BILLS-119hr77", limit: "10" }],
+      [{ billGuids: "BILLS-119hr77", cursor: Buffer.from("2026-12-10#BILLS-119hr900#House").toString("base64url") }],
+    ])("answers 400 INVALID_BILL_GUIDS for %j without reading anything", async (query) => {
+      const result = await request({ bioguideId: "A000001", ...query });
+
+      expect(result.statusCode).toBe(400);
+      expect(body(result).error).toBe("INVALID_BILL_GUIDS");
+      expect(mockSend).not.toHaveBeenCalled();
+    });
   });
 
   it("answers 500 with ApiError when the vote record cannot be read", async () => {

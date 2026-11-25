@@ -1559,13 +1559,15 @@ describe("UserAPIServiceStack, FetchCongressMemberRecord", () => {
     });
   });
 
-  test("reads only: the record's newest-first index, the stats row, and the manifest's bill and lookup rows", () => {
+  test("reads only: the record's newest-first index and given rows, the stats row, and the manifest's bill and lookup rows", () => {
     const statements = roleStatementsOf(templates.userApiTemplate, "FetchCongressMemberRecord");
     const unscoped = statements.filter((statement) => !JSON.stringify(statement.Condition ?? {}).includes("LeadingKeys"));
     const access = storeActions(unscoped);
     expect(access["table/CongressMemberVoteRecord/index/VotedOnIndex"]).toEqual(["dynamodb:Query"]);
+    expect(access["table/CongressMemberVoteRecord"]).toEqual(["dynamodb:BatchGetItem"]);
     expect(access["table/CongressMembersStats"]).toEqual(["dynamodb:GetItem"]);
     expect(Object.keys(access).filter((resource) => resource.startsWith("table/"))).toEqual([
+      "table/CongressMemberVoteRecord",
       "table/CongressMemberVoteRecord/index/VotedOnIndex",
       "table/CongressMembersStats",
     ]);

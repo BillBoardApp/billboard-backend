@@ -308,8 +308,8 @@ const SPONSOR_MUST_REJECT = [
 
 // ── A member's votes and bills (UX-39d) ──
 // Positions only as Congress records them (no judging word, no Abstain, which only BillBoard users cast), plain guids,
-// days without a time, and the shapes clients must decode: a last page without nextCursor, a later page without
-// sponsoredBills, and a member with no record.
+// days without a time, and the shapes clients must decode: a last page without nextCursor, a later page or a billGuids
+// answer without sponsoredBills, and a member with no record.
 const MEMBER_RECORD = "schemas/entities/congress-member-record.v1.schema.json";
 const withRecordVote = (edit) => (record) => ({ ...record, votes: [edit(record.votes[0]), ...record.votes.slice(1)] });
 const withRecordBill = (edit) => (record) => ({
@@ -320,8 +320,8 @@ const RECORD_MUST_ACCEPT = [
   [MEMBER_RECORD, "a last page (no nextCursor)", ({ nextCursor, ...record }) => record],
   [
     MEMBER_RECORD,
-    "a later page (no sponsoredBills)",
-    ({ sponsoredBills, sponsoredBillCount, sponsoredBillCounts, ...record }) => record,
+    "a later page or a billGuids answer (no sponsoredBills)",
+    ({ sponsoredBills, sponsoredBillCount, sponsoredBillCounts, nextCursor, ...record }) => record,
   ],
   [
     MEMBER_RECORD,

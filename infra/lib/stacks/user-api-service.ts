@@ -766,9 +766,10 @@ export class UserAPIServiceStack extends cdk.Stack {
     voteProfilesTable.grantReadData(this.fetchCongressMemberCivicProfile);
     legislativeProfilesTable.grantReadData(this.fetchCongressMemberCivicProfile);
 
-    // UX-39d: a member's public record. Their vote rows a page at a time (Query on the VotedOnIndex), their
-    // sponsored-bill sets (GetItem of their stats row), and the titles, statuses and dates of those bills (BatchGetItem
-    // of the manifest's BILL_GUID lookup rows and BILL rows only). Nothing about any user is read.
+    // UX-39d: a member's public record. Their vote rows a page at a time (Query on the VotedOnIndex) or on given bills
+    // (BatchGetItem on the table), their sponsored-bill sets (GetItem of their stats row), and the titles, statuses and
+    // dates of those bills (BatchGetItem of the manifest's BILL_GUID lookup rows and BILL rows only). Nothing about any
+    // user is read.
     this.fetchCongressMemberRecord = addProdFunction('FetchCongressMemberRecord', 'fetchCongressMemberRecord', {
       environment: {
         VOTE_RECORD_TABLE_NAME: CONGRESS_MEMBER_VOTE_RECORD_TABLE_NAME,
@@ -791,6 +792,11 @@ export class UserAPIServiceStack extends cdk.Stack {
       grantee: this.fetchCongressMemberRecord,
       actions: ['dynamodb:Query'],
       resourceArns: [`${voteRecordTable.tableArn}/index/${CONGRESS_MEMBER_VOTE_RECORD_VOTED_ON_INDEX_NAME}`],
+    });
+    iam.Grant.addToPrincipal({
+      grantee: this.fetchCongressMemberRecord,
+      actions: ['dynamodb:BatchGetItem'],
+      resourceArns: [voteRecordTable.tableArn],
     });
     iam.Grant.addToPrincipal({
       grantee: this.fetchCongressMemberRecord,
