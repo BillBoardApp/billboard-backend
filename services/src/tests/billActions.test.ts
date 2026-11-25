@@ -1,5 +1,5 @@
 import type { RawBill } from "../models/bill";
-import { extractActionsFromRawBill } from "../shared/billActions";
+import { extractActionsFromRawBill, isRoutineFollowUpText } from "../shared/billActions";
 
 describe("extractActionsFromRawBill", () => {
   it("returns content.actions.actions when present", () => {
@@ -33,5 +33,25 @@ describe("extractActionsFromRawBill", () => {
   it("returns [] when actions is not an array", () => {
     const rawBill = { content: { actions: { actions: { not: "an array" } } } } as unknown as RawBill;
     expect(extractActionsFromRawBill(rawBill)).toEqual([]);
+  });
+});
+
+describe("isRoutineFollowUpText", () => {
+  it.each([
+    "Motion to reconsider laid on the table Agreed to without objection.",
+    "Placed on the Union Calendar, Calendar No. 123.",
+    "Placed on Senate Legislative Calendar under General Orders. Calendar No. 210.",
+    "Message on Senate action sent to the House.",
+    "Held at the desk.",
+  ])("passes over %s", (text) => {
+    expect(isRoutineFollowUpText(text)).toBe(true);
+  });
+
+  it.each([
+    "Passed/agreed to in House: On motion to suspend the rules and pass the bill Agreed to by voice vote.",
+    "Received in the Senate and Read twice and referred to the Committee on Finance.",
+    "Reported by the Committee on Energy and Commerce. H. Rept. 119-876.",
+  ])("keeps %s", (text) => {
+    expect(isRoutineFollowUpText(text)).toBe(false);
   });
 });

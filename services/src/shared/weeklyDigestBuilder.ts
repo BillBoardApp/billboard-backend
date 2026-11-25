@@ -2,6 +2,7 @@ import type { CompanionGroupV1 } from "../contracts";
 import type { BillManifestEntry, BillStatusValue, ProcessedBillDocument } from "../models/bill";
 import { canonicalSubCategory } from "../models/categories";
 import type { WeeklyDigest, WeeklyDigestAccent, WeeklyDigestBillState, WeeklyDigestItem } from "../models/weeklyDigest";
+import { isRoutineFollowUpText } from "./billActions";
 import { plainBillGuid } from "./billCompanions";
 import { deriveBillVetoedFromActions, isFailedOverrideAction, isVetoAction } from "./billOutcomes";
 import type { BillContentTypePreference } from "./billContentTypes";
@@ -511,24 +512,6 @@ function sameText(left: string | undefined, right: string | undefined): boolean 
   return key(left).length > 0 && key(left) === key(right);
 }
 
-/**
- * Routine entries Congress.gov records right after the action they follow, the same day or the next; that action
- * says more. "Motion to reconsider laid on the table" follows a House vote, "Placed on the Union Calendar, Calendar
- * No. 123." a committee report, "Message on Senate action sent to the House." a Senate passage, and "Held at the
- * desk." a bill received from the other chamber.
- */
-const ROUTINE_FOLLOW_UP_RE = new RegExp(
-  "^(?:" +
-    [
-      "motion to reconsider",
-      "placed on (?:the )?(?:union|house|private|senate legislative) calendar",
-      "message on senate action sent to the house",
-      "held at the desk",
-    ].join("|") +
-    ")\\b",
-  "i",
-);
-
 interface WeekAction {
   /** The action's calendar day, "yyyy-mm-dd". */
   day: string;
@@ -538,8 +521,8 @@ interface WeekAction {
 /**
  * The bill's latest Congress.gov action dated inside the week (Sunday to Saturday, New York time), as Congress
  * wrote it. Actions come newest first, so on the latest day the first one listed wins. A routine follow-up
- * (ROUTINE_FOLLOW_UP_RE) is passed over for the latest other action of the week, and used only when the week has
- * nothing else.
+ * (billActions.ts isRoutineFollowUpText) is passed over for the latest other action of the week, and used only when
+ * the week has nothing else.
  */
 function latestActionInWeek(bill: ProcessedBillLike, window: WeeklyDigestPublicationWindow): WeekAction | undefined {
   const firstDay = weeklyDigestDayKey(window.start);
@@ -565,7 +548,7 @@ function latestActionInWeek(bill: ProcessedBillLike, window: WeeklyDigestPublica
     .filter((value): value is WeekAction & { index: number } => value !== null)
     .sort((left, right) => (left.day === right.day ? left.index - right.index : left.day < right.day ? 1 : -1));
 
-  const chosen = inWeek.find((action) => !ROUTINE_FOLLOW_UP_RE.test(action.text)) ?? inWeek[0];
+  const chosen = inWeek.find((action) => !isRoutineFollowUpText(action.text)) ?? inWeek[0];
   return chosen ? { day: chosen.day, text: chosen.text } : undefined;
 }
 
