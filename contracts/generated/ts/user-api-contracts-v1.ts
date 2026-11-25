@@ -517,8 +517,11 @@ export interface CongressMemberRecordVoteV1 {
   /** The chamber whose roll call this is. */
   chamber: "House" | "Senate";
   position: CongressMemberRecordPositionV1;
-  /** The roll call's day (midnight UTC), or when the vote was synced when Congress gave no day. */
-  votedAt: string;
+  /**
+   * The roll call's day as Congress records it, YYYY-MM-DD (Washington's day, with no time or zone): show it as it is,
+   * never converted to the device's time zone. A roll call without a day is not in the record.
+   */
+  votedOn: string;
   /**
    * What the roll call was on, as Congress words it (a passage, a cloture vote, a motion), at most 500 characters;
    * absent when Congress gave none.
@@ -553,7 +556,7 @@ export interface CongressMemberRecordV1 {
   /** A Congress.gov bioguide ID: one capital letter and six digits, such as D000001. */
   bioguideId: string;
   /**
-   * The member's latest roll-call vote on each bill in BillBoard that has one, newest first (by votedAt, then bill
+   * The member's latest roll-call vote on each bill in BillBoard that has one, newest first (by votedOn, then bill
    * guid), at most the request's limit. A member in both chambers' latest roll calls of a bill (who moved chambers) has
    * one entry for each. Empty for a member with no recorded vote, or past the last page.
    */

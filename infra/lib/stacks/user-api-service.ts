@@ -43,6 +43,8 @@ import {
   CONGRESS_MEMBER_VOTE_RECORD_TABLE_NAME,
   CONGRESS_MEMBER_VOTE_RECORD_TABLE_PRIMARY_KEY,
   CONGRESS_MEMBER_VOTE_RECORD_TABLE_SORT_KEY,
+  CONGRESS_MEMBER_VOTE_RECORD_VOTED_ON_INDEX_NAME,
+  CONGRESS_MEMBER_VOTE_RECORD_VOTED_ON_INDEX_SORT_KEY,
 } from '../config/aggregate-data-store-constants';
 import {
   BILL_PRIORITY_ACTIVE_INDEX_NAME,
@@ -764,14 +766,16 @@ export class UserAPIServiceStack extends cdk.Stack {
     voteProfilesTable.grantReadData(this.fetchCongressMemberCivicProfile);
     legislativeProfilesTable.grantReadData(this.fetchCongressMemberCivicProfile);
 
-    // UX-39d: a member's public record. Their vote rows a page at a time (Query on the table), their sponsored-bill
-    // sets (GetItem of their stats row), and the titles, statuses and dates of those bills (BatchGetItem of the
-    // manifest's BILL_GUID lookup rows and BILL rows only). Nothing about any user is read.
+    // UX-39d: a member's public record. Their vote rows a page at a time (Query on the VotedOnIndex), their
+    // sponsored-bill sets (GetItem of their stats row), and the titles, statuses and dates of those bills (BatchGetItem
+    // of the manifest's BILL_GUID lookup rows and BILL rows only). Nothing about any user is read.
     this.fetchCongressMemberRecord = addProdFunction('FetchCongressMemberRecord', 'fetchCongressMemberRecord', {
       environment: {
         VOTE_RECORD_TABLE_NAME: CONGRESS_MEMBER_VOTE_RECORD_TABLE_NAME,
         VOTE_RECORD_PRIMARY_KEY: CONGRESS_MEMBER_VOTE_RECORD_TABLE_PRIMARY_KEY,
         VOTE_RECORD_SORT_KEY: CONGRESS_MEMBER_VOTE_RECORD_TABLE_SORT_KEY,
+        VOTE_RECORD_VOTED_ON_INDEX_NAME: CONGRESS_MEMBER_VOTE_RECORD_VOTED_ON_INDEX_NAME,
+        VOTE_RECORD_VOTED_ON_KEY: CONGRESS_MEMBER_VOTE_RECORD_VOTED_ON_INDEX_SORT_KEY,
         STATS_TABLE_NAME: CONGRESS_MEMBER_STATS_TABLE_NAME,
         STATS_PRIMARY_KEY: CONGRESS_MEMBER_STATS_TABLE_PRIMARY_KEY,
         MANIFEST_TABLE_NAME: BILLS_MANIFEST_TABLE_NAME,
@@ -786,7 +790,7 @@ export class UserAPIServiceStack extends cdk.Stack {
     iam.Grant.addToPrincipal({
       grantee: this.fetchCongressMemberRecord,
       actions: ['dynamodb:Query'],
-      resourceArns: [voteRecordTable.tableArn],
+      resourceArns: [`${voteRecordTable.tableArn}/index/${CONGRESS_MEMBER_VOTE_RECORD_VOTED_ON_INDEX_NAME}`],
     });
     iam.Grant.addToPrincipal({
       grantee: this.fetchCongressMemberRecord,

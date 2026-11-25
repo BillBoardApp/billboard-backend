@@ -9,7 +9,7 @@
       "title": "Funds grants for rural broadband",
       "chamber": "House",
       "position": "Yea",
-      "votedAt": "2026-03-04T00:00:00.000Z",
+      "votedOn": "2026-03-04",
       "actionText": "On passage Passed by the Yeas and Nays: 220 - 210 (Roll no. 61)."
     },
     {
@@ -19,7 +19,7 @@
       "billNumber": "900",
       "chamber": "House",
       "position": "Not Voting",
-      "votedAt": "2026-02-11T00:00:00.000Z"
+      "votedOn": "2026-02-11"
     },
     {
       "billGuid": "BILLS-119hr812",
@@ -29,7 +29,7 @@
       "title": "Names a post office",
       "chamber": "House",
       "position": "Present",
-      "votedAt": "2026-01-20T00:00:00.000Z",
+      "votedOn": "2026-01-20",
       "actionText": "On motion to suspend the rules and pass the bill Agreed to by the Yeas and Nays: 401 - 2 (Roll no. 18)."
     },
     {
@@ -40,11 +40,11 @@
       "title": "Changes the rules for small farms",
       "chamber": "House",
       "position": "Nay",
-      "votedAt": "2025-11-05T00:00:00.000Z",
+      "votedOn": "2025-11-05",
       "actionText": "On passage Failed by the Yeas and Nays: 200 - 215 (Roll no. 301)."
     }
   ],
-  "nextCursor": "MjAyNS0xMS0wNVQwMDowMDowMC4wMDBaI0JJTExTLTExOWhyNzc",
+  "nextCursor": "MjAyNS0xMS0wNSNCSUxMUy0xMTlocjc3I0hvdXNl",
   "sponsoredBills": [
     {
       "billGuid": "BILLS-120hr12",

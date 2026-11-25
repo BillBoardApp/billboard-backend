@@ -16,16 +16,25 @@ import {
 } from "../../contracts";
 import { getAuthenticatedUserId, jsonResponse } from "../../shared/apiGateway";
 import { counterAttributesFor, countedCongressesAt } from "../../shared/memberCounters";
+import {
+  VOTE_RECORD_POSITIONS,
+  voteRecordBillKey,
+  voteRecordVotedOnKey,
+  type VoteRecordChamber,
+} from "../../shared/memberVoteRecord";
 import { sleep } from "../../shared/retry";
 
 // GET /congress-member-record (UX-39d): a member of Congress's public record. Their latest roll-call vote on each bill
-// in BillBoard, newest first, a page at a time (CongressMemberVoteRecord, written by congressMemberStats), and on the
-// first page the bills they sponsored (CongressMembersStats' counted-bill sets, each Congress apart, REL-46). Titles,
-// statuses and dates come from the bills manifest. Only public facts: no score, no ranking, no BillBoard user's vote.
+// in BillBoard, newest first, a page at a time (CongressMemberVoteRecord, written by congressMemberStats, read through
+// its VotedOnIndex), and on the first page the bills they sponsored (CongressMembersStats' counted-bill sets, each
+// Congress apart, REL-46). Titles, statuses and dates come from the bills manifest. Only public facts: no score, no
+// ranking, no BillBoard user's vote.
 
 const VOTE_RECORD_TABLE_NAME = process.env.VOTE_RECORD_TABLE_NAME ?? "";
 const VOTE_RECORD_PRIMARY_KEY = process.env.VOTE_RECORD_PRIMARY_KEY ?? "bioguideId";
-const VOTE_RECORD_SORT_KEY = process.env.VOTE_RECORD_SORT_KEY ?? "recordKey";
+const VOTE_RECORD_SORT_KEY = process.env.VOTE_RECORD_SORT_KEY ?? "billKey";
+const VOTE_RECORD_VOTED_ON_INDEX_NAME = process.env.VOTE_RECORD_VOTED_ON_INDEX_NAME ?? "VotedOnIndex";
+const VOTE_RECORD_VOTED_ON_KEY = process.env.VOTE_RECORD_VOTED_ON_KEY ?? "votedOnKey";
 const STATS_TABLE_NAME = process.env.STATS_TABLE_NAME ?? "";
 const STATS_PRIMARY_KEY = process.env.STATS_PRIMARY_KEY ?? "bioguideId";
 const MANIFEST_TABLE_NAME = process.env.MANIFEST_TABLE_NAME ?? "";
@@ -43,9 +52,10 @@ const BATCH_GET_BACKOFF_MS = 100;
 
 const BIOGUIDE_ID_PATTERN = /^[A-Z]\d{6}$/;
 const PLAIN_GUID_PATTERN = /^BILLS-(\d+)([a-z]+)(\d+)$/;
-// A recordKey: "<votedAt ISO>#<plain guid>".
-const RECORD_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z#BILLS-\d+[a-z]+\d+$/;
-const POSITIONS: ReadonlySet<string> = new Set<CongressMemberRecordPositionV1>(["Yea", "Nay", "Present", "Not Voting"]);
+const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+// What a cursor carries: the last vote served, "<votedOn>#<plain guid>#<chamber>".
+const CURSOR_PATTERN = /^(\d{4}-\d{2}-\d{2})#(BILLS-\d+[a-z]+\d+)#(House|Senate)$/;
+const POSITIONS: ReadonlySet<string> = new Set<CongressMemberRecordPositionV1>(VOTE_RECORD_POSITIONS);
 const BILL_STATUSES: ReadonlySet<string> = new Set(BILL_STATUS_VALUES_V1);
 
 const ddb = new DynamoDBClient({});
@@ -54,13 +64,17 @@ type Item = Record<string, AttributeValue>;
 
 const badRequest = (error: string, message: string): APIGatewayProxyResult => jsonResponse(400, { error, message });
 
-const encodeCursor = (recordKey: string): string => Buffer.from(recordKey, "utf8").toString("base64url");
+/** Where a page ends: the last vote served. */
+type CursorPosition = { votedOn: string; billGuid: string; chamber: VoteRecordChamber };
 
-/** The recordKey a cursor carries, or null when it is not one this handler sent. */
-const decodeCursor = (cursor: string): string | null => {
+const encodeCursor = ({ votedOn, billGuid, chamber }: CursorPosition): string =>
+  Buffer.from(`${votedOn}#${billGuid}#${chamber}`, "utf8").toString("base64url");
+
+/** The vote a cursor continues after, or null when it is not one this handler sent. */
+const decodeCursor = (cursor: string): CursorPosition | null => {
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(cursor)) return null;
-  const recordKey = Buffer.from(cursor, "base64url").toString("utf8");
-  return RECORD_KEY_PATTERN.test(recordKey) ? recordKey : null;
+  const match = Buffer.from(cursor, "base64url").toString("utf8").match(CURSOR_PATTERN);
+  return match ? { votedOn: match[1], billGuid: match[2], chamber: match[3] as VoteRecordChamber } : null;
 };
 
 /** BILLS-119hr1234 -> its congress, type and number, as the bills manifest writes them. */
@@ -148,36 +162,50 @@ const readManifestFacts = async (guids: string[]): Promise<Map<string, ManifestF
   return facts;
 };
 
-/** One page of the member's vote rows, newest first, and the recordKey to continue after when more follow. */
+const VOTE_PROJECTION = "billGuid, #chamber, #position, votedOn, actionText";
+const VOTE_PROJECTION_NAMES = { "#chamber": "chamber", "#position": "position" };
+
+/** A vote row's place in the newest-first order, as a cursor names it; null for a row that cannot be served. */
+const cursorPositionOf = (row: Item): CursorPosition | null => {
+  const votedOn = row.votedOn?.S ?? "";
+  const billGuid = row.billGuid?.S ?? "";
+  const chamber = row.chamber?.S;
+  if (!DAY_PATTERN.test(votedOn) || !PLAIN_GUID_PATTERN.test(billGuid)) return null;
+  return chamber === "House" || chamber === "Senate" ? { votedOn, billGuid, chamber } : null;
+};
+
+/** One page of the member's vote rows, newest first (VotedOnIndex), and where the next page starts when more follow. */
 const readVotePage = async (
   bioguideId: string,
   limit: number,
-  after: string | null,
-): Promise<{ rows: Item[]; next: string | null }> => {
+  after: CursorPosition | null,
+): Promise<{ rows: Item[]; next: CursorPosition | null }> => {
   if (!VOTE_RECORD_TABLE_NAME) return { rows: [], next: null };
   // One row more than asked, so a page that ends the record says so (no empty last page).
   const response = await ddb.send(
     new QueryCommand({
       TableName: VOTE_RECORD_TABLE_NAME,
+      IndexName: VOTE_RECORD_VOTED_ON_INDEX_NAME,
       KeyConditionExpression: "#pk = :pk",
-      ExpressionAttributeNames: {
-        "#pk": VOTE_RECORD_PRIMARY_KEY,
-        "#sk": VOTE_RECORD_SORT_KEY,
-        "#chamber": "chamber",
-        "#position": "position",
-      },
+      ExpressionAttributeNames: { "#pk": VOTE_RECORD_PRIMARY_KEY, ...VOTE_PROJECTION_NAMES },
       ExpressionAttributeValues: { ":pk": { S: bioguideId } },
-      ProjectionExpression: "#sk, billGuid, #chamber, #position, votedAt, actionText",
+      ProjectionExpression: VOTE_PROJECTION,
       ScanIndexForward: false,
       Limit: limit + 1,
       ...(after
-        ? { ExclusiveStartKey: { [VOTE_RECORD_PRIMARY_KEY]: { S: bioguideId }, [VOTE_RECORD_SORT_KEY]: { S: after } } }
+        ? {
+            ExclusiveStartKey: {
+              [VOTE_RECORD_PRIMARY_KEY]: { S: bioguideId },
+              [VOTE_RECORD_SORT_KEY]: { S: voteRecordBillKey(after.billGuid, after.chamber) },
+              [VOTE_RECORD_VOTED_ON_KEY]: { S: voteRecordVotedOnKey(after.votedOn, after.billGuid) },
+            },
+          }
         : {}),
     }),
   );
   const items = response.Items ?? [];
   const rows = items.slice(0, limit);
-  const next = items.length > limit ? (rows[rows.length - 1]?.[VOTE_RECORD_SORT_KEY]?.S ?? null) : null;
+  const next = items.length > limit && rows.length > 0 ? cursorPositionOf(rows[rows.length - 1]) : null;
   return { rows, next };
 };
 
@@ -208,22 +236,19 @@ const readSponsoredGuids = async (bioguideId: string): Promise<string[]> => {
 };
 
 const toVote = (row: Item, facts: Map<string, ManifestFacts>): CongressMemberRecordVoteV1 | null => {
-  const billGuid = row.billGuid?.S ?? "";
-  const parts = billParts(billGuid);
-  const chamber = row.chamber?.S;
+  const place = cursorPositionOf(row);
+  const parts = place ? billParts(place.billGuid) : null;
   const position = row.position?.S ?? "";
-  const votedAt = row.votedAt?.S ?? "";
-  if (!parts || (chamber !== "House" && chamber !== "Senate") || !POSITIONS.has(position)) return null;
-  if (Number.isNaN(Date.parse(votedAt))) return null;
-  const title = facts.get(billGuid)?.title;
+  if (!place || !parts || !POSITIONS.has(position)) return null;
+  const title = facts.get(place.billGuid)?.title;
   const actionText = row.actionText?.S?.trim();
   return {
-    billGuid,
+    billGuid: place.billGuid,
     ...parts,
     ...(title ? { title } : {}),
-    chamber,
+    chamber: place.chamber,
     position: position as CongressMemberRecordPositionV1,
-    votedAt,
+    votedOn: place.votedOn,
     ...(actionText ? { actionText } : {}),
   };
 };

@@ -199,8 +199,10 @@ it.
   most `limit` (1 to 100, default 25): `billGuid` (plain), `congress`, `billType` and `billNumber` (from the guid, as the
   bills manifest writes them), `title` (absent without a manifest row), `chamber` (`House` or `Senate`), `position`
   (`CongressMemberRecordPositionV1`: `Yea`, `Nay`, `Present` or `Not Voting`, as Congress records it; never a judging
-  word, and never `Abstain`, which only BillBoard users cast), `votedAt` and `actionText` (what the roll call was on, a
-  passage or a procedural vote). `nextCursor` is present while more follow; send it back as `cursor`.
+  word, and never `Abstain`, which only BillBoard users cast), `votedOn` (the roll call's day as Congress records it,
+  `YYYY-MM-DD` with no time or zone: shown as it is, never converted to the device's zone) and `actionText` (what the
+  roll call was on, a passage or a procedural vote). `nextCursor` is present while more follow; send it back as
+  `cursor`.
 - `sponsoredBills` (`CongressMemberRecordBillV1`) and `sponsoredBillCount`, on the first page only: the bills the member
   sponsored (not cosponsored), each Congress counted apart (REL-46), newest Congress first, then by `updatedAt`; at most
   250. Each has the guid parts, and `title`, `billStatus`, `vetoed` (only as `true`) and `updatedAt` from the manifest.
@@ -209,7 +211,7 @@ it.
   `INVALID_CURSOR`.
 - `check-contracts.mjs` accepts a last page, a later page, a member with no record and a Senate vote, and rejects a
   judging word or `Abstain` as a position, a lower-case chamber, a suffixed guid, an extra key on a vote, a vote without
-  `votedAt`, `vetoed: false`, a negative `sponsoredBillCount` and a record without `votes`.
+  `votedOn` or dated with a time, `vetoed: false`, a negative `sponsoredBillCount` and a record without `votes`.
 - Generated: the four types above in TypeScript; `UserAPIContractsV1.CongressMemberRecord`,
   `CongressMemberRecordVote` and `CongressMemberRecordBill` in Swift (`position` and `chamber` are `String`).
 

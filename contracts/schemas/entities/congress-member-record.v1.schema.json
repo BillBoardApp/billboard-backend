@@ -10,7 +10,7 @@
     "bioguideId": { "$ref": "processed-bill.v1.schema.json#/$defs/bioguideId" },
     "votes": {
       "type": "array",
-      "description": "The member's latest roll-call vote on each bill in BillBoard that has one, newest first (by votedAt, then bill guid), at most the request's limit. A member in both chambers' latest roll calls of a bill (who moved chambers) has one entry for each. Empty for a member with no recorded vote, or past the last page.",
+      "description": "The member's latest roll-call vote on each bill in BillBoard that has one, newest first (by votedOn, then bill guid), at most the request's limit. A member in both chambers' latest roll calls of a bill (who moved chambers) has one entry for each. Empty for a member with no recorded vote, or past the last page.",
       "items": { "$ref": "#/$defs/vote" }
     },
     "nextCursor": {
@@ -34,7 +34,7 @@
       "title": "CongressMemberRecordVoteV1",
       "type": "object",
       "additionalProperties": false,
-      "required": ["billGuid", "congress", "billType", "billNumber", "chamber", "position", "votedAt"],
+      "required": ["billGuid", "congress", "billType", "billNumber", "chamber", "position", "votedOn"],
       "properties": {
         "billGuid": {
           "type": "string",
@@ -55,10 +55,10 @@
           "description": "The chamber whose roll call this is."
         },
         "position": { "$ref": "#/$defs/position" },
-        "votedAt": {
+        "votedOn": {
           "type": "string",
-          "format": "date-time",
-          "description": "The roll call's day (midnight UTC), or when the vote was synced when Congress gave no day."
+          "format": "date",
+          "description": "The roll call's day as Congress records it, YYYY-MM-DD (Washington's day, with no time or zone): show it as it is, never converted to the device's time zone. A roll call without a day is not in the record."
         },
         "actionText": {
           "type": "string",

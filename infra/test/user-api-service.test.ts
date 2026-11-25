@@ -1544,7 +1544,9 @@ describe("UserAPIServiceStack, FetchCongressMemberRecord", () => {
         Variables: {
           VOTE_RECORD_TABLE_NAME: "CongressMemberVoteRecord",
           VOTE_RECORD_PRIMARY_KEY: "bioguideId",
-          VOTE_RECORD_SORT_KEY: "recordKey",
+          VOTE_RECORD_SORT_KEY: "billKey",
+          VOTE_RECORD_VOTED_ON_INDEX_NAME: "VotedOnIndex",
+          VOTE_RECORD_VOTED_ON_KEY: "votedOnKey",
           STATS_TABLE_NAME: "CongressMembersStats",
           STATS_PRIMARY_KEY: "bioguideId",
           MANIFEST_TABLE_NAME: "BillsManifest",
@@ -1557,14 +1559,14 @@ describe("UserAPIServiceStack, FetchCongressMemberRecord", () => {
     });
   });
 
-  test("reads only: a Query of the record, a GetItem of the stats row, and the manifest's bill and lookup rows", () => {
+  test("reads only: the record's newest-first index, the stats row, and the manifest's bill and lookup rows", () => {
     const statements = roleStatementsOf(templates.userApiTemplate, "FetchCongressMemberRecord");
     const unscoped = statements.filter((statement) => !JSON.stringify(statement.Condition ?? {}).includes("LeadingKeys"));
     const access = storeActions(unscoped);
-    expect(access["table/CongressMemberVoteRecord"]).toEqual(["dynamodb:Query"]);
+    expect(access["table/CongressMemberVoteRecord/index/VotedOnIndex"]).toEqual(["dynamodb:Query"]);
     expect(access["table/CongressMembersStats"]).toEqual(["dynamodb:GetItem"]);
     expect(Object.keys(access).filter((resource) => resource.startsWith("table/"))).toEqual([
-      "table/CongressMemberVoteRecord",
+      "table/CongressMemberVoteRecord/index/VotedOnIndex",
       "table/CongressMembersStats",
     ]);
     expect(partitionScopedGrants(statements)).toEqual([

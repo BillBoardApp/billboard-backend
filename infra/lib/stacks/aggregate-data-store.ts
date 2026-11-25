@@ -22,6 +22,8 @@ import {
   CONGRESS_MEMBER_VOTE_RECORD_TABLE_NAME,
   CONGRESS_MEMBER_VOTE_RECORD_TABLE_PRIMARY_KEY,
   CONGRESS_MEMBER_VOTE_RECORD_TABLE_SORT_KEY,
+  CONGRESS_MEMBER_VOTE_RECORD_VOTED_ON_INDEX_NAME,
+  CONGRESS_MEMBER_VOTE_RECORD_VOTED_ON_INDEX_SORT_KEY,
 } from '../config/aggregate-data-store-constants';
 
 /**
@@ -77,7 +79,8 @@ export class AggregateDataStoreStack extends cdk.Stack {
       projectionType: ddb.ProjectionType.KEYS_ONLY,
     });
 
-    // UX-39d: the members' public roll-call record, every position, for every bill with official votes.
+    // UX-39d: the members' public roll-call record, every position, for every bill with official votes. One row per
+    // member, bill and chamber, so a newer roll call overwrites it.
     const congressMemberVoteRecordTable = new ddb.Table(this, 'CongressMemberVoteRecordTable', {
       partitionKey: { name: CONGRESS_MEMBER_VOTE_RECORD_TABLE_PRIMARY_KEY, type: ddb.AttributeType.STRING },
       sortKey: { name: CONGRESS_MEMBER_VOTE_RECORD_TABLE_SORT_KEY, type: ddb.AttributeType.STRING },
@@ -88,7 +91,15 @@ export class AggregateDataStoreStack extends cdk.Stack {
       billingMode: ddb.BillingMode.PAY_PER_REQUEST,
     });
 
-    // KEYS_ONLY carries the table keys too: the bioguideId and recordKey of each of a bill's rows, to delete them.
+    // A member's rows newest first, for GET /congress-member-record's pages. A local index exists only if the table is
+    // created with it.
+    congressMemberVoteRecordTable.addLocalSecondaryIndex({
+      indexName: CONGRESS_MEMBER_VOTE_RECORD_VOTED_ON_INDEX_NAME,
+      sortKey: { name: CONGRESS_MEMBER_VOTE_RECORD_VOTED_ON_INDEX_SORT_KEY, type: ddb.AttributeType.STRING },
+      projectionType: ddb.ProjectionType.ALL,
+    });
+
+    // KEYS_ONLY carries the table keys too: the bioguideId and billKey of each of a bill's rows, to delete them.
     congressMemberVoteRecordTable.addGlobalSecondaryIndex({
       indexName: CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_NAME,
       partitionKey: { name: CONGRESS_MEMBER_VOTE_RECORD_BILL_GUID_INDEX_PRIMARY_KEY, type: ddb.AttributeType.STRING },
