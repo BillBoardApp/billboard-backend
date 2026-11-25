@@ -60,6 +60,8 @@ const BATCH_GET_BACKOFF_MS = 100;
 // APPF-23: the groups PublishBillsManifest last published, read at most every 60 s, as the other readers do.
 const COMPANION_GROUPS_MAX_AGE_MS = 60_000;
 const COMPANION_METRIC_NAMESPACE = "BillBoard/BillsManifest";
+// ReadCapHit: a request whose moved bills did not all fit in MAX_BILL_READS (a count only, no dimensions).
+const RECENT_ACTIONS_METRIC_NAMESPACE = "BillBoard/RecentActions";
 
 const db = new DynamoDBClient({});
 const storage = new BillStorage(new S3Client({}), BUCKET_NAME);
@@ -197,13 +199,14 @@ const readManifestUpdatedAt = async (guids: readonly string[]): Promise<Map<stri
  * window's first day (an action in the window moves the row when it is stored, so no row with one is left out), most
  * recently moved group first, while the members to read stay within MAX_BILL_READS. Every member of such a group with
  * a manifest row is read, moved or not: the group's row takes the status of the member the Bills card shows
- * (companionStatusLead.ts), which may be a law or a veto from before the window.
+ * (companionStatusLead.ts), which may be a law or a veto from before the window. `moved` counts the groups that moved
+ * and `unread` those of them the cap left out, which then have no row.
  */
 export const selectBillReads = (
   groups: readonly (readonly string[])[],
   updatedAt: ReadonlyMap<string, string>,
   movedSince: string,
-): { groups: string[][]; reads: string[] } => {
+): { groups: string[][]; reads: string[]; moved: number; unread: number } => {
   const fresh = groups
     .map((members) => {
       const listed = members.filter((guid) => updatedAt.has(guid));
@@ -222,7 +225,7 @@ export const selectBillReads = (
     selected.push(group.members);
     reads.push(...group.listed);
   }
-  return { groups: selected, reads };
+  return { groups: selected, reads, moved: fresh.length, unread: fresh.length - selected.length };
 };
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
@@ -249,6 +252,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const updatedAt = await readManifestUpdatedAt([...new Set(groups.flat())]);
     const movedSince = addDays(recentActionsWindowStart(nowMs, WINDOW_DAYS), -1);
     const selection = selectBillReads(groups, updatedAt, movedSince);
+    if (selection.unread > 0) emitEmbeddedMetric(RECENT_ACTIONS_METRIC_NAMESPACE, "ReadCapHit", 1);
     const documents = await mapWithConcurrency(selection.reads, BILL_READ_CONCURRENCY, (guid) =>
       storage.getJson<unknown>(buildProcessedBillRootGuidKey(guid)),
     );
@@ -268,7 +272,8 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     });
     logger.info("fetchRecentActions built the list", {
       bills: groups.length,
-      moved: selection.groups.length,
+      moved: selection.moved,
+      unread: selection.unread,
       read: selection.reads.length,
       missing: selection.reads.length - bills.size,
       items: items.length,

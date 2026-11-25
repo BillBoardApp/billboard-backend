@@ -457,6 +457,14 @@ describe("fetchRecentActions", () => {
     expect(items).toHaveLength(50);
     const days = items.map((item) => item.action.date);
     expect(days).toEqual([...days].sort().reverse());
+    const summary = logLines(console.log).find((line) => line.message === "fetchRecentActions built the list");
+    expect(summary).toMatchObject({ bills: 70, moved: 70, unread: 10, read: 60, missing: 0, items: 50 });
+    const metric = logLines(console.log).find((line) => line._aws);
+    expect(metric?._aws?.CloudWatchMetrics[0]).toMatchObject({
+      Namespace: "BillBoard/RecentActions",
+      Metrics: [{ Name: "ReadCapHit" }],
+    });
+    expect(JSON.stringify(metric)).not.toContain("BILLS-");
   });
 
   it("reads the lookup rows of 150 bills in two BatchGetItem calls of at most 100 keys", async () => {
@@ -489,8 +497,9 @@ describe("fetchRecentActions", () => {
 
     expect(items.map((item) => item.billGuid)).toEqual(["BILLS-119hr11"]);
     const summary = logLines(console.log).find((line) => line.message === "fetchRecentActions built the list");
-    expect(summary).toMatchObject({ bills: 2, moved: 2, read: 2, missing: 1, items: 1 });
+    expect(summary).toMatchObject({ bills: 2, moved: 2, unread: 0, read: 2, missing: 1, items: 1 });
     expect(JSON.stringify(summary)).not.toContain(USER_A);
+    expect(logLines(console.log).some((line) => line._aws)).toBe(false);
   });
 
   it("shows a companion pair as one row, reading the partner the caller does not hold", async () => {
