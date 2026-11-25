@@ -269,12 +269,14 @@ async function pushToUser(
   counts: WeeklyBriefPushSummary,
 ): Promise<UserOutcome> {
   const { userId } = recipient;
+  // Devices first: until app 1.3 is widely installed almost no user has a device that takes the brief (D2), and a
+  // device Query is far cheaper than reading the snapshot, whose payload every run would otherwise read for every user.
+  const devices = devicesTakingTheBrief(await deviceDao.getDevicesForUser(userId));
+  if (devices.length === 0) return "no_device";
+
   const stored = await snapshotDao.getPushState(userId, context.windowId);
   if (!stored) return "no_brief";
   if (stored.pushClaimedAt) return "already_sent";
-
-  const devices = devicesTakingTheBrief(await deviceDao.getDevicesForUser(userId));
-  if (devices.length === 0) return "no_device";
 
   if (context.quietHours && isInQuietHours(context.nowMs, timeZoneForState(recipient.state))) {
     return "held_quiet_hours";
