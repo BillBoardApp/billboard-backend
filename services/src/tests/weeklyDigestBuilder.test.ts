@@ -675,6 +675,86 @@ describe("your bills this week (yourBills)", () => {
     },
   );
 
+  // Review of UX-41 concept 4: the voted bills were made one candidate per companion group before any bill was loaded,
+  // so the bill that stood for a pair was chosen by status and row date, not by which bill moved. A twin with no action
+  // in the week that tied or outranked the bill that moved, and whose row was rewritten later (a text version, or after
+  // the week and before the build), stood for the pair, and the pair was left out of Your bills.
+  it.each([
+    ["ties", "in the week", "Passed", "2026-03-19T15:00:00.000Z"],
+    ["ties", "on Sunday morning, before the build", "Passed", "2026-03-22T12:00:00.000Z"],
+    ["outranks", "in the week", "Updated", "2026-03-19T15:00:00.000Z"],
+    ["outranks", "on Sunday morning, before the build", "Updated", "2026-03-22T12:00:00.000Z"],
+  ] as const)(
+    "lists a companion pair by the bill that moved when the twin that did not move %s it and was rewritten %s",
+    async (_rank, _when, houseStatus, senateUpdatedAt) => {
+      const HOUSE = "BILLS-119hr1285ih";
+      const SENATE = "BILLS-119s570es";
+      const title = "Lower Energy Costs Act";
+      const houseAction =
+        houseStatus === "Passed"
+          ? "Passed/agreed to in House: On passage Passed by the Yeas and Nays."
+          : "Ordered to be Reported by the Yeas and Nays.";
+      const digest = await build({
+        // The reader voted on the House bill, which moved on Mar 18. The Senate bill passed in February.
+        items: [
+          entry(HOUSE, { billStatus: houseStatus, subCategories: [], title }),
+          entry(SENATE, { billStatus: "Passed", subCategories: [], title, updatedAt: senateUpdatedAt }),
+        ],
+        bills: {
+          [HOUSE]: acted("2026-03-18", houseAction),
+          [SENATE]: acted("2026-02-10", "Passed Senate without amendment by Unanimous Consent."),
+        },
+        topics: [],
+        companions: [[HOUSE, SENATE]],
+        votedOn: [HOUSE],
+      });
+
+      expect(digest!.yourBills).toEqual([
+        expect.objectContaining({
+          id: `bill|${HOUSE}`,
+          billGuid: HOUSE,
+          title,
+          summary: `Mar 18: ${houseAction}`,
+          reason: "You voted on this",
+        }),
+      ]);
+      // The sections are as before: the House bill needs attention again when it only changed, and a bill that passed
+      // with nothing but the vote is in no section.
+      expect(items(digest).map((item) => item.billGuid)).toEqual(houseStatus === "Updated" ? [HOUSE] : []);
+      const { weeklyBriefPushBody } = require("../shared/weeklyBriefPushCopy");
+      expect(weeklyBriefPushBody(digest)).toBe("Includes Lower Energy Costs Act.");
+    },
+  );
+
+  it("lists a companion pair once, by the higher rank, when both bills moved in the week", async () => {
+    const HOUSE = "BILLS-119hr1285ih";
+    const SENATE = "BILLS-119s570es";
+    const digest = await build({
+      items: [
+        entry(HOUSE, { billStatus: "Updated", subCategories: [] }),
+        entry(SENATE, { billStatus: "Passed", subCategories: [], updatedAt: "2026-03-17T15:00:00.000Z" }),
+      ],
+      bills: {
+        [HOUSE]: acted("2026-03-18", "Ordered to be Reported by the Yeas and Nays."),
+        [SENATE]: acted("2026-03-16", "Passed Senate without amendment by Unanimous Consent."),
+      },
+      topics: [],
+      companions: [[HOUSE, SENATE]],
+      votedOn: [HOUSE],
+    });
+
+    // Needs attention has the House bill, the only one with a bucket. Your bills says the Senate passage, the higher
+    // rank, under the billGuid of the section's item.
+    expect(items(digest).map((item) => item.billGuid)).toEqual([HOUSE]);
+    expect(digest!.yourBills).toEqual([
+      expect.objectContaining({
+        billGuid: HOUSE,
+        summary: "Mar 16: Passed Senate without amendment by Unanimous Consent.",
+        billState: "passed",
+      }),
+    ]);
+  });
+
   // Review of UX-41 concept 4: a row rewritten between Sunday 00:00 and the 10:00 build (weekend ingestion of a Friday or
   // Saturday action) was after the week for this brief, and its action was before the week for the next one.
   it("lists a voted bill whose row was rewritten on Sunday morning, before the build, in that week's brief only", async () => {
