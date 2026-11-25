@@ -1031,6 +1031,8 @@ describe("UserAPIServiceStack", () => {
         State: "ENABLED",
       }));
       expect(JSON.stringify(schedule.Properties.Target.Arn)).toMatch(/WeeklyBriefPushProdAlias/);
+      // The function tells its last run by the scheduled time, which an async retry keeps.
+      expect(JSON.parse(schedule.Properties.Target.Input)).toEqual({ scheduledTime: "<aws.scheduler.scheduled-time>" });
 
       const environment = functionEnvironment("WeeklyBriefPush");
       const generator = functionEnvironment("GenerateWeeklyDigests");

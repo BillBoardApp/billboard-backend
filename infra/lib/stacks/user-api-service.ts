@@ -1449,6 +1449,9 @@ export class UserAPIServiceStack extends cdk.Stack {
         arn: weeklyBriefPush.alias.functionArn,
         roleArn: weeklyBriefPushSchedulerRole.roleArn,
         deadLetterConfig: { arn: scheduledJobFailuresQueue(this).queueArn },
+        // The run's scheduled start, which Lambda's async retries resend unchanged: the function tells its last run
+        // by it, so a late retry of an earlier run never counts WeeklyBriefPushesUnsent.
+        input: JSON.stringify({ scheduledTime: '<aws.scheduler.scheduled-time>' }),
       },
     });
 

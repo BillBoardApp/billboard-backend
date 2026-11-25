@@ -27,9 +27,12 @@ import { latestPublishedWindow, WEEKLY_DIGEST_TIME_ZONE } from "../../shared/wee
  * - Not held by the 3-hour bill-push pace and never counted in it (decision D6): it writes no pace marker.
  * - The payload is userNotifier's message shape, read by 1.3 as a brief (domain weekly_digest, a digestId, no billIds).
  * - Metrics (EMF, BillBoard/WeeklyDigest): WeeklyBriefPushesSent (pushes SNS accepted, one per device) and
- *   WeeklyBriefPushFailed (failed publishes, and users whose reads or claim failed) every run, zero included, and on the
- *   last run WeeklyBriefPushesUnsent (users with an unsent brief and a device that takes it, still in their quiet hours
- *   or not reached).
+ *   WeeklyBriefPushFailed (failed publishes, and users whose reads or claim failed) every run, zero included, and from
+ *   the last run WeeklyBriefPushesUnsent (users with an unsent brief and a device that takes it, still in their quiet
+ *   hours), once a Sunday: only from an attempt that finishes without throwing, so an async retry of the last run never
+ *   counts the same users again, and the last run is the one scheduled for the last hour (the event's scheduledTime,
+ *   which a retry keeps), so an earlier run's retry that lands in that hour is not. A last run that fails every attempt
+ *   emits none; its Errors alarm and ScheduledJobFailures show it.
  * - Logs carry counts and error names only: never a user id, an endpoint ARN or an SNS error message (which can hold
  *   the ARN).
  * - WEEKLY_BRIEF_PUSH exactly "on" sends; anything else sends nothing (the switch). A run more than 12 hours after the
@@ -292,11 +295,22 @@ async function pushToUser(
 
 type InvocationContext = LambdaContextLike & { getRemainingTimeInMillis?: () => number };
 
-export async function handler(_event?: unknown, lambdaContext?: InvocationContext): Promise<WeeklyBriefPushSummary> {
+/**
+ * When the schedule meant this run to start: the `scheduledTime` EventBridge Scheduler puts in the event
+ * (<aws.scheduler.scheduled-time>, infra WeeklyBriefPushSchedule), which Lambda's async retries resend unchanged. Now
+ * for an invocation without one, such as a manual run.
+ */
+const scheduledTimeOf = (event: unknown, nowMs: number): number => {
+  const value = event && typeof event === "object" ? (event as { scheduledTime?: unknown }).scheduledTime : undefined;
+  const parsed = typeof value === "string" ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : nowMs;
+};
+
+export async function handler(event?: unknown, lambdaContext?: InvocationContext): Promise<WeeklyBriefPushSummary> {
   logger.resetContext(lambdaContext);
   const nowMs = Date.now();
   const window = latestPublishedWindow(new Date(nowMs));
-  const lastRun = localTimeIn(nowMs, WEEKLY_DIGEST_TIME_ZONE).hour >= lastRunHour();
+  const lastRun = localTimeIn(scheduledTimeOf(event, nowMs), WEEKLY_DIGEST_TIME_ZONE).hour >= lastRunHour();
   const summary: WeeklyBriefPushSummary = {
     status: "sent",
     windowId: window.id,
@@ -340,19 +354,17 @@ export async function handler(_event?: unknown, lambdaContext?: InvocationContex
     summary.users[outcome] += 1;
   });
 
+  const failed = summary.users.failed > 0 || summary.users.not_started > 0;
   const metrics: EmbeddedMetricInput[] = [
     { name: "WeeklyBriefPushesSent", value: summary.devices.sent },
     { name: "WeeklyBriefPushFailed", value: summary.devices.failed + summary.users.failed },
   ];
-  if (lastRun) {
-    metrics.push({
-      name: "WeeklyBriefPushesUnsent",
-      value: summary.users.held_quiet_hours + summary.users.not_started,
-    });
+  // Once a Sunday: an attempt that throws is retried, and the retry that finishes counts the users still held.
+  if (lastRun && !failed) {
+    metrics.push({ name: "WeeklyBriefPushesUnsent", value: summary.users.held_quiet_hours });
   }
   emitEmbeddedMetrics(METRIC_NAMESPACE, metrics);
 
-  const failed = summary.users.failed > 0 || summary.users.not_started > 0;
   (failed || summary.devices.failed > 0 ? logger.error.bind(logger) : logger.info.bind(logger))(
     "weeklyBriefPush summary",
     { ...summary },
