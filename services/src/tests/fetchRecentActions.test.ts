@@ -331,6 +331,8 @@ describe("fetchRecentActions", () => {
           date: "2026-11-19",
           text: "Reported by the Committee on Energy and Commerce (Voted bill)",
           actionCode: "H12200",
+          billGuid: "BILLS-119hr77",
+          officialNumber: "H.R. 77",
         },
         yourVote: "Yea",
         votedOn: "2026-10-26",
@@ -346,9 +348,12 @@ describe("fetchRecentActions", () => {
     );
     expect(Object.keys(body).sort()).toEqual([...schema.required].sort());
     const itemSchema = schema.$defs.recentActionItem;
+    const actionSchema = schema.$defs.recentAction;
     for (const item of body.items) {
       for (const key of itemSchema.required) expect(item).toHaveProperty(key);
       for (const key of Object.keys(item)) expect(Object.keys(itemSchema.properties)).toContain(key);
+      for (const key of actionSchema.required) expect(item.action).toHaveProperty(key);
+      for (const key of Object.keys(item.action)) expect(Object.keys(actionSchema.properties)).toContain(key);
     }
   });
 
@@ -541,7 +546,7 @@ describe("fetchRecentActions", () => {
         billGuid: "BILLS-119hr19",
         title: "House law",
         billStatus: "Finalized",
-        action: expect.objectContaining({ date: "2026-11-12" }),
+        action: expect.objectContaining({ date: "2026-11-12", billGuid: "BILLS-119s19", officialNumber: "S. 19" }),
         watched: true,
       }),
     ]);

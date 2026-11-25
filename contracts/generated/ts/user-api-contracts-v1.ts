@@ -674,6 +674,14 @@ export interface RecentActionV1 {
   text: string;
   /** The Library of Congress or chamber code of the action, when it has one. */
   actionCode?: string;
+  /**
+   * The plain guid of the bill the action is on. For a companion group it can be the other member, not the one the row
+   * shows: a row for H.R. 77 (Passed) can carry S. 50's "Failed in the Senate". A client names that member beside the
+   * action when it differs from the row's billGuid, as a push does.
+   */
+  billGuid: string;
+  /** The number of the bill the action is on, as the apps show it: "S. 50". */
+  officialNumber: string;
 }
 
 /**
@@ -702,7 +710,8 @@ export interface RecentActionItemV1 {
    * The plain guid of the bill the row shows. For a companion group (one row), the member whose status the Bills card
    * shows for the group: a law first, then a veto, a passage, a failure, an update, then the member whose manifest row
    * changed later, then the primary (CompanionGroupIndex.statusLead). The row's number, title, billStatus and vetoed
-   * are that member's; its action is the group's latest, from either member.
+   * are that member's; its action is the group's latest, from either member, and action.billGuid names the member it is
+   * on.
    */
   billGuid: string;
   congress: string;
