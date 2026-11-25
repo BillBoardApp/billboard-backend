@@ -8,7 +8,9 @@ import { formatWeeklyDigestShortRange } from "./weeklyDigestSchedule";
  * - Title: "Weekly Brief · Nov 15–21", the week as app 1.3's front page docket gives it ("Oct 25–Nov 1" across months).
  * - Body: "Includes {bill}." for one bill, "Includes {bill 1} and {bill 2}." for two, "Includes {bill 1}, {bill 2}, and
  *   {N} more." for three or more, the bills in app 1.3's page order (Your bills this week first, then the sections)
- *   with member items skipped and each bill once. So a brief with Your bills names the reader's own bills first; the
+ *   with member items skipped and each bill once. A title is named once: a later bill with the same title as one
+ *   already named (two unrelated bills can share a short title) is counted in "N more", never named twice, so the
+ *   body reads "Includes SAVE Act and 1 more.", not "Includes SAVE Act and SAVE Act." So a brief with Your bills names the reader's own bills first; the
  *   proposed count of them ("2 bills you voted on moved this week.") is not used (project decision 2026-11-25). Listed
  *   titles are cut to 36 bytes with "...", as userNotifier's example titles are; a lone title gets the whole body. The
  *   body stays within 160 bytes, as a bill push's does.
@@ -68,11 +70,23 @@ export const weeklyBriefPushBody = (digest: Pick<WeeklyDigest, "sections" | "sum
     return closed(`${INCLUDES}${truncateUtf8(titles[0], room)}`);
   }
 
-  const [first, second] = titles.map((title) => truncateUtf8(title, WEEKLY_BRIEF_LISTED_TITLE_MAX_BYTES));
-  const body =
-    titles.length === 2
-      ? closed(`${INCLUDES}${first} and ${second}`)
-      : `${INCLUDES}${first}, ${second}, and ${titles.length - 2} more.`;
+  // Up to two titles that read differently as listed (cut to 36 bytes, any letter case); every other bill is "N more".
+  const named: string[] = [];
+  const namedKeys = new Set<string>();
+  for (const title of titles) {
+    const listed = truncateUtf8(title, WEEKLY_BRIEF_LISTED_TITLE_MAX_BYTES);
+    const key = listed.toLowerCase();
+    if (namedKeys.has(key)) continue;
+    namedKeys.add(key);
+    named.push(listed);
+    if (named.length === 2) break;
+  }
+  const more = titles.length - named.length;
+  const [first, second] = named;
+  let body: string;
+  if (second === undefined) body = `${INCLUDES}${first} and ${more} more.`;
+  else if (more === 0) body = closed(`${INCLUDES}${first} and ${second}`);
+  else body = `${INCLUDES}${first}, ${second}, and ${more} more.`;
   return truncateUtf8(body, WEEKLY_BRIEF_PUSH_BODY_MAX_BYTES);
 };
 
