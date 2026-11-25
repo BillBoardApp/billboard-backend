@@ -3,8 +3,8 @@ import {
   DeleteItemCommand,
   DynamoDBClient,
   GetItemCommand,
-  PutItemCommand,
   QueryCommand,
+  UpdateItemCommand,
 } from "@aws-sdk/client-dynamodb";
 import { SNSClient, CreatePlatformEndpointCommand, SetEndpointAttributesCommand } from "@aws-sdk/client-sns";
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
@@ -25,9 +25,15 @@ const NOTIFY_UPDATED_ATTRIBUTE = process.env.NOTIFY_UPDATED_ATTRIBUTE ?? "notify
 const NOTIFY_ALERT_ATTRIBUTE = process.env.NOTIFY_ALERT_ATTRIBUTE ?? "notifyAlert";
 const NOTIFY_PASSED_ATTRIBUTE = process.env.NOTIFY_PASSED_ATTRIBUTE ?? "notifyPassed";
 const NOTIFY_FAILED_ATTRIBUTE = process.env.NOTIFY_FAILED_ATTRIBUTE ?? "notifyFailed";
-// UX-28: the Weekly Brief push flag has no default (deviceNotificationSettings); a stored value is carried over and an
-// absent one stays absent, so a new token neither opts the device out nor in.
-const NOTIFY_WEEKLY_BRIEF_ATTRIBUTE = process.env.NOTIFY_WEEKLY_BRIEF_ATTRIBUTE ?? "notifyWeeklyBrief";
+/** The switches a registration stores with their default (on) when the row has none; a stored value is kept. */
+const DEFAULT_ON_SWITCHES = [
+  NOTIFICATIONS_ENABLED_ATTRIBUTE,
+  NOTIFY_NEW_ATTRIBUTE,
+  NOTIFY_UPDATED_ATTRIBUTE,
+  NOTIFY_ALERT_ATTRIBUTE,
+  NOTIFY_PASSED_ATTRIBUTE,
+  NOTIFY_FAILED_ATTRIBUTE,
+];
 
 const db = new DynamoDBClient({});
 const sns = new SNSClient({});
@@ -58,21 +64,6 @@ function isValidPushToken(value: unknown): value is string {
 
 function isValidDeviceId(value: unknown): value is string {
   return typeof value === "string" && DEVICE_ID_PATTERN.test(value);
-}
-
-function attrToBool(attr: AttributeValue | undefined): boolean | null {
-  if (!attr) return null;
-  if (typeof attr.BOOL === "boolean") return attr.BOOL;
-  if (typeof attr.S === "string") {
-    const lowered = attr.S.trim().toLowerCase();
-    if (lowered === "true") return true;
-    if (lowered === "false") return false;
-  }
-  if (typeof attr.N === "string") {
-    if (attr.N === "1") return true;
-    if (attr.N === "0") return false;
-  }
-  return null;
 }
 
 function isAlreadyRegistered(existingItem: Record<string, AttributeValue> | undefined, pushToken: string): boolean {
@@ -192,13 +183,6 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     );
 
     let endpointArn = existing.Item?.endpointArn?.S;
-    const notificationsEnabled = attrToBool(existing.Item?.[NOTIFICATIONS_ENABLED_ATTRIBUTE]) ?? true;
-    const notifyNew = attrToBool(existing.Item?.[NOTIFY_NEW_ATTRIBUTE]) ?? true;
-    const notifyUpdated = attrToBool(existing.Item?.[NOTIFY_UPDATED_ATTRIBUTE]) ?? true;
-    const notifyAlert = attrToBool(existing.Item?.[NOTIFY_ALERT_ATTRIBUTE]) ?? true;
-    const notifyPassed = attrToBool(existing.Item?.[NOTIFY_PASSED_ATTRIBUTE]) ?? true;
-    const notifyFailed = attrToBool(existing.Item?.[NOTIFY_FAILED_ATTRIBUTE]) ?? true;
-    const notifyWeeklyBrief = attrToBool(existing.Item?.[NOTIFY_WEEKLY_BRIEF_ATTRIBUTE]);
 
     if (isAlreadyRegistered(existing.Item, pushToken)) {
       return { statusCode: 200, body: JSON.stringify({ message: "Device registered", endpointArn }) };
@@ -239,23 +223,37 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       }),
     );
 
+    // One UpdateItem that sets only the registration and the switch defaults, never a whole-row replace: a
+    // deviceNotificationSettings PUT at the same moment keeps the switches it stores, the Weekly Brief flag (UX-28)
+    // included. A stored switch is kept; a missing one gets its default (on). The Weekly Brief flag has no default,
+    // so it is never written here: a new token neither opts the device out of the Sunday push nor in.
     await db.send(
-      new PutItemCommand({
+      new UpdateItemCommand({
         TableName: TABLE_NAME,
-        Item: {
+        Key: {
           [PARTITION_KEY]: { S: userId },
           [SORT_KEY]: { S: deviceId },
-          platform: { S: "ios" },
-          pushToken: { S: pushToken },
-          endpointArn: { S: endpointArn! },
-          [NOTIFICATIONS_ENABLED_ATTRIBUTE]: { BOOL: notificationsEnabled },
-          [NOTIFY_NEW_ATTRIBUTE]: { BOOL: notifyNew },
-          [NOTIFY_UPDATED_ATTRIBUTE]: { BOOL: notifyUpdated },
-          [NOTIFY_ALERT_ATTRIBUTE]: { BOOL: notifyAlert },
-          [NOTIFY_PASSED_ATTRIBUTE]: { BOOL: notifyPassed },
-          [NOTIFY_FAILED_ATTRIBUTE]: { BOOL: notifyFailed },
-          ...(notifyWeeklyBrief === null ? {} : { [NOTIFY_WEEKLY_BRIEF_ATTRIBUTE]: { BOOL: notifyWeeklyBrief } }),
-          updatedAt: { S: new Date().toISOString() },
+        },
+        UpdateExpression: `SET ${[
+          "#platform = :platform",
+          "#pushToken = :pushToken",
+          "#endpointArn = :endpointArn",
+          "#updatedAt = :updatedAt",
+          ...DEFAULT_ON_SWITCHES.map((_, index) => `#s${index} = if_not_exists(#s${index}, :on)`),
+        ].join(", ")}`,
+        ExpressionAttributeNames: {
+          "#platform": "platform",
+          "#pushToken": "pushToken",
+          "#endpointArn": "endpointArn",
+          "#updatedAt": "updatedAt",
+          ...Object.fromEntries(DEFAULT_ON_SWITCHES.map((attribute, index) => [`#s${index}`, attribute])),
+        },
+        ExpressionAttributeValues: {
+          ":platform": { S: "ios" },
+          ":pushToken": { S: pushToken },
+          ":endpointArn": { S: endpointArn! },
+          ":updatedAt": { S: new Date().toISOString() },
+          ":on": { BOOL: true },
         },
       }),
     );
