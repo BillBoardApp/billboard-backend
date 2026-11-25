@@ -326,11 +326,13 @@ and every day field stays.
   first voted on in it (`firstVotedAt`, so a changed vote never moves its week), Yea, Nay and Abstain alike, a
   companion pair once.
 - `CivicScore.weeksVotedRecent`: the weeks of `recentVoteWeeks` with a count above 0, 0 to 8. One vote fills a week.
-- Weeks earn no points, and the day-streak bonus is frozen (project decision 2026-11-23, D85 (a)). `streakBonus` keeps
-  the value it had on the caller's first read after the freeze (5 x the best streak then, never less than the stored
-  record gave) and never changes after, so it can be below 5 x `longestStreak`. `longestStreak` and `currentStreak`
-  still follow the days, because 1.1 and 1.2 show them; 1.3 shows the bonus as "Best streak +N". The record on
-  `UserPII` gains `civicStreakBonus`, the frozen value, and holds no week.
+- Weeks earn no points, and the day-streak bonus is frozen (project decision 2026-11-23, D85 (a)) at the freeze,
+  Monday 2026-11-23 00:00 America/New_York. `streakBonus` is 5 x the larger of the best streak on the caller's record
+  (the one the score last showed) and the longest run of days with a bill first voted on before the freeze, so it is
+  the same whenever the app reads, and 0 for a caller who first voted after the freeze. It is stored once and never
+  changes, so it can be below 5 x `longestStreak`. `longestStreak` and `currentStreak` still follow the days, because
+  1.1 and 1.2 show them; 1.3 shows the bonus as "Best streak +N". The record on `UserPII` gains `civicStreakBonus`,
+  the frozen value, and holds no week.
 - The `CivicScore` sample carries both; the `CIVIC_SCORE_*` cases accept a body without them and one with no vote in
   8 weeks, and reject 7 or 9 weeks, a week without or with a non-date `weekStart`, a negative count, an undeclared
   field, `weeksVotedRecent` above 8 or fractional, and `null`. The sample's weeks must be consecutive Sundays ending
