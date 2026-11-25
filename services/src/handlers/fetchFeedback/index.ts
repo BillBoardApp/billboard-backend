@@ -3,10 +3,23 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { isLegacyDismissRow, LEGACY_DISMISS_ATTRIBUTE } from "../../models/feedback";
 import { sendsAppVersion } from "../../shared/appAttest/wire";
 import { plainBillGuid } from "../../shared/billCompanions";
+import { exportVotes, VOTE_EXPORT_RESOURCE, type VoteExportConfig } from "./exportVotes";
 
 const TABLE_NAME = process.env.TABLE_NAME!;
 const PARTITION_KEY = process.env.PARTITION_KEY!;
 const SORT_KEY = process.env.SORT_KEY!;
+
+// UX-40 L7: GET /account-data/votes ("Download my votes") reads titles from the bills manifest.
+const VOTE_EXPORT_CONFIG: VoteExportConfig = {
+  tableName: TABLE_NAME,
+  partitionKey: PARTITION_KEY,
+  sortKey: SORT_KEY,
+  manifestTableName: process.env.MANIFEST_TABLE_NAME?.trim() || undefined,
+  manifestPrimaryKey: process.env.MANIFEST_PRIMARY_KEY ?? "pk",
+  manifestSortKey: process.env.MANIFEST_SORT_KEY ?? "sk",
+  manifestPkValue: process.env.MANIFEST_PK_VALUE ?? "BILL",
+  manifestGuidLookupPk: process.env.MANIFEST_GUID_LOOKUP_PK ?? "BILL_GUID",
+};
 
 const db = new DynamoDBClient({});
 
@@ -43,6 +56,12 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: "Unauthorized (missing authorizer claims)" }),
     };
+  }
+
+  // UX-40 L7: the caller's own votes for "Download my votes", by the API resource the request came through. It reads
+  // no body and no bill id: only the cursor of a later page.
+  if (event?.resource === VOTE_EXPORT_RESOURCE) {
+    return exportVotes(event, String(userId), db, VOTE_EXPORT_CONFIG);
   }
 
   const body = parseJsonBody(event);
