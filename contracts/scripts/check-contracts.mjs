@@ -360,14 +360,31 @@ const VERIFICATION_MUST_REJECT = [
   ],
 ];
 
-// GET /civic-profile (UX-32): the theme lock's additive fields. Apps 1.1 and 1.2 decode only the first five (and ignore
-// unknown keys), so a body without the new ones (a server before UX-32) stays valid.
+// GET /civic-profile (UX-32): the theme lock's additive fields, and UX-40 L4's themeVotes. Apps 1.1 and 1.2 decode only
+// the first five (and ignore unknown keys), so a body without the new ones (a server before UX-32 or UX-40 L4) stays
+// valid. themeVotes, when sent, names all six themes with a whole count of 0 or more.
 const USER_CIVIC_PROFILE = component("UserCivicProfile");
+const withThemeVotes = (edit) => (profile) => ({ ...profile, themeVotes: edit(profile.themeVotes) });
 const CIVIC_PROFILE_MUST_ACCEPT = [
   [
     USER_CIVIC_PROFILE,
-    "a body without the UX-32 fields (a server before UX-32)",
-    without("lockedBy", "themesReady", "minThemesRequired", "minThemeVotes"),
+    "a body without the UX-32 fields or themeVotes (a server before UX-32)",
+    without("lockedBy", "themesReady", "minThemesRequired", "minThemeVotes", "themeVotes"),
+  ],
+  [USER_CIVIC_PROFILE, "a body without themeVotes (a server before UX-40 L4)", without("themeVotes")],
+  [
+    USER_CIVIC_PROFILE,
+    "a caller with no votes (every theme count 0)",
+    (profile) => ({
+      ...profile,
+      axes: {},
+      votesUsed: 0,
+      totalVotesWithProfile: 0,
+      minVotesRequired: 25,
+      lockedBy: "votes",
+      themesReady: 0,
+      themeVotes: Object.fromEntries(Object.keys(profile.themeVotes).map((theme) => [theme, 0])),
+    }),
   ],
   [
     USER_CIVIC_PROFILE,
@@ -401,8 +418,14 @@ const CIVIC_PROFILE_MUST_REJECT = [
   [USER_CIVIC_PROFILE, "an unknown lockedBy", (profile) => ({ ...profile, lockedBy: "axes" })],
   [USER_CIVIC_PROFILE, "minVotesRequired 0", (profile) => ({ ...profile, minVotesRequired: 0 })],
   [USER_CIVIC_PROFILE, "a fractional themesReady", (profile) => ({ ...profile, themesReady: 2.5 })],
-  [USER_CIVIC_PROFILE, "an undeclared field", (profile) => ({ ...profile, themeVotes: { localVsFederal: 8 } })],
+  [USER_CIVIC_PROFILE, "an undeclared field", (profile) => ({ ...profile, themeScores: profile.axes })],
   [USER_CIVIC_PROFILE, "a body without isReady", without("isReady")],
+  [USER_CIVIC_PROFILE, "themeVotes without a theme", withThemeVotes(without("privacyVsSecurity"))],
+  [USER_CIVIC_PROFILE, "themeVotes with an unknown theme", withThemeVotes((votes) => ({ ...votes, economy: 3 }))],
+  [USER_CIVIC_PROFILE, "a negative theme count", withThemeVotes((votes) => ({ ...votes, localVsFederal: -1 }))],
+  [USER_CIVIC_PROFILE, "a fractional theme count", withThemeVotes((votes) => ({ ...votes, localVsFederal: 7.5 }))],
+  [USER_CIVIC_PROFILE, "a theme count as a string", withThemeVotes((votes) => ({ ...votes, localVsFederal: "8" }))],
+  [USER_CIVIC_PROFILE, "a null themeVotes", (profile) => ({ ...profile, themeVotes: null })],
 ];
 
 // GET and PUT /device-notification-settings (UX-28): notify_weekly_brief is left out until an app stores it, so a body
@@ -801,6 +824,29 @@ function checkCrossFieldRules(fixtures) {
   } catch (error) {
     addError(`${BILL_STATS} fixture: cannot check the sample: ${error.message}`);
   }
+
+  const profile = fixtures.get(USER_CIVIC_PROFILE);
+  if (profile) checkCivicProfileFixture(profile, `${USER_CIVIC_PROFILE} fixture`);
+}
+
+/**
+ * The UserCivicProfile sample as fetchCivicProfile serves it (UX-40 L4): its themeVotes counts the same window as
+ * votesUsed, so no count exceeds it, and the themes at minThemeVotes or more are exactly the themes in axes, themesReady
+ * of them.
+ */
+function checkCivicProfileFixture(profile, where) {
+  if (!profile.themeVotes) {
+    addError(`${where}: the sample must carry themeVotes`);
+    return;
+  }
+  const counts = Object.entries(profile.themeVotes);
+  for (const [theme, count] of counts) {
+    if (count > profile.votesUsed) addError(`${where}: themeVotes.${theme} must not exceed votesUsed`);
+  }
+  const scored = counts.filter(([, count]) => count >= profile.minThemeVotes).map(([theme]) => theme);
+  if (JSON.stringify([...scored].sort()) !== JSON.stringify(Object.keys(profile.axes).sort()))
+    addError(`${where}: axes must hold exactly the themes with at least minThemeVotes votes (${scored.join(", ")})`);
+  if (profile.themesReady !== scored.length) addError(`${where}: themesReady must be ${scored.length}`);
 }
 
 const PLAIN_VOTE_FIELDS = ["votes", "yea", "nay", "abstain", "decisionVotes", "yeaPct"];
