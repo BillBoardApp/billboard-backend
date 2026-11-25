@@ -349,10 +349,17 @@ nonisolated enum UserAPIContractsV1 {
         let nextCursor: String?
         /// The bills in BillBoard the member sponsored (not cosponsored), from BillBoard's member stats: the 119th
         /// Congress and each later Congress counted apart (REL-46), newest Congress first, then by updatedAt, newest
-        /// first. At most 250 (sponsoredBillCount is the whole number). Sent on the first page only (no cursor).
+        /// first. Only bills the bills manifest lists (a bill still waiting for its text is left out), except when the
+        /// manifest could not be read, when every counted bill is sent and some lack a title. At most 250
+        /// (sponsoredBillCount is the whole number). Sent on the first page only (no cursor). Label them by each bill's
+        /// congress (D78): from 2027-01-03 they span more than one Congress.
         let sponsoredBills: [CongressMemberRecordBill]?
-        /// How many bills in BillBoard the member sponsored, sponsoredBills or more. Sent with sponsoredBills.
+        /// How many bills in BillBoard the member sponsored, sponsoredBills or more: the sum of sponsoredBillCounts.
+        /// Sent with sponsoredBills.
         let sponsoredBillCount: Int?
+        /// How many of those bills each Congress has, newest Congress first, one entry per Congress with at least one.
+        /// Sent with sponsoredBills.
+        let sponsoredBillCounts: [CongressMemberRecordCongressCount]?
     }
 
     nonisolated struct CongressMemberRecordVote: Decodable {
@@ -393,6 +400,13 @@ nonisolated enum UserAPIContractsV1 {
         let vetoed: Bool?
         /// The bill's date in the bills manifest (its latest news); absent without a manifest row.
         let updatedAt: String?
+    }
+
+    nonisolated struct CongressMemberRecordCongressCount: Decodable {
+        /// The Congress, as each bill's congress writes it, such as 119.
+        let congress: String
+        /// How many of the member's sponsored bills it has.
+        let count: Int
     }
 
     nonisolated struct WeeklyDigest: Decodable {

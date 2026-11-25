@@ -20,13 +20,18 @@
     },
     "sponsoredBills": {
       "type": "array",
-      "description": "The bills in BillBoard the member sponsored (not cosponsored), from BillBoard's member stats: the 119th Congress and each later Congress counted apart (REL-46), newest Congress first, then by updatedAt, newest first. At most 250 (sponsoredBillCount is the whole number). Sent on the first page only (no cursor).",
+      "description": "The bills in BillBoard the member sponsored (not cosponsored), from BillBoard's member stats: the 119th Congress and each later Congress counted apart (REL-46), newest Congress first, then by updatedAt, newest first. Only bills the bills manifest lists (a bill still waiting for its text is left out), except when the manifest could not be read, when every counted bill is sent and some lack a title. At most 250 (sponsoredBillCount is the whole number). Sent on the first page only (no cursor). Label them by each bill's congress (D78): from 2027-01-03 they span more than one Congress.",
       "items": { "$ref": "#/$defs/bill" }
     },
     "sponsoredBillCount": {
       "type": "integer",
       "minimum": 0,
-      "description": "How many bills in BillBoard the member sponsored, sponsoredBills or more. Sent with sponsoredBills."
+      "description": "How many bills in BillBoard the member sponsored, sponsoredBills or more: the sum of sponsoredBillCounts. Sent with sponsoredBills."
+    },
+    "sponsoredBillCounts": {
+      "type": "array",
+      "description": "How many of those bills each Congress has, newest Congress first, one entry per Congress with at least one. Sent with sponsoredBills.",
+      "items": { "$ref": "#/$defs/congressCount" }
     }
   },
   "$defs": {
@@ -65,6 +70,20 @@
           "minLength": 1,
           "description": "What the roll call was on, as Congress words it (a passage, a cloture vote, a motion), at most 500 characters; absent when Congress gave none."
         }
+      }
+    },
+    "congressCount": {
+      "title": "CongressMemberRecordCongressCountV1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["congress", "count"],
+      "properties": {
+        "congress": {
+          "type": "string",
+          "pattern": "^[0-9]+$",
+          "description": "The Congress, as each bill's congress writes it, such as 119."
+        },
+        "count": { "type": "integer", "minimum": 1, "description": "How many of the member's sponsored bills it has." }
       }
     },
     "position": {

@@ -547,6 +547,13 @@ export interface CongressMemberRecordBillV1 {
   updatedAt?: string;
 }
 
+export interface CongressMemberRecordCongressCountV1 {
+  /** The Congress, as each bill's congress writes it, such as 119. */
+  congress: string;
+  /** How many of the member's sponsored bills it has. */
+  count: number;
+}
+
 /**
  * A member of Congress's public record in BillBoard (UX-39d), from GET /congress-member-record: their latest roll-call
  * vote on each bill in BillBoard, newest first, a page at a time, and the bills they sponsored. Facts only, as Congress
@@ -565,12 +572,23 @@ export interface CongressMemberRecordV1 {
   nextCursor?: string;
   /**
    * The bills in BillBoard the member sponsored (not cosponsored), from BillBoard's member stats: the 119th Congress
-   * and each later Congress counted apart (REL-46), newest Congress first, then by updatedAt, newest first. At most 250
-   * (sponsoredBillCount is the whole number). Sent on the first page only (no cursor).
+   * and each later Congress counted apart (REL-46), newest Congress first, then by updatedAt, newest first. Only bills
+   * the bills manifest lists (a bill still waiting for its text is left out), except when the manifest could not be
+   * read, when every counted bill is sent and some lack a title. At most 250 (sponsoredBillCount is the whole number).
+   * Sent on the first page only (no cursor). Label them by each bill's congress (D78): from 2027-01-03 they span more
+   * than one Congress.
    */
   sponsoredBills?: CongressMemberRecordBillV1[];
-  /** How many bills in BillBoard the member sponsored, sponsoredBills or more. Sent with sponsoredBills. */
+  /**
+   * How many bills in BillBoard the member sponsored, sponsoredBills or more: the sum of sponsoredBillCounts. Sent with
+   * sponsoredBills.
+   */
   sponsoredBillCount?: number;
+  /**
+   * How many of those bills each Congress has, newest Congress first, one entry per Congress with at least one. Sent
+   * with sponsoredBills.
+   */
+  sponsoredBillCounts?: CongressMemberRecordCongressCountV1[];
 }
 
 export interface WeeklyDigestStatV1 {

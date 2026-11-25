@@ -100,10 +100,12 @@ const fakeTables = (
   options: {
     votes?: Item[];
     stats?: Item | null;
+    manifest?: Record<string, Item>;
     manifestFails?: boolean;
   } = {},
 ) => {
   const votes = options.votes ?? VOTES;
+  const manifest = options.manifest ?? MANIFEST;
   mockSend.mockImplementation(async (command: Command) => {
     const input = command.input;
     if (command.kind === "Query") {
@@ -119,9 +121,9 @@ const fakeTables = (
     const items = keys.flatMap((key) => {
       const pk = key.pk.S;
       const sk = key.sk.S!;
-      if (pk === "BILL_GUID") return MANIFEST[sk] ? [{ sk: { S: sk }, manifestSk: { S: `2026#${sk}` } }] : [];
+      if (pk === "BILL_GUID") return manifest[sk] ? [{ sk: { S: sk }, manifestSk: { S: `2026#${sk}` } }] : [];
       const guid = sk.split("#")[1];
-      return MANIFEST[guid] ? [{ sk: { S: sk }, ...MANIFEST[guid] }] : [];
+      return manifest[guid] ? [{ sk: { S: sk }, ...manifest[guid] }] : [];
     });
     return { Responses: { BillsManifest: items } };
   });
@@ -255,9 +257,14 @@ describe("fetchCongressMemberRecord (UX-39d)", () => {
           billStatus: "New",
           updatedAt: "2025-03-01T00:00:00.000Z",
         },
-        { billGuid: "BILLS-119hr404", congress: "119", billType: "hr", billNumber: "404" },
+        // BILLS-119hr404 is counted in the member stats but has no manifest row (still waiting for its text): not in
+        // BillBoard yet, so neither listed nor counted.
       ],
-      sponsoredBillCount: 4,
+      sponsoredBillCount: 3,
+      sponsoredBillCounts: [
+        { congress: "120", count: 1 },
+        { congress: "119", count: 2 },
+      ],
     });
     const [query] = commands("Query");
     expect(query.input).toMatchObject({
@@ -289,7 +296,7 @@ describe("fetchCongressMemberRecord (UX-39d)", () => {
     const first = body(await request({ bioguideId: "A000001", limit: "2" }));
     expect(first.votes.map((vote: { billGuid: string }) => vote.billGuid)).toEqual(["BILLS-120hr5", "BILLS-119hr900"]);
     expect(Buffer.from(first.nextCursor, "base64url").toString()).toBe("2026-12-10#BILLS-119hr900#House");
-    expect(first.sponsoredBills).toHaveLength(4);
+    expect(first.sponsoredBills).toHaveLength(3);
 
     mockSend.mockClear();
     const second = body(await request({ bioguideId: "A000001", limit: "2", cursor: first.nextCursor }));
@@ -301,6 +308,7 @@ describe("fetchCongressMemberRecord (UX-39d)", () => {
     expect(second).not.toHaveProperty("nextCursor");
     expect(second).not.toHaveProperty("sponsoredBills");
     expect(second).not.toHaveProperty("sponsoredBillCount");
+    expect(second).not.toHaveProperty("sponsoredBillCounts");
     // The local index's start key: the table's keys and the index's sort key.
     expect(commands("Query")[0].input.ExclusiveStartKey).toEqual({
       bioguideId: { S: "A000001" },
@@ -316,25 +324,33 @@ describe("fetchCongressMemberRecord (UX-39d)", () => {
     const result = await request({ bioguideId: "Z999999" });
 
     expect(result.statusCode).toBe(200);
-    expect(body(result)).toEqual({ bioguideId: "Z999999", votes: [], sponsoredBills: [], sponsoredBillCount: 0 });
+    expect(body(result)).toEqual({
+      bioguideId: "Z999999",
+      votes: [],
+      sponsoredBills: [],
+      sponsoredBillCount: 0,
+      sponsoredBillCounts: [],
+    });
     expect(commands("BatchGetItem")).toEqual([]);
   });
 
   it("caps the sponsored bills at 250 and counts them all", async () => {
     const guids = Array.from({ length: 260 }, (_, index) => `BILLS-119hr${index + 1000}`);
-    fakeTables({ votes: [], stats: { bioguideId: { S: "A000001" }, sponsoredBillGuids: { SS: guids } } });
+    const manifest = Object.fromEntries(guids.map((guid) => [guid, { title: { S: `Bill ${guid}` } }]));
+    fakeTables({ votes: [], manifest, stats: { bioguideId: { S: "A000001" }, sponsoredBillGuids: { SS: guids } } });
 
     const record = body(await request({ bioguideId: "A000001" }));
 
     expect(record.sponsoredBills).toHaveLength(250);
     expect(record.sponsoredBillCount).toBe(260);
-    // 260 lookups, in batches of at most 100 keys.
+    expect(record.sponsoredBillCounts).toEqual([{ congress: "119", count: 260 }]);
+    // 260 lookups and then 260 rows, in batches of at most 100 keys.
     expect(commands("BatchGetItem").map((command) => command.input.RequestItems!.BillsManifest.Keys.length)).toEqual([
-      100, 100, 60,
+      100, 100, 60, 100, 100, 60,
     ]);
   });
 
-  it("serves the record without titles when the manifest cannot be read", async () => {
+  it("serves the record without titles, and every counted sponsored bill, when the manifest cannot be read", async () => {
     fakeTables({ manifestFails: true });
 
     const result = await request({ bioguideId: "A000001" });
@@ -342,6 +358,13 @@ describe("fetchCongressMemberRecord (UX-39d)", () => {
     expect(result.statusCode).toBe(200);
     expect(body(result).votes[0]).not.toHaveProperty("title");
     expect(body(result).votes).toHaveLength(4);
+    expect(body(result).sponsoredBills.map((bill: { billGuid: string }) => bill.billGuid)).toEqual([
+      "BILLS-120hr2",
+      "BILLS-119hr404",
+      "BILLS-119hr11",
+      "BILLS-119hr10",
+    ]);
+    expect(body(result).sponsoredBillCount).toBe(4);
   });
 
   it("answers 500 with ApiError when the vote record cannot be read", async () => {

@@ -203,17 +203,23 @@ it.
   `YYYY-MM-DD` with no time or zone: shown as it is, never converted to the device's zone) and `actionText` (what the
   roll call was on, a passage or a procedural vote). `nextCursor` is present while more follow; send it back as
   `cursor`.
-- `sponsoredBills` (`CongressMemberRecordBillV1`) and `sponsoredBillCount`, on the first page only: the bills the member
-  sponsored (not cosponsored), each Congress counted apart (REL-46), newest Congress first, then by `updatedAt`; at most
-  250. Each has the guid parts, and `title`, `billStatus`, `vetoed` (only as `true`) and `updatedAt` from the manifest.
+- `sponsoredBills` (`CongressMemberRecordBillV1`), `sponsoredBillCount` and `sponsoredBillCounts`
+  (`CongressMemberRecordCongressCountV1`: `congress` as each bill writes it, and `count`), on the first page only: the
+  bills the member sponsored (not cosponsored) that the bills manifest lists, each Congress counted apart (REL-46),
+  newest Congress first, then by `updatedAt`; at most 250. Each has the guid parts, and `title`, `billStatus`, `vetoed`
+  (only as `true`) and `updatedAt` from the manifest. A bill still waiting for its text is left out of all three, except
+  when the manifest could not be read, when every counted bill is sent and some lack a title. From 2027-01-03 they span
+  more than one Congress: label them by each bill's `congress` or by `sponsoredBillCounts` (D78), not as the 119th.
 - Public facts only: no score, no ranking and no BillBoard user's vote. Clients add "You voted ..." from the caller's own
   votes. An unknown member gets empty lists; 400s are `ApiError` with `INVALID_BIOGUIDE_ID`, `INVALID_LIMIT` and
   `INVALID_CURSOR`.
 - `check-contracts.mjs` accepts a last page, a later page, a member with no record and a Senate vote, and rejects a
   judging word or `Abstain` as a position, a lower-case chamber, a suffixed guid, an extra key on a vote, a vote without
-  `votedOn` or dated with a time, `vetoed: false`, a negative `sponsoredBillCount` and a record without `votes`.
-- Generated: the four types above in TypeScript; `UserAPIContractsV1.CongressMemberRecord`,
-  `CongressMemberRecordVote` and `CongressMemberRecordBill` in Swift (`position` and `chamber` are `String`).
+  `votedOn` or dated with a time, `vetoed: false`, a negative `sponsoredBillCount`, a Congress count of zero or with a
+  numeric `congress`, and a record without `votes`.
+- Generated: the five types above in TypeScript; `UserAPIContractsV1.CongressMemberRecord`,
+  `CongressMemberRecordVote`, `CongressMemberRecordBill` and `CongressMemberRecordCongressCount` in Swift (`position` and
+  `chamber` are `String`).
 
 ## Stats, verification limits and labels (C2)
 
