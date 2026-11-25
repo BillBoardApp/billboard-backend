@@ -204,9 +204,9 @@ const loadHandler = (env: Record<string, string | undefined> = {}): HandlerModul
   return loaded!.handler;
 };
 
-const runAt = async (iso: string, env: Record<string, string | undefined> = {}, context?: object) => {
+const runAt = async (iso: string, env: Record<string, string | undefined> = {}, context?: object, event?: object) => {
   jest.setSystemTime(new Date(iso));
-  return loadHandler(env)(undefined, context);
+  return loadHandler(env)(event, context);
 };
 
 const publishedTo = () => mockWorld.published.map((publish) => publish.TargetArn).sort();
@@ -321,6 +321,47 @@ describe("when it arrives (D3: the first run outside the user's quiet hours)", (
     await runAt(RUN_1030_ET, { QUIET_HOURS: "off" });
 
     expect(publishedTo()).toEqual([arn("la", "d1")]);
+  });
+
+  // UX-28 review: the Sunday's WeeklyBriefPushesUnsent must count each user once, whatever the retries.
+  it("counts the last run's unsent users once when an attempt fails and its retry finishes", async () => {
+    addUser("hi", { state: "HI" });
+    addUser("boston", { state: "MA" });
+    mockWorld.failGetFor.add("boston");
+    // A last run set at 10:30 New York (15:30Z), 5:30 AM in Hawaii: the Hawaii user is still held there.
+    const env = { WEEKLY_BRIEF_PUSH_LAST_RUN_HOUR: "10" };
+    const scheduled = { scheduledTime: "2026-11-22T15:30:00Z" };
+
+    await expect(runAt("2026-11-22T15:30:00.000Z", env, undefined, scheduled)).rejects.toThrow(
+      /could not finish 1 of 2 users/,
+    );
+    expect(metric("WeeklyBriefPushesUnsent")).toEqual([]);
+
+    mockWorld.failGetFor.clear();
+    const retry = await runAt("2026-11-22T15:33:00.000Z", env, undefined, scheduled);
+
+    expect(retry.lastRun).toBe(true);
+    expect(retry.users.held_quiet_hours).toBe(1);
+    expect(metric("WeeklyBriefPushesUnsent")).toEqual([1]);
+  });
+
+  it("does not take a late retry of an earlier run for the last run", async () => {
+    addUser("hi", { state: "HI" });
+
+    // The 5:30 PM run's retry lands at 6:05 PM New York; its event still names 5:30 PM.
+    const retry = await runAt("2026-11-22T23:05:00.000Z", {}, undefined, { scheduledTime: "2026-11-22T22:30:00Z" });
+
+    expect(retry.lastRun).toBe(false);
+    expect(metric("WeeklyBriefPushesUnsent")).toEqual([]);
+  });
+
+  it("tells the last run by the clock when the event has no scheduled time (a manual run)", async () => {
+    addUser("ny", { state: "NY" });
+
+    const manual = await runAt("2026-11-22T23:30:00.000Z", {}, undefined, {});
+
+    expect(manual.lastRun).toBe(true);
+    expect(metric("WeeklyBriefPushesUnsent")).toEqual([0]);
   });
 
   it("emits WeeklyBriefPushesUnsent only on the last run", async () => {
@@ -568,7 +609,7 @@ describe("failures", () => {
     expect(mockWorld.snapshots.get(`boston|${WINDOW_ID}`)!.pushClaimedAt).toBeUndefined();
   });
 
-  it("stops starting users when the Lambda is about to time out, counts them unsent on the last run, and throws", async () => {
+  it("stops starting users when the Lambda is about to time out, and throws so a retry reaches them", async () => {
     addUser("gu", { state: "GU" });
 
     await expect(runAt("2026-11-22T23:30:00.000Z", {}, { getRemainingTimeInMillis: () => 10_000 })).rejects.toThrow(
@@ -576,7 +617,8 @@ describe("failures", () => {
     );
 
     expect(publishedTo()).toEqual([]);
-    expect(metric("WeeklyBriefPushesUnsent")).toEqual([1]);
+    // The attempt that throws counts nothing unsent: its retry does, once.
+    expect(metric("WeeklyBriefPushesUnsent")).toEqual([]);
   });
 
   it("never logs a user id, an endpoint ARN or an SNS error message", async () => {
