@@ -404,14 +404,18 @@ is stored. `schemas/entities/recent-actions.v1.schema.json` (`RecentActionsV1`, 
 gets `UserAPIContractsV1.RecentActions` with `./scripts/syncContracts.sh`):
 
 - The caller's bills: a Yea, Nay or Abstain vote (an Updates dismissal from 1.0 or 1.1 is not a vote) or a Watch row,
-  on either member of a companion group. One row per bill, a group being one bill: the member with the latest action,
-  the vote on the primary when both members have one, `watched` when either member is.
-- An action dated in the last `windowDays` (30) Eastern days, the bill's latest there in a push's words
-  (`handlers/userNotifier/pushCopy.ts` `pushActionPhrase`): a routine follow-up such as "Motion to reconsider laid on
-  the table" only when the window has nothing else, and on the latest day the bill's own outcome ("Passed the House")
-  before the other lines. Newest first, then by title, at most 50. Nothing to show is `200` with `items: []`.
+  on either member of a companion group. One row per bill, a group being one bill. The row shows the member whose
+  status the Bills card shows for the group (`CompanionGroupIndex.statusLead` in the app, the Weekly Brief's rule, in
+  `services/src/shared/companionStatusLead.ts`): a law first, then a veto, a passage, a failure, an update, then the
+  member whose manifest row changed later, then the primary. So a law or a veto is never hidden by a twin's later
+  action. The vote is the primary's when both members have one, and `watched` is set when either member is watched.
+- An action dated in the last `windowDays` (30) Eastern days, the bill's latest there (for a group, from either
+  member) in a push's words (`handlers/userNotifier/pushCopy.ts` `pushActionPhrase`): a routine follow-up such as
+  "Motion to reconsider laid on the table" only when the window has nothing else, and on the latest day the bill's own
+  outcome ("Passed the House") before the other lines. Newest first, then by title, at most 50. Nothing to show is
+  `200` with `items: []`.
 - `id` is the guid, the day and the wording, so a newer action gives a new id. `billStatus` and `vetoed` are the bill's
-  as everywhere else.
+  as everywhere else (for a group, the member the row shows).
 - `yourVote` and `votedOn` are the caller's own vote and the Eastern day it was last saved. `voteTiming` (UX-41
   concept 2) is the latest House or Senate roll call in the window (How Congress voted's), with `daysBefore`, the days
   from `votedOn` to it, only when that is at least 1: a vote changed or saved again on or after the roll call's day has

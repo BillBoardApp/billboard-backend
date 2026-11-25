@@ -32,7 +32,8 @@ import {
  * UserPreferences partition), keyed by the authorizer's sub. Then, for those bills and their companions, the manifest's
  * BILL_GUID lookup rows (BatchGetItem), whose updatedAt keeps only bills that moved in the window (a prefilter: the
  * action date decides), and at most MAX_BILL_READS processed bills from S3, BILL_READ_CONCURRENCY at a time, the most
- * recently moved first. A bill with no processed copy is skipped. Nothing is written.
+ * recently moved first. A companion group's members are all read when either moved, since the member whose status the
+ * group shows may not have moved. A bill with no processed copy is skipped. Nothing is written.
  */
 
 const FEEDBACK_TABLE_NAME = process.env.FEEDBACK_TABLE_NAME ?? "";
@@ -188,9 +189,11 @@ const readManifestUpdatedAt = async (guids: readonly string[]): Promise<Map<stri
 };
 
 /**
- * The groups to read and which of their members: a member whose manifest row moved on or after the day before the
+ * The groups to read and which of their members: a group whose manifest rows moved on or after the day before the
  * window's first day (an action in the window moves the row when it is stored, so no row with one is left out), most
- * recently moved group first, while the members to read stay within MAX_BILL_READS.
+ * recently moved group first, while the members to read stay within MAX_BILL_READS. Every member of such a group with
+ * a manifest row is read, moved or not: the group's row takes the status of the member the Bills card shows
+ * (companionStatusLead.ts), which may be a law or a veto from before the window.
  */
 export const selectBillReads = (
   groups: readonly (readonly string[])[],
@@ -199,21 +202,21 @@ export const selectBillReads = (
 ): { groups: string[][]; reads: string[] } => {
   const fresh = groups
     .map((members) => {
-      const moved = members.filter((guid) => (updatedAt.get(guid) ?? "") >= movedSince);
-      const latest = moved.reduce((max, guid) => {
+      const listed = members.filter((guid) => updatedAt.has(guid));
+      const latest = listed.reduce((max, guid) => {
         const when = updatedAt.get(guid) ?? "";
         return when > max ? when : max;
       }, "");
-      return { members: [...members], moved, latest };
+      return { members: [...members], listed, latest };
     })
-    .filter((group) => group.moved.length > 0)
+    .filter((group) => group.latest >= movedSince)
     .sort((left, right) => (left.latest === right.latest ? 0 : left.latest > right.latest ? -1 : 1));
   const selected: string[][] = [];
   const reads: string[] = [];
   for (const group of fresh) {
-    if (reads.length + group.moved.length > MAX_BILL_READS) continue;
+    if (reads.length + group.listed.length > MAX_BILL_READS) continue;
     selected.push(group.members);
-    reads.push(...group.moved);
+    reads.push(...group.listed);
   }
   return { groups: selected, reads };
 };
@@ -253,6 +256,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const items = buildRecentActionItems({
       groups: selection.groups,
       bills,
+      movedAt: updatedAt,
       votes,
       watched,
       nowMs,

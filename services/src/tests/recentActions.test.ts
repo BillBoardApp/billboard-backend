@@ -91,7 +91,14 @@ const vote = (feedback: CallerVote["feedback"], votedAt: string | null = "2026-1
 });
 
 const build = (input: Partial<RecentActionsInput> & Pick<RecentActionsInput, "groups" | "bills">) =>
-  buildRecentActionItems({ votes: new Map(), watched: new Set(), nowMs: NOW, windowDays: 30, ...input });
+  buildRecentActionItems({
+    movedAt: new Map(),
+    votes: new Map(),
+    watched: new Set(),
+    nowMs: NOW,
+    windowDays: 30,
+    ...input,
+  });
 
 describe("calendarDayOf", () => {
   it.each([
@@ -347,7 +354,7 @@ describe("buildRecentActionItems", () => {
     expect(items).toEqual([]);
   });
 
-  it("shows a companion pair once: the member with the latest action, either member's vote and watch", () => {
+  it("shows a companion pair once: the member that leads its status, either member's vote and watch", () => {
     const items = build({
       groups: [[HR77, S50]],
       bills: new Map([
@@ -377,7 +384,7 @@ describe("buildRecentActionItems", () => {
     });
   });
 
-  it("takes the primary's vote when the caller voted on both members, and the primary's action on a tie", () => {
+  it("takes the primary's vote when the caller voted on both members, and the primary on a tie", () => {
     const items = build({
       groups: [[HR77, S50]],
       bills: new Map([
@@ -390,6 +397,165 @@ describe("buildRecentActionItems", () => {
       ]),
     });
     expect(items).toEqual([expect.objectContaining({ billGuid: HR77, yourVote: "Nay" })]);
+  });
+
+  describe("a companion group's status, as the Bills card shows it", () => {
+    const law = (day: string) => ({
+      actionCode: "36000",
+      actionDate: day,
+      text: "Became Public Law No: 119-37.",
+      type: "BecameLaw",
+    });
+    const hearing = (day: string) => ({
+      actionDate: day,
+      sourceSystem: { code: 0, name: "Senate" },
+      text: "Committee on Finance. Hearings held.",
+      type: "Committee",
+    });
+    const senateCommittee = (day: string) => ({
+      actionDate: day,
+      sourceSystem: { code: 0, name: "Senate" },
+      text: "Read twice and referred to the Committee on Commerce, Science, and Transportation.",
+      type: "IntroReferral",
+    });
+
+    it("keeps a law when its twin has a later action: the law's number, title and status, the twin's action", () => {
+      const items = build({
+        groups: [[HR77, S50]],
+        bills: new Map([
+          [HR77, bill(HR77, "House law", [law("2026-11-10")], { billStatus: "Finalized" })],
+          [S50, bill(S50, "Senate twin", [hearing("2026-11-12")])],
+        ]),
+        movedAt: new Map([
+          [HR77, "2026-11-10T18:00:00.000Z"],
+          [S50, "2026-11-12T18:00:00.000Z"],
+        ]),
+        watched: new Set([S50]),
+      });
+      expect(items).toEqual([
+        {
+          id: recentActionId(HR77, { date: "2026-11-12", text: "Committee on Finance. Hearings held" }),
+          billGuid: HR77,
+          congress: "119",
+          billType: "hr",
+          billNumber: "77",
+          officialNumber: "H.R. 77",
+          title: "House law",
+          billStatus: "Finalized",
+          action: { date: "2026-11-12", text: "Committee on Finance. Hearings held" },
+          watched: true,
+        },
+      ]);
+    });
+
+    it("keeps a law whose own news is older than the window", () => {
+      const [item] = build({
+        groups: [[HR77, S50]],
+        bills: new Map([
+          [HR77, bill(HR77, "House law", [law("2026-08-01")], { billStatus: "Finalized" })],
+          [S50, bill(S50, "Senate twin", [hearing("2026-11-12")])],
+        ]),
+        watched: new Set([HR77]),
+      });
+      expect(item).toMatchObject({ billGuid: HR77, billStatus: "Finalized", action: { date: "2026-11-12" } });
+    });
+
+    it("keeps a House passage when the Senate twin has a later committee action", () => {
+      const [item] = build({
+        groups: [[HR77, S50]],
+        bills: new Map([
+          [HR77, bill(HR77, "House bill", housePassageDay("2026-11-19"), { billStatus: "Passed" })],
+          [S50, bill(S50, "Senate twin", [senateCommittee("2026-11-20")])],
+        ]),
+        movedAt: new Map([
+          [HR77, "2026-11-19T18:00:00.000Z"],
+          [S50, "2026-11-20T18:00:00.000Z"],
+        ]),
+        votes: new Map([[S50, vote("Yea")]]),
+      });
+      expect(item).toMatchObject({
+        billGuid: HR77,
+        officialNumber: "H.R. 77",
+        title: "House bill",
+        billStatus: "Passed",
+        action: {
+          date: "2026-11-20",
+          text: "Read twice and referred to the Committee on Commerce, Science, and Transportation",
+        },
+        yourVote: "Yea",
+      });
+      expect(item).not.toHaveProperty("vetoed");
+    });
+
+    it("keeps a veto over a twin that passed later, and names the vetoed member", () => {
+      const vetoed = [{ actionCode: "31000", actionDate: "2026-11-10", text: "Vetoed by President.", type: "Veto" }];
+      const passedSenate = { actionCode: "17000", actionDate: "2026-11-18", text: "Passed Senate.", type: "Floor" };
+      const [item] = build({
+        groups: [[HR77, S50]],
+        bills: new Map([
+          [HR77, bill(HR77, "Vetoed House bill", vetoed, { billStatus: "Passed" })],
+          [S50, bill(S50, "Senate twin", [passedSenate], { billStatus: "Passed" })],
+        ]),
+        movedAt: new Map([
+          [HR77, "2026-11-10T18:00:00.000Z"],
+          [S50, "2026-11-18T18:00:00.000Z"],
+        ]),
+        watched: new Set([HR77]),
+      });
+      expect(item).toMatchObject({
+        billGuid: HR77,
+        billStatus: "Passed",
+        vetoed: true,
+        action: { date: "2026-11-18", text: "Passed the Senate" },
+      });
+    });
+
+    it("never says vetoed for a law, even with a veto line", () => {
+      const overridden = [
+        { actionCode: "36000", actionDate: "2026-11-14", text: "Became Public Law No: 119-60.", type: "BecameLaw" },
+        { actionCode: "31000", actionDate: "2026-11-01", text: "Vetoed by President.", type: "Veto" },
+      ];
+      const [item] = build({
+        groups: [[HR77]],
+        bills: new Map([[HR77, bill(HR77, "Law over a veto", overridden, { billStatus: "Finalized" })]]),
+        watched: new Set([HR77]),
+      });
+      expect(item).toMatchObject({ billStatus: "Finalized", action: { text: "Became law" } });
+      expect(item).not.toHaveProperty("vetoed");
+    });
+
+    it("takes the member that moved later when both have the same status", () => {
+      const [item] = build({
+        groups: [[HR77, S50]],
+        bills: new Map([
+          [HR77, bill(HR77, "House headline", [reported("2026-11-19")])],
+          [S50, bill(S50, "Senate headline", [hearing("2026-11-05")])],
+        ]),
+        movedAt: new Map([
+          [HR77, "2026-11-01T18:00:00.000Z"],
+          [S50, "2026-11-21T18:00:00.000Z"],
+        ]),
+        watched: new Set([HR77]),
+      });
+      expect(item).toMatchObject({ billGuid: S50, title: "Senate headline", action: { date: "2026-11-19" } });
+    });
+
+    it("applies the routine follow-up rule across the group: one member's follow-up never hides the other's news", () => {
+      const held = { actionDate: "2026-11-20", text: "Held at the desk.", type: "Floor" };
+      const [item] = build({
+        groups: [[HR77, S50]],
+        bills: new Map([
+          [HR77, bill(HR77, "House headline", [reported("2026-11-19")])],
+          [S50, bill(S50, "Senate headline", [held])],
+        ]),
+        watched: new Set([S50]),
+      });
+      expect(item.action).toEqual({
+        date: "2026-11-19",
+        text: "Reported by the Committee on Energy and Commerce. H. Rept. 119-876",
+        actionCode: "H12200",
+      });
+    });
   });
 
   it("says vetoed only as true, and a law is never vetoed", () => {

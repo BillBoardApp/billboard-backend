@@ -12,6 +12,7 @@ import { parseBillGuid } from "../../shared/billCompanions";
 import { officialBillNumber } from "../../shared/billNumbers";
 import { billOutcomeTextForAction, deriveBillVetoedFromActions } from "../../shared/billOutcomes";
 import { addDays, daysBetween, easternDayKey } from "../../shared/civicDays";
+import { companionStatusLead } from "../../shared/companionStatusLead";
 import { usableOfficialVotes } from "../../shared/congressVotes";
 import { normalizeInlineText, pushActionPhrase } from "../userNotifier/pushCopy";
 
@@ -19,13 +20,16 @@ import { normalizeInlineText, pushActionPhrase } from "../userNotifier/pushCopy"
  * UX-35: the Updates tab's list, built on the server from the caller's own data (GET /recent-actions). Pure: the
  * handler reads the votes, watches, companion groups and processed bills, and this turns them into rows.
  *
- * - A row is one bill: a companion group (APPF-23) is one bill, shown by the member with the latest action, with the
- *   vote on the primary when the caller voted on both members, and watched when either member is.
- * - Its action is the bill's latest one dated in the window, worded as a push words it (pushActionPhrase): the bill's
- *   own outcome ("Passed the House", "Became law"), or Congress's text without record references. A routine follow-up
- *   ("Motion to reconsider laid on the table", billActions.ts) counts only when the window has nothing else, as in the
- *   Weekly Brief, and on the latest day an outcome line comes before the other lines of that day, which otherwise keep
- *   congress.gov's order (newest first, UX-43).
+ * - A row is one bill: a companion group (APPF-23) is one bill, shown by the member the Bills card's status shows
+ *   (shared/companionStatusLead.ts: a law, then a veto, then a passage, before a later move), so the row's number,
+ *   title, billStatus and vetoed are that member's and match the card. Its vote is the primary's when the caller voted
+ *   on both members, and it is watched when either member is.
+ * - Its action is the bill's latest one dated in the window, from either member of a group, worded as a push words it
+ *   (pushActionPhrase): the bill's own outcome ("Passed the House", "Became law"), or Congress's text without record
+ *   references. A routine follow-up ("Motion to reconsider laid on the table", billActions.ts) counts only when the
+ *   window has nothing else, across a group's members too, as in the Weekly Brief, and on the latest day an outcome line
+ *   comes before the other lines of that day, which otherwise keep congress.gov's order (newest first, UX-43), the
+ *   primary's lines before its twin's.
  * - The vote is the caller's own and nobody else's (INT-11): there is no count or tally anywhere in a row.
  * - UX-41 concept 2: voteTiming says how many days before a chamber's roll call the vote shown was saved. The roll
  *   call is the latest House or Senate vote on the bill (How Congress voted's, officialVotes) in the window. The vote's
@@ -51,6 +55,11 @@ export interface RecentActionsInput {
   groups: readonly (readonly string[])[];
   /** The processed bills read, by plain guid. A member that is not here (not read, or not stored) is skipped. */
   bills: ReadonlyMap<string, unknown>;
+  /**
+   * When each bill's manifest row last moved (its BILL_GUID lookup's updatedAt), by plain guid: of a group's members
+   * with the same rank, the one that moved later stands for the group, as on the Bills card. Absent counts as never.
+   */
+  movedAt: ReadonlyMap<string, string>;
   /** The caller's votes, by plain guid. */
   votes: ReadonlyMap<string, CallerVote>;
   /** The plain guids the caller watches. */
@@ -94,12 +103,21 @@ const clip = (text: string): string => {
   return `${atWord.replace(/[\s,;:.-]+$/, "")}${ELLIPSIS}`;
 };
 
+/** One action dated in the window that a push can word, before the latest is picked. */
+interface ActionCandidate {
+  day: string;
+  phrase: string;
+  actionCode: string | undefined;
+  routine: boolean;
+  outcome: boolean;
+}
+
 /**
- * The bill's latest action dated on or after `windowStart`, in a push's words, or null when it has none there. Only
- * actions a push can word count (pushActionPhrase: an action without text that is no outcome has none).
+ * The actions dated on or after `windowStart` that a push can word (pushActionPhrase: an action without text that is
+ * no outcome has none), in the order given.
  */
-export const latestRecentAction = (actions: unknown, windowStart: string): RecentActionV1 | null => {
-  const candidates = (Array.isArray(actions) ? actions : []).flatMap((value) => {
+const actionCandidates = (actions: unknown, windowStart: string): ActionCandidate[] =>
+  (Array.isArray(actions) ? actions : []).flatMap((value) => {
     const action = asRecord(value) as LooseAction | undefined;
     if (!action) return [];
     const day = calendarDayOf(action.actionDate);
@@ -119,6 +137,12 @@ export const latestRecentAction = (actions: unknown, windowStart: string): Recen
       },
     ];
   });
+
+/**
+ * The latest of `candidates`, or null when there are none: a routine follow-up only when nothing else is there, and of
+ * one day's lines an outcome first, else the first given.
+ */
+const pickLatestAction = (candidates: readonly ActionCandidate[]): RecentActionV1 | null => {
   const pool = candidates.some((action) => !action.routine)
     ? candidates.filter((action) => !action.routine)
     : candidates;
@@ -132,6 +156,10 @@ export const latestRecentAction = (actions: unknown, windowStart: string): Recen
     ...(chosen.actionCode ? { actionCode: chosen.actionCode } : {}),
   };
 };
+
+/** The bill's latest action dated on or after `windowStart`, in a push's words, or null when it has none there. */
+export const latestRecentAction = (actions: unknown, windowStart: string): RecentActionV1 | null =>
+  pickLatestAction(actionCandidates(actions, windowStart));
 
 /** A chamber's recorded vote on a bill, as How Congress voted shows it. */
 export interface ChamberRollCall {
@@ -190,30 +218,46 @@ const billStatusOf = (document: Record<string, unknown> | undefined): BillStatus
   return BILL_STATUSES.has(status) ? (status as BillStatusV1) : undefined;
 };
 
+const actionsOf = (document: Record<string, unknown>): unknown[] =>
+  Array.isArray(document.actions) ? document.actions : [];
+
+/** An ISO time in epoch ms, or 0 when it is missing or not a time. */
+const timeMs = (iso: string | undefined): number => {
+  const ms = iso ? Date.parse(iso) : Number.NaN;
+  return Number.isNaN(ms) ? 0 : ms;
+};
+
 /** One group's row, or null when no member read has an action in the window. */
 const rowForGroup = (
   members: readonly string[],
   input: RecentActionsInput,
   windowStart: string,
 ): RecentActionItemV1 | null => {
-  const loaded = members.flatMap((guid) => {
+  const loaded = members.flatMap((guid, position) => {
     const document = asRecord(input.bills.get(guid));
-    return document ? [{ guid, document, action: latestRecentAction(document.actions, windowStart) }] : [];
+    if (!document) return [];
+    const status = billStatusOf(document);
+    // As the app reads `isVetoed`: a law is never vetoed.
+    const vetoed = status !== "Finalized" && deriveBillVetoedFromActions(actionsOf(document));
+    return [{ guid, document, status, vetoed, isPrimary: position === 0 }];
   });
-  // The member with the latest action; of two on one day, the earlier listed (the primary).
-  let shown: (typeof loaded)[number] | undefined;
-  for (const member of loaded) {
-    if (member.action && (!shown?.action || member.action.date > shown.action.date)) shown = member;
-  }
-  if (!shown?.action) return null;
+  // The group's latest action: every member's lines together, so one member's routine follow-up never stands over
+  // the other's news, and the primary's lines come first on a day both have.
+  const action = pickLatestAction(loaded.flatMap((member) => actionCandidates(member.document.actions, windowStart)));
+  if (!action) return null;
+  // The member that stands for the group, as on the Bills card (for a single bill, the bill).
+  const lead = companionStatusLead(loaded, (member) => ({
+    status: member.status,
+    vetoed: member.vetoed,
+    movedAtMs: timeMs(input.movedAt.get(member.guid)),
+    isPrimary: member.isPrimary,
+  }));
+  const parsed = lead ? parseBillGuid(lead.guid) : null;
+  if (!lead || !parsed) return null;
 
-  const parsed = parseBillGuid(shown.guid);
-  if (!parsed) return null;
   const officialNumber =
-    officialBillNumber({ billType: parsed.billType, billNumber: parsed.billNumber, guid: shown.guid }) ?? shown.guid;
-  const title = normalizeInlineText(trimmed(shown.document.title)) || officialNumber;
-  const billStatus = billStatusOf(shown.document);
-  const actions = Array.isArray(shown.document.actions) ? shown.document.actions : [];
+    officialBillNumber({ billType: parsed.billType, billNumber: parsed.billNumber, guid: lead.guid }) ?? lead.guid;
+  const title = normalizeInlineText(trimmed(lead.document.title)) || officialNumber;
   const vote = members.map((guid) => input.votes.get(guid)).find((value) => value !== undefined);
   const votedOn = vote ? easternDayOfTime(vote.votedAt) : null;
   const voteTiming = vote
@@ -225,16 +269,16 @@ const rowForGroup = (
     : undefined;
 
   return {
-    id: recentActionId(parsed.plainGuid, shown.action),
+    id: recentActionId(parsed.plainGuid, action),
     billGuid: parsed.plainGuid,
     congress: parsed.congress,
     billType: parsed.billType,
     billNumber: parsed.billNumber,
     officialNumber,
     title,
-    ...(billStatus ? { billStatus } : {}),
-    ...(deriveBillVetoedFromActions(actions) ? { vetoed: true as const } : {}),
-    action: shown.action,
+    ...(lead.status ? { billStatus: lead.status } : {}),
+    ...(lead.vetoed ? { vetoed: true as const } : {}),
+    action,
     ...(vote ? { yourVote: vote.feedback } : {}),
     ...(votedOn ? { votedOn } : {}),
     ...(voteTiming ? { voteTiming } : {}),
