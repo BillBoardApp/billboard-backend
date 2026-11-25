@@ -750,7 +750,9 @@ describe("MonitoringStack", () => {
         EvaluationPeriods: 1,
         DatapointsToAlarm: 1,
         TreatMissingData: "notBreaching",
-        AlarmDescription: Match.stringLikeRegexp("FetchCivicScore.*UserPII.*RUNBOOK 19.6"),
+        AlarmDescription: Match.stringLikeRegexp(
+          "FetchCivicScore.*UserPII.*Do not roll FetchCivicScore back.*lowers the score.*RUNBOOK 19.6",
+        ),
         AlarmActions: [alarmTopicRef],
       });
     });

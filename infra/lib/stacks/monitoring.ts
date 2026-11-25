@@ -556,8 +556,9 @@ export class MonitoringStack extends cdk.Stack {
 
     // UX-31: two new reads in the vote and score paths answer a handled 500 instead of throwing, so the alias Errors
     // alarms never count them, the API 5XX alarms cannot reach 5 a minute at this traffic, and the canary calls neither
-    // route. Routine only. Rolling either function back is safe (RUNBOOK 19.6), but they are in no deployment group:
-    // the 10-minute shift would rarely see one at this traffic, and RUNBOOK 19.6 checks both right after the deploy.
+    // route. Routine only. Rolling SetFeedback back is safe; rolling FetchCivicScore back is not since D85 (a), as its
+    // alarm says (RUNBOOK 19.6). Neither alarm is in a deployment group: the 10-minute shift would rarely see one at
+    // this traffic, and RUNBOOK 19.6 checks both right after the deploy.
     notify('service', new cloudwatch.Alarm(this, 'EarlierVoteReadFailedAlarm', {
       alarmName: 'Billboard-Votes-EarlierVoteReadFailed',
       alarmDescription: 'POST /feedback answered 500 and stored no vote because SetFeedback could not read the caller\'s earlier UserFeedback row on the bill (UX-31 keeps the first-vote time from it). Both apps roll the vote back, so while this lasts nobody can vote. Check /aws/lambda/SetFeedback for "Could not read the caller\'s earlier vote on the bill": AccessDeniedException means the role lost dynamodb:GetItem on UserFeedback, throttling means the table\'s capacity. Rolling SetFeedback back is safe (votes then lose their first-vote time as before UX-31). RUNBOOK 19.6.',
@@ -575,7 +576,7 @@ export class MonitoringStack extends cdk.Stack {
     }));
     notify('service', new cloudwatch.Alarm(this, 'CivicRecordFailedAlarm', {
       alarmName: 'Billboard-CivicScore-RecordFailed',
-      alarmDescription: 'FetchCivicScore could not read the caller\'s Civic Score record on UserPII (CivicRecordReadFailed: GET /civic-score answered 500, both apps keep the score they show) or could not store it (CivicRecordWriteFailed: it answered from what it read, but the record did not keep what rose). Check /aws/lambda/FetchCivicScore for "Civic Score record": AccessDeniedException means the role lost dynamodb:GetItem or UpdateItem on UserPII, throttling means the table\'s capacity; one write failure after concurrent reads of one user is harmless. Rolling FetchCivicScore back shows the old scores (RUNBOOK 19.6).',
+      alarmDescription: 'FetchCivicScore could not read the caller\'s Civic Score record on UserPII (CivicRecordReadFailed: GET /civic-score answered 500, both apps keep the score they show) or could not store it (CivicRecordWriteFailed: it answered from what it read, but the record did not keep what rose). Check /aws/lambda/FetchCivicScore for "Civic Score record": AccessDeniedException means the role lost dynamodb:GetItem or UpdateItem on UserPII, throttling means the table\'s capacity; one write failure after concurrent reads of one user is harmless. Do not roll FetchCivicScore back without checking first: the code before D85 (a) pays the day-streak bonus on the best streak again, and deploying this code again brings back each stored civicStreakBonus, which lowers the score of anyone whose best streak grew in between. RUNBOOK 19.6.',
       metric: new cloudwatch.MathExpression({
         expression: 'FILL(readFailed, 0) + FILL(writeFailed, 0)',
         usingMetrics: {
