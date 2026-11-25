@@ -1019,13 +1019,13 @@ describe("UserAPIServiceStack", () => {
 
   // UX-28: the Sunday Weekly Brief push.
   describe("WeeklyBriefPush (UX-28)", () => {
-    test("runs hourly on Sunday from 10:30 to 17:30 New York, on its prod alias, with the generator's week", () => {
+    test("runs hourly on Sunday from 10:30 to 18:30 New York, on its prod alias, with the generator's week", () => {
       const schedules = Object.entries(templates.userApiTemplate.findResources("AWS::Scheduler::Schedule"))
         .filter(([logicalId]) => logicalId.startsWith("WeeklyBriefPushSchedule"));
       expect(schedules).toHaveLength(1);
       const [, schedule] = schedules[0];
       expect(schedule.Properties).toEqual(expect.objectContaining({
-        ScheduleExpression: "cron(30 10-17 ? * SUN *)",
+        ScheduleExpression: "cron(30 10-18 ? * SUN *)",
         ScheduleExpressionTimezone: "America/New_York",
         FlexibleTimeWindow: { Mode: "OFF" },
         State: "ENABLED",
@@ -1050,7 +1050,7 @@ describe("UserAPIServiceStack", () => {
         DEVICES_SORT_KEY: "deviceId",
         QUIET_HOURS: "on",
         WEEKLY_BRIEF_PUSH: "on",
-        WEEKLY_BRIEF_PUSH_LAST_RUN_HOUR: "17",
+        WEEKLY_BRIEF_PUSH_LAST_RUN_HOUR: "18",
       });
       templates.userApiTemplate.hasResourceProperties("AWS::Lambda::Function", {
         FunctionName: "WeeklyBriefPush",
