@@ -93,6 +93,8 @@ const assertFresh = async (stepName, metricName, timestamp, maxSeconds) => {
 const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 const SNAPSHOT_DOWNLOAD_TIMEOUT_MS = 30000;
 const POINTER_STEP_CONFIG = { includeResponseBody: false };
+// UX-35: GET /recent-actions answers with the test account's own votes; its body stays out of the HTTP report too.
+const OWN_VOTES_STEP_CONFIG = { includeResponseBody: false };
 const SNAPSHOT_STEP_CONFIG = {
   screenshotOnStepStart: false,
   screenshotOnStepSuccess: false,
@@ -392,6 +394,20 @@ exports.handler = async () => {
       maxWeeklyDigestAgeSeconds,
     );
   });
+
+  // UX-35: the Updates list answers 200 with an items array (empty for an account with no recent actions). Only its
+  // shape is checked: what it lists depends on the test account's votes and on Congress.
+  await httpStep('auth-recent-actions', {
+    ...requestBase,
+    path: base + '/recent-actions',
+    method: 'GET',
+    headers: authHeaders,
+  }, (statusCode, body) => {
+    expectStatus('auth-recent-actions', 200)(statusCode);
+    const json = parseJson(body, 'auth-recent-actions');
+    if (!Array.isArray(json.items)) throw new Error('auth-recent-actions: missing items array');
+    if (!Number.isInteger(json.windowDays)) throw new Error('auth-recent-actions: missing windowDays');
+  }, OWN_VOTES_STEP_CONFIG);
 
   if (process.env.SMOKE_TEST_WRITE_CHECKS !== 'true') return;
   const feedbackBillId = fixtures.feedbackBillId || billGuid;

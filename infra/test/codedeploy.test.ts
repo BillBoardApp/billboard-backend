@@ -162,11 +162,11 @@ describe('Lambda prod aliases', () => {
   });
 
   // The account-integrity work added PreSignUpCheck, RestampUserVotes and AppAttest to the 26 before it; CB-07
-  // SignUpFilterCheck; UX-28 WeeklyBriefPush; UX-39d FetchCongressMemberRecord.
-  it('UserAPIServiceStack has prod alias for all 32 Lambdas', () => {
+  // SignUpFilterCheck; UX-28 WeeklyBriefPush; UX-39d FetchCongressMemberRecord; UX-35 FetchRecentActions.
+  it('UserAPIServiceStack has prod alias for all 33 Lambdas', () => {
     const t = userApiTemplate();
-    // 32 Lambdas → 32 aliases
-    t.resourceCountIs('AWS::Lambda::Alias', 32);
+    // 33 Lambdas → 33 aliases
+    t.resourceCountIs('AWS::Lambda::Alias', 33);
     t.allResourcesProperties('AWS::Lambda::Alias', {
       Name: 'prod',
     });
@@ -245,8 +245,8 @@ describe('CodeDeploy deployment groups', () => {
     priorityTemplate().resourceCountIs('AWS::CodeDeploy::DeploymentGroup', 1);
   });
 
-  it('UserAPIServiceStack has 32 deployment groups', () => {
-    userApiTemplate().resourceCountIs('AWS::CodeDeploy::DeploymentGroup', 32);
+  it('UserAPIServiceStack has 33 deployment groups', () => {
+    userApiTemplate().resourceCountIs('AWS::CodeDeploy::DeploymentGroup', 33);
   });
 
   it('NotificationServiceStack has 5 deployment groups', () => {
@@ -307,18 +307,18 @@ describe('CodeDeploy deployment config', () => {
     }
   });
 
-  // CON-08: the 24 API handlers shift 10% for 10 minutes; the 8 workers shift at once. The account-integrity
+  // CON-08: the 25 API handlers shift 10% for 10 minutes; the 8 workers shift at once. The account-integrity
   // work added two canaried functions (PreSignUpCheck, a synchronous Cognito trigger, and AppAttest) and one worker
   // (RestampUserVotes); CB-07 one worker (SignUpFilterCheck); UX-28 one worker (WeeklyBriefPush); UX-39d one API
-  // handler (FetchCongressMemberRecord).
+  // handler (FetchCongressMemberRecord); UX-35 one API handler (FetchRecentActions).
   it('UserAPIServiceStack API groups use the built-in 10% / 10-minute canary and create no config resource', () => {
     const t = userApiTemplate();
     t.resourceCountIs('AWS::CodeDeploy::DeploymentConfig', 0);
     const configs = Object.values(t.findResources('AWS::CodeDeploy::DeploymentGroup'))
       .map((group) => group.Properties?.DeploymentConfigName as string);
-    expect(configs.filter((name) => name === API_CANARY_CONFIG_NAME)).toHaveLength(24);
+    expect(configs.filter((name) => name === API_CANARY_CONFIG_NAME)).toHaveLength(25);
     expect(configs.filter((name) => name === ALL_AT_ONCE_CONFIG_NAME)).toHaveLength(8);
-    expect(configs).toHaveLength(32);
+    expect(configs).toHaveLength(33);
   });
 
   it('the helper returns the built-in config and creates nothing', () => {
@@ -532,7 +532,7 @@ describe('Per-alias error alarms', () => {
 
     const workers = groups.filter(([, group]) => isWorker(group));
     const apis = groups.filter(([, group]) => !isWorker(group));
-    expect(groups).toHaveLength(32);
+    expect(groups).toHaveLength(33);
     expect(workers.map(([logicalId]) => logicalId.replace(/DeploymentGroup.*$/, '')).sort()).toEqual([
       'CleanupOrphanedUsers',
       'ExportCognitoUsers',
@@ -543,7 +543,7 @@ describe('Per-alias error alarms', () => {
       'WeeklyBriefPush',
       'WeeklyDigestWorker',
     ]);
-    expect(apis).toHaveLength(24);
+    expect(apis).toHaveLength(25);
     // The canaried account-integrity functions: the Cognito trigger and the App Attest routes.
     expect(apis.map(([logicalId]) => logicalId.replace(/DeploymentGroup.*$/, ''))).toEqual(
       expect.arrayContaining(['AppAttest', 'PreSignUpCheck']),

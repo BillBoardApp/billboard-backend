@@ -36,6 +36,7 @@ import {
 import {
   COMPANION_GROUPS_ENABLED,
   PRE_SIGN_UP_CHECK_INTENTIONAL_ERROR_METRICS,
+  RECENT_ACTIONS_WINDOW_DAYS,
   RETIRED_PROFILE_ATTRIBUTES_MODE,
   SIGNUP_FILTER_CHECK_RESERVED_CONCURRENCY,
 } from "../lib/config/user-api-service-constants";
@@ -233,6 +234,7 @@ describe("UserAPIServiceStack", () => {
       "adult-attestation",
       "account-data",
       "status",
+      "recent-actions",
       "public",
       "processed-bill",
       "feedback",
@@ -343,7 +345,7 @@ describe("UserAPIServiceStack", () => {
     const apiHandlers = functions.filter((properties) =>
       !WORKERS.includes(properties.FunctionName) && !COGNITO_TRIGGERS.includes(properties.FunctionName));
 
-    expect(apiHandlers).toHaveLength(23);
+    expect(apiHandlers).toHaveLength(24);
     apiHandlers.forEach(({ FunctionName, Timeout }) => {
       expect({ FunctionName, Timeout }).toEqual({ FunctionName, Timeout: expect.any(Number) });
       expect(Timeout).toBeGreaterThanOrEqual(10);
@@ -1278,6 +1280,7 @@ describe("UserAPIServiceStack", () => {
       "FetchBillStats",
       "FetchCivicScore",
       "FetchCivicProfile",
+      "FetchRecentActions",
       "GenerateWeeklyDigests",
       "WeeklyDigestWorker",
     ])("%s knows the companion rows' table and keys", (functionName) => {
@@ -1294,6 +1297,7 @@ describe("UserAPIServiceStack", () => {
         "FetchCivicProfile",
         "FetchCivicScore",
         "FetchProcessedBill",
+        "FetchRecentActions",
         "GenerateWeeklyDigests",
         "PublishBillsManifest",
         "WeeklyDigestWorker",
@@ -2665,5 +2669,85 @@ describe("CleanupOrphanedUsers: sign-ups left unconfirmed (REL-53)", () => {
       "signUpFilterCheckAddress(",
     ].forEach((reference) => expect(step).toContain(reference));
     expect(step).toContain('export const UNCONFIRMED_CLEANUP_MODES = ["off", "dry_run", "delete"] as const;');
+  });
+});
+
+// UX-35: GET /recent-actions reads the caller's own votes and watches, and public bill data, and writes nothing.
+describe("UserAPIServiceStack, FetchRecentActions", () => {
+  const statements = () => roleStatementsOf(templates.userApiTemplate, "FetchRecentActions");
+
+  test("is a 512 MB, 10 s API handler with the tables, the manifest, the bucket and the window", () => {
+    templates.userApiTemplate.hasResourceProperties("AWS::Lambda::Function", {
+      FunctionName: "FetchRecentActions",
+      MemorySize: 512,
+      Timeout: 10,
+      Environment: {
+        Variables: {
+          FEEDBACK_TABLE_NAME: "UserFeedback",
+          FEEDBACK_PARTITION_KEY: "userId",
+          FEEDBACK_SORT_KEY: "billId",
+          PREFERENCES_TABLE_NAME: "UserPreferences",
+          PREFERENCES_PARTITION_KEY: "userId",
+          PREFERENCES_SORT_KEY: "preference",
+          BUCKET_NAME: BILL_STORE_BUCKET_NAME,
+          MANIFEST_TABLE_NAME: "BillsManifest",
+          MANIFEST_PRIMARY_KEY: "pk",
+          MANIFEST_COMPANION_DECL_PK: "BILL_COMPANION_DECL",
+          MANIFEST_COMPANION_GROUPS_PK: "BILL_COMPANION_GROUPS",
+          GUID_LOOKUP_PK: "BILL_GUID",
+          RECENT_ACTIONS_WINDOW_DAYS: String(RECENT_ACTIONS_WINDOW_DAYS),
+        },
+      },
+    });
+    expect(RECENT_ACTIONS_WINDOW_DAYS).toBe(30);
+  });
+
+  test("Queries UserFeedback and UserPreferences (no index, no GetItem or Scan), and reads processed bills only", () => {
+    const unscoped = statements().filter((statement) => !JSON.stringify(statement.Condition ?? {}).includes("LeadingKeys"));
+    const access = storeActions(unscoped);
+    expect(Object.keys(access).filter((resource) => resource.startsWith("table/"))).toEqual([
+      "table/UserFeedback",
+      "table/UserPreferences",
+    ]);
+    expect(access["table/UserFeedback"]).toEqual(["dynamodb:Query"]);
+    expect(access["table/UserPreferences"]).toEqual(["dynamodb:Query"]);
+    expect(Object.keys(access).filter((resource) => resource.startsWith("bucket/"))).toEqual([
+      `bucket/${BILL_STORE_BUCKET_NAME}`,
+      `bucket/${BILL_STORE_BUCKET_NAME}/processed-bills/*`,
+    ]);
+    expect(access[`bucket/${BILL_STORE_BUCKET_NAME}/processed-bills/*`]).toEqual([
+      "s3:GetBucket*",
+      "s3:GetObject*",
+      "s3:List*",
+    ]);
+  });
+
+  test("reaches BillsManifest only through the guid lookups (BatchGetItem) and the companion groups row (GetItem)", () => {
+    const scoped = partitionScopedGrants(statements());
+    expect(scoped).toHaveLength(2);
+    expect(scoped).toEqual(
+      expect.arrayContaining([
+        { resource: "table/BillsManifest", actions: ["dynamodb:BatchGetItem"], condition: leadingKeysCondition("BILL_GUID") },
+        { resource: "table/BillsManifest", actions: ["dynamodb:GetItem"], condition: leadingKeysCondition("BILL_COMPANION_GROUPS") },
+      ]),
+    );
+  });
+
+  test("writes nothing", () => {
+    expect(statements().flatMap((statement) => [statement.Action].flat()).filter(isDataWrite)).toEqual([]);
+  });
+
+  test("is GET /recent-actions under the Cognito authorizer", () => {
+    const resources = templates.userApiTemplate.findResources("AWS::ApiGateway::Resource", {
+      Properties: { PathPart: "recent-actions" },
+    });
+    const [resourceId] = Object.keys(resources);
+    expect(Object.keys(resources)).toHaveLength(1);
+    const methods = Object.values(templates.userApiTemplate.findResources("AWS::ApiGateway::Method", {
+      Properties: { ResourceId: { Ref: resourceId } },
+    }));
+    expect(methods.map((method) => [method.Properties.HttpMethod, method.Properties.AuthorizationType])).toEqual([
+      ["GET", "COGNITO_USER_POOLS"],
+    ]);
   });
 });
