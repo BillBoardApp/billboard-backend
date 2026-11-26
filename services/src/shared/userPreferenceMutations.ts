@@ -340,15 +340,14 @@ const isConditionalCheckFailed = (error: unknown): boolean =>
  * row reaches the user with every push a Bill row does (shared/pushAudience.ts, `billFollowers`), so the watch is
  * kept. BatchWriteItem takes no condition, so each row is its own PutItem, conditional on the stored row; a failed
  * condition means the bill is already watched, and that row is done. The condition is checked where the row is
- * written, so a Watch row written at any moment around the vote is never replaced.
+ * written, so a Watch row written at any moment around the vote is never replaced. Answers how many rows it wrote.
  */
 export async function putBillRowsUnlessWatched(params: {
   db: Pick<DynamoDBClient, "send">;
   tableName: string;
   items: readonly Record<string, AttributeValue>[];
-}): Promise<{ written: number; keptWatch: number }> {
+}): Promise<number> {
   let written = 0;
-  let keptWatch = 0;
   for (let start = 0; start < params.items.length; start += BILL_ROW_WRITE_CONCURRENCY) {
     await Promise.all(
       params.items.slice(start, start + BILL_ROW_WRITE_CONCURRENCY).map(async (item) => {
@@ -364,13 +363,13 @@ export async function putBillRowsUnlessWatched(params: {
           );
           written += 1;
         } catch (error) {
+          // A failed condition: the bill is watched, and its Watch row stays.
           if (!isConditionalCheckFailed(error)) throw error;
-          keptWatch += 1;
         }
       }),
     );
   }
-  return { written, keptWatch };
+  return written;
 }
 
 /** BatchGetItem's most keys per request. */
