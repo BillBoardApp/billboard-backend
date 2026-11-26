@@ -3537,7 +3537,7 @@ describe("createBillsManifest handler", () => {
         });
       });
 
-      it("takes the document's own introducedDate when it has one, and writes no latest action without a dated action", async () => {
+      it("takes a document's own introducedDate (none carries one yet), and writes no latest action without a dated action", async () => {
         const ddbItems: Items = {};
         const { handler: loaded } = load(ddbItems);
         s3.put(key, { ...base, introducedDate: "2026-02-03", actions: [{ text: "Introduced in House" }] }, TEXT);
@@ -3545,6 +3545,27 @@ describe("createBillsManifest handler", () => {
         await loaded(event());
 
         expect(factsOf(ddbItems[ddbKey("BILL", baseSk)])).toEqual({ introducedDate: { S: "2026-02-03" } });
+      });
+
+      it("writes no introducedDate for a full page of stored actions, whose earliest may be long after the introduction", async () => {
+        const ddbItems: Items = {};
+        const { handler: loaded } = load(ddbItems);
+        // The newest 250 actions: the two passages and 248 amendment votes of the Senate's passage day.
+        const amendments = Array.from({ length: 248 }, (_, i) => ({
+          actionCode: "S04000",
+          actionDate: SENATE_PASSAGE.actionDate,
+          text: `Amendment SA ${3000 + i} not agreed to in Senate.`,
+          type: "Floor",
+        }));
+        s3.put(key, passedDoc(PASSED_AT, { actions: [SENATE_PASSAGE, ...amendments, HOUSE_PASSAGE] }), TEXT);
+
+        await loaded(event());
+
+        expect(factsOf(ddbItems[ddbKey("BILL", passedSk)])).toEqual({
+          passedHouseOn: PASSED_FACTS.passedHouseOn,
+          passedSenateOn: PASSED_FACTS.passedSenateOn,
+          latestAction: PASSED_FACTS.latestAction,
+        });
       });
 
       it("flags a ceremonial resolution only, beside its emptied topics and life areas", async () => {

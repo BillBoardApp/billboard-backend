@@ -1,4 +1,4 @@
-import { billIntroducedDate, latestManifestAction } from "../shared/billManifestFacts";
+import { billIntroducedDate, latestManifestAction, STORED_ACTIONS_PAGE } from "../shared/billManifestFacts";
 import { calendarDay } from "../shared/calendarDay";
 
 describe("calendarDay", () => {
@@ -51,6 +51,30 @@ describe("billIntroducedDate (UX-29)", () => {
     expect(billIntroducedDate(undefined, [])).toBeNull();
     expect(billIntroducedDate(null, undefined)).toBeNull();
     expect(billIntroducedDate(undefined, [{ text: "Introduced in House" }, null, "2026-02-10"])).toBeNull();
+  });
+
+  describe("a full page of stored actions", () => {
+    // A vote-a-rama: the newest 250 actions, all from two days, so the introduction is not among them.
+    const fullPage = Array.from({ length: STORED_ACTIONS_PAGE }, (_, i) => ({
+      actionCode: "S04000",
+      actionDate: i < 120 ? "2026-07-01" : "2026-06-30",
+      text: `Amendment SA ${3000 + i} not agreed to in Senate.`,
+      type: "Floor",
+    }));
+
+    it("gives no day from the actions, whose earliest may be long after the introduction", () => {
+      expect(STORED_ACTIONS_PAGE).toBe(250);
+      expect(billIntroducedDate(undefined, fullPage)).toBeNull();
+      expect(billIntroducedDate(undefined, [...fullPage, ...actions])).toBeNull();
+    });
+
+    it("still takes the document's introducedDate", () => {
+      expect(billIntroducedDate("2025-05-20", fullPage)).toBe("2025-05-20");
+    });
+
+    it("takes the earliest action of a page one short of full", () => {
+      expect(billIntroducedDate(undefined, fullPage.slice(1))).toBe("2026-06-30");
+    });
   });
 });
 

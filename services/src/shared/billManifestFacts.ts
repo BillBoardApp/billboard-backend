@@ -19,14 +19,23 @@ const actionsOf = (actions: unknown): LooseAction[] =>
 const trimmedText = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 
 /**
- * The day the bill was introduced (YYYY-MM-DD): `documentIntroducedDate` (congress.gov's introducedDate, where a
- * document carries one) when it is a calendar day, else the earliest calendar day among the actions, else null. A
- * processed bill stores at most the newest 250 actions (one congress.gov page), so for a longer history the earliest
- * stored action is later than the introduction.
+ * The most actions a processed bill stores: one congress.gov page, the newest first (fetchRawBill's
+ * CONGRESS_API_ACTIONS_PAGE_LIMIT, 250 unless set otherwise, which no stack does).
+ */
+export const STORED_ACTIONS_PAGE = 250;
+
+/**
+ * The day the bill was introduced (YYYY-MM-DD): `documentIntroducedDate` (congress.gov's introducedDate) when it is a
+ * calendar day, else the earliest calendar day among the actions, else null. No processed bill carries congress.gov's
+ * introducedDate yet (it is on the raw bill only), so today every row takes the earliest action. A bill with a full
+ * page of stored actions (STORED_ACTIONS_PAGE) may have older ones that were never stored, and its earliest stored
+ * action can be weeks or months after the introduction (a vote-a-rama fills the page in two days): it gets null rather
+ * than a day that would make a long-running bill look new (UX-29's NEW).
  */
 export const billIntroducedDate = (documentIntroducedDate: unknown, actions: unknown): string | null => {
   const stated = calendarDay(documentIntroducedDate);
   if (stated !== null) return stated;
+  if (Array.isArray(actions) && actions.length >= STORED_ACTIONS_PAGE) return null;
   let earliest: string | null = null;
   for (const action of actionsOf(actions)) {
     const day = calendarDay(action.actionDate);

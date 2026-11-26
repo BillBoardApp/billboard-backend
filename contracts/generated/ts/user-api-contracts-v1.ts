@@ -332,9 +332,11 @@ export interface BillsManifestItemV1 {
    */
   isCommemorative?: true;
   /**
-   * YYYY-MM-DD: the day the bill was introduced, from the processed bill's introducedDate when it has one, else its
-   * earliest dated action (later than the introduction for a bill with more than the newest 250 actions a fetch
-   * stores). Absent when neither gives a date.
+   * YYYY-MM-DD: the day the bill was introduced. No processed bill carries congress.gov's introducedDate yet, so it is
+   * the earliest dated action the processed bill stores (billManifestFacts.ts billIntroducedDate); a processed bill
+   * that carries one gives that day. Absent when neither gives a date, and when the processed bill stores a full page
+   * of 250 actions (a fetch stores only the newest 250), whose earliest may be long after the introduction. Its absence
+   * never means the bill is new.
    */
   introducedDate?: string;
   /**

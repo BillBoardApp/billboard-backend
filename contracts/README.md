@@ -239,9 +239,11 @@ it) is skipped and gets none.
 
 - `isCommemorative`: `{"type": "boolean", "const": true}`, like `vetoed`, for a ceremonial resolution
   (`services/src/shared/commemorativeResolutions.ts`, the rule that also empties its topics and life areas).
-- `introducedDate` (`format: date`): the document's introducedDate when it has one, else its earliest dated action
-  (`services/src/shared/billManifestFacts.ts`). A fetch stores the newest 250 actions, so a longer history gives a later
-  day.
+- `introducedDate` (`format: date`): the earliest dated action the processed bill stores
+  (`services/src/shared/billManifestFacts.ts` `billIntroducedDate`). No processed bill carries congress.gov's
+  introducedDate yet; one that does gives that day. A fetch stores only the newest 250 actions, so a bill with a full
+  page of them gets none: its earliest stored action may be long after the introduction. Its absence never means the
+  bill is new.
 - `passedHouseOn`, `passedSenateOn` (`format: date`): the earliest action coded 8000 or 17000
   (`services/src/shared/billOutcomes.ts` `chamberPassageDates`), whatever the status says. A bill reaches the second
   chamber only once the chamber it began in passed it, so the second chamber's day alone (the first passage older than
