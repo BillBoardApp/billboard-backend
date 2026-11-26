@@ -371,14 +371,39 @@ describe("unwatching a bill the user voted on keeps their Bill row (UX-47)", () 
     unprocessedAnswers = 4;
     expect((await unwatch(watch(BILL))).statusCode).toBe(500);
     expect(errors.mock.calls.map(([line]) => String(line)).join("\n")).toContain(
-      "Could not read the caller's votes after an unwatch",
+      "Could not restore the caller's Bill rows after an unwatch",
     );
     expect(errors.mock.calls.map(([line]) => String(line)).join("\n")).not.toContain(USER);
 
     errors.mockRestore();
 
-    // The app keeps the watch and sends the unwatch again: that one puts the Bill row back.
+    // The app keeps the watch, and its next preferences load saves the Watch row again; an unwatch tapped again then
+    // puts the Bill row back.
+    expect(preferences.has(BILL)).toBe(false);
+    expect((await put(watch(BILL))).statusCode).toBe(200);
+    expect(typeOf(BILL)).toBe("Watch");
     expect((await unwatch(watch(BILL))).statusCode).toBe(200);
     expect(typeOf(BILL)).toBe("Bill");
+  });
+
+  it("answers 500 with the same log line when the Bill row cannot be written back", async () => {
+    storeRow(BILL, "Watch");
+    vote(BILL, "Nay");
+    send.mockImplementation(async (command: FakeCommand) => {
+      if (command.constructor.name === "PutItemCommand") {
+        throw Object.assign(new Error("Rate exceeded"), { name: "ProvisionedThroughputExceededException" });
+      }
+      return fakeTable(command);
+    });
+    const errors = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      expect((await unwatch(watch(BILL))).statusCode).toBe(500);
+      expect(errors.mock.calls.map(([line]) => String(line)).join("\n")).toContain(
+        "Could not restore the caller's Bill rows after an unwatch",
+      );
+      expect(preferences.has(BILL)).toBe(false);
+    } finally {
+      errors.mockRestore();
+    }
   });
 });
