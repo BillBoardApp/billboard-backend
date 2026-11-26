@@ -14,6 +14,7 @@ import { buildBillsManifest } from "../shared/billsManifestBuilder";
 import { billContentHash, formatDateBasis, manifestDateBasis } from "../shared/billVersionChange";
 import { asSqsEvent } from "./fixtures/awsEvents";
 import { evaluateCondition, type ConditionInput } from "./fixtures/dynamoCondition";
+import { manifestRowFacts } from "./fixtures/manifestRowFacts";
 import { jsonReadable } from "./fixtures/streams";
 import { FakeVersionedS3, type FakeS3Command } from "./fakeVersionedS3";
 
@@ -187,7 +188,7 @@ const written = (correlationId: string, rawVersion?: string): Record<string, str
 
 const basisOf = (doc: ProcessedDoc) => formatDateBasis(manifestDateBasis(doc, TEXT["source-text-hash"]));
 
-/** The exact row a first publication of `doc` writes at `updatedAt`: every attribute, as before D2. */
+/** The exact row a first publication of `doc` writes at `updatedAt`: every attribute, as before D2, and its facts. */
 const firstRow = (doc: ProcessedDoc, updatedAt: string, documentStoredAt = doc.storedAt): Item => ({
   pk: { S: "BILL" },
   sk: { S: `${updatedAt}#${guid}` },
@@ -206,6 +207,7 @@ const firstRow = (doc: ProcessedDoc, updatedAt: string, documentStoredAt = doc.s
   dateBasis: { S: basisOf(doc) },
   documentStoredAt: { S: documentStoredAt },
   billStatus: { S: "New" },
+  ...manifestRowFacts(doc.actions),
 });
 
 const lookup = (updatedAt: string): Item => ({

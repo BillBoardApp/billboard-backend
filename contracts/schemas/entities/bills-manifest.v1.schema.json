@@ -90,6 +90,41 @@
           "const": true,
           "description": "Only as true, when the processed bill's actions show a veto that stands (billOutcomes.ts deriveBillVetoedFromActions); absent otherwise. billStatus keeps its value. Clients that predate it ignore it."
         },
+        "isCommemorative": {
+          "type": "boolean",
+          "const": true,
+          "description": "Only as true, when the bill is a ceremonial resolution (one that designates a day or week, or recognizes, honors or congratulates someone; commemorativeResolutions.ts isCommemorativeResolution, the rule that also leaves its subCategories and lifeAreas empty); absent otherwise. Clients that predate it ignore it. Sent only in the snapshot and in inline answers to a request with facts=1 (UX-29, UX-38; a project decision, 2026-11-26)."
+        },
+        "introducedDate": {
+          "type": "string",
+          "format": "date",
+          "description": "YYYY-MM-DD: the day the bill was introduced. No processed bill carries congress.gov's introducedDate yet, so it is the earliest dated action the processed bill stores (billManifestFacts.ts billIntroducedDate); a processed bill that carries one gives that day. Absent when neither gives a date, and when the processed bill stores a full page of 250 actions (a fetch stores only the newest 250), whose earliest may be long after the introduction. Its absence never means the bill is new. Sent only in the snapshot and in inline answers to a request with facts=1 (UX-29, UX-38; a project decision, 2026-11-26)."
+        },
+        "passedHouseOn": {
+          "type": "string",
+          "format": "date",
+          "description": "YYYY-MM-DD: the earliest action coded 8000, Passed/agreed to in House (billOutcomes.ts chamberPassageDates); absent when no stored action records it (a fetch stores the newest 250 actions). A vote over a veto (32000), on an amendment or on a motion is not one. Set whatever billStatus says: a bill that later failed or became law keeps it. A bill reaches the second chamber only once the chamber it began in passed it, so a bill that began in the Senate and has passedHouseOn passed the Senate too, even when passedSenateOn is absent because that action is older than the stored ones. Sent only in the snapshot and in inline answers to a request with facts=1 (UX-29, UX-38; a project decision, 2026-11-26)."
+        },
+        "passedSenateOn": {
+          "type": "string",
+          "format": "date",
+          "description": "YYYY-MM-DD: the earliest action coded 17000, Passed/agreed to in Senate (billOutcomes.ts chamberPassageDates); absent when no stored action records it (a fetch stores the newest 250 actions). A vote over a veto (34000), on an amendment or on a motion is not one. Set whatever billStatus says. A bill reaches the second chamber only once the chamber it began in passed it, so a bill that began in the House and has passedSenateOn passed the House too, even when passedHouseOn is absent because that action is older than the stored ones. Sent only in the snapshot and in inline answers to a request with facts=1 (UX-29, UX-38; a project decision, 2026-11-26)."
+        },
+        "latestAction": {
+          "title": "BillsManifestLatestActionV1",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["actionDate"],
+          "description": "The bill's latest action, the one the app's bill page and the website show as Latest action (UX-43; billManifestFacts.ts latestManifestAction): of the processed bill's actions, those of the greatest actionDate, then the first listed (congress.gov lists the newest first; actionTime is not read, as many Library of Congress lines have none). An action without text counts only when no action of its date has text and its type or veto code has a label in the apps. Absent when there is no such action or its date is not a calendar day. Sent only in the snapshot and in inline answers to a request with facts=1 (UX-29, UX-38; a project decision, 2026-11-26).",
+          "properties": {
+            "actionDate": { "type": "string", "format": "date", "description": "YYYY-MM-DD." },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Congress.gov's text, trimmed, citations included. Absent when that action has none (the apps then show its type)."
+            }
+          }
+        },
         "civicProfile": {
           "title": "CivicProfileScoresV1",
           "type": "object",

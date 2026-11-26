@@ -228,6 +228,47 @@ and `cursor`) it serves only the member's votes on those bills. New and additive
   `CongressMemberRecordVote`, `CongressMemberRecordBill` and `CongressMemberRecordCongressCount` in Swift (`position` and
   `chamber` are `String`).
 
+## Bill facts on manifest rows (UX-29, UX-38)
+
+Facts the apps rank and label a bill by before they open it, on `BillsManifest.bills[]`, optional and additive;
+clients that predate them ignore them. Which answers carry them (a project decision, 2026-11-26):
+
+- The S3 snapshot (`delivery=snapshot`) always does. It is read from S3, so Lambda's 6 MiB response limit does not
+  apply, and apps 1.1 and 1.2 decode its rows with keyed decoders that skip fields they do not know.
+- An inline answer of `GET /bills-manifest`, windowed or full, carries them only for a request with `facts=1` (an
+  optional query parameter in `openapi/user-api.v1.json`; app 1.3 sends it). Without it, or with any other value, the
+  answer is byte for byte the one it was before the facts. With them, a windowed answer wider than about 13 weeks
+  would pass the limit (26 weeks fit without them; measured on production rows, 2026-11-26), so app 1.3 reads
+  windows wider than 8 weeks from the snapshot.
+
+CreateBillsManifest derives each from the processed bill on every row write and writes it only when the document gives
+it. None of them is part of what dates a row, so a rows-only replay adds them to a row that reflects its document
+without moving it. A row whose document has news it never got moves, as at any write, and a row at a key newer than its
+document (unless written from it) is skipped and gets none.
+
+- `isCommemorative`: `{"type": "boolean", "const": true}`, like `vetoed`, for a ceremonial resolution
+  (`services/src/shared/commemorativeResolutions.ts`, the rule that also empties its topics and life areas).
+- `introducedDate` (`format: date`): the earliest dated action the processed bill stores
+  (`services/src/shared/billManifestFacts.ts` `billIntroducedDate`). No processed bill carries congress.gov's
+  introducedDate yet; one that does gives that day. A fetch stores only the newest 250 actions, so a bill with a full
+  page of them gets none: its earliest stored action may be long after the introduction. Its absence never means the
+  bill is new.
+- `passedHouseOn`, `passedSenateOn` (`format: date`): the earliest action coded 8000 or 17000
+  (`services/src/shared/billOutcomes.ts` `chamberPassageDates`), whatever the status says. A bill reaches the second
+  chamber only once the chamber it began in passed it, so the second chamber's day alone (the first passage older than
+  the stored actions) still means both passed.
+- `latestAction` (title `BillsManifestLatestActionV1`): `actionDate` (`format: date`, required) and `text` (congress.gov's,
+  trimmed, at least one character, absent when that action has none) of the action the app's bill page and the website
+  show as Latest action (UX-43; `billManifestFacts.ts` `latestManifestAction`, the rule of `timelineActions` in both):
+  of the greatest day, the first listed (congress.gov lists the newest first). `actionTime` is not read: the Library of
+  Congress's lines have none, and by time the day a bill became law named a House procedural step.
+- `check-contracts.mjs` accepts an item without any of them and a `latestAction` without `text`, and rejects an
+  `isCommemorative` other than `true`, a day that is not a calendar day (`2026-02-30`, `2026-3-5`, a timestamp, `""`),
+  a `latestAction` without `actionDate`, with empty `text` or an undeclared field (`ROW_FACTS_*`). The fixture's
+  H.R. 2207 and H.Res. 826 carry them, so `check:swift` decodes them.
+- Generated: optional fields in both languages (`isCommemorative?: true` and `Bool?`, the days as `string` and
+  `String?`, `BillsManifestLatestActionV1` and `UserAPIContractsV1.BillsManifestLatestAction`).
+
 ## Stats, verification limits and labels (C2)
 
 All additive; builds 1.0 and R1 keep decoding every response.

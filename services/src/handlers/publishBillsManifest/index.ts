@@ -25,6 +25,11 @@ import { putMetrics, type MetricUnit } from "../../shared/metrics";
 // and can be invoked directly (any payload). fetchBillsManifest hands clients a presigned URL for
 // this object instead of returning the whole manifest in a Lambda response.
 //
+// The snapshot always carries the bill facts (UX-29, UX-38; billsManifestBuilder.ts), which
+// FetchBillsManifest adds to an inline answer only on request (facts=1): an S3 object has no
+// Lambda response limit, and apps 1.1 and 1.2 decode its rows with keyed decoders, which skip the
+// fields they do not know.
+//
 // The object is rewritten only when its content changed: its sha256 metadata is a SHA-256 of the
 // serialized bills array followed by the companionGroups JSON (not generatedAt), and a run whose
 // hash matches the current object's skips the write, so the snapshot keeps the generatedAt of the
@@ -307,7 +312,7 @@ export const handler = async (_event?: unknown, context?: LambdaContextLike): Pr
   if (!bucket) throw new Error("Missing env var MANIFEST_SNAPSHOT_BUCKET");
   const key = process.env.MANIFEST_SNAPSHOT_KEY?.trim() || DEFAULT_SNAPSHOT_KEY;
 
-  const built = await buildBillsManifest(manifestSource);
+  const built = await buildBillsManifest(manifestSource, { withFacts: true });
   const companions = await publishCompanionGroups(built);
   const manifest: BillsManifest = { ...built, companionGroups: companionGroupsFromPairs(companions.pairs) };
   const { count, generatedAt } = manifest;

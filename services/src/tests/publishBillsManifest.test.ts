@@ -352,6 +352,59 @@ describe("publishBillsManifest handler", () => {
     ]);
   });
 
+  it("always carries the bill facts, after vetoed and before civicProfile, which FetchBillsManifest adds only on request (UX-29, UX-38)", async () => {
+    queuePages();
+    s3Send.mockRejectedValueOnce(notFound()).mockResolvedValueOnce({});
+    await publish.handler();
+    const firstMetadata = putCalls()[0].input.Metadata;
+
+    // The replay adds the facts to a row in place: the same date, so only the facts changed.
+    s3Send.mockReset();
+    const factsRow = {
+      ...manifestItem("BILLS-119s3is", 0, "2026-09-20T00:00:00.000Z"),
+      billStatus: { S: "Failed" },
+      vetoed: { BOOL: true },
+      isCommemorative: { BOOL: true },
+      introducedDate: { S: "2025-03-20" },
+      passedHouseOn: { S: "2025-06-04" },
+      passedSenateOn: { S: "2025-07-15" },
+      latestAction: { M: { actionDate: { S: "2026-09-20" }, text: { S: "Vetoed by President." } } },
+      civicProfile: { M: { localVsFederal: { N: "0.5" } } },
+    };
+    queuePages([PAGES[0], { Items: [factsRow] }]);
+    s3Send.mockResolvedValueOnce({ Metadata: firstMetadata }).mockResolvedValueOnce({});
+
+    const summary = await publish.handler();
+
+    expect(summary.outcome).toBe("written");
+    const [put] = putCalls();
+    expect(put.input.Metadata.sha256).not.toBe(firstMetadata.sha256);
+    const written = JSON.parse(gunzipSync(put.input.Body).toString("utf8")) as BillsManifestV1;
+    expect(written.bills[0]).toEqual({
+      ...EXPECTED_BILLS[0],
+      billStatus: "Failed",
+      vetoed: true,
+      isCommemorative: true,
+      introducedDate: "2025-03-20",
+      passedHouseOn: "2025-06-04",
+      passedSenateOn: "2025-07-15",
+      latestAction: { actionDate: "2026-09-20", text: "Vetoed by President." },
+      civicProfile: { localVsFederal: 0.5 },
+    });
+    expect(Object.keys(written.bills[0]).slice(-8)).toEqual([
+      "billStatus",
+      "vetoed",
+      "isCommemorative",
+      "introducedDate",
+      "passedHouseOn",
+      "passedSenateOn",
+      "latestAction",
+      "civicProfile",
+    ]);
+    // The other rows carry none, so their entries are as before.
+    expect(written.bills.slice(1)).toEqual(EXPECTED_BILLS.slice(1));
+  });
+
   it("keeps the snapshot when only a bill's vote count changed: it is not in the manifest (INT-11)", async () => {
     queuePages();
     s3Send.mockRejectedValueOnce(notFound()).mockResolvedValueOnce({});

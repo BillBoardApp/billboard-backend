@@ -805,11 +805,18 @@
             "required": false,
             "description": "When `snapshot` and `updatedAfter` is absent, the response is a BillsManifestSnapshotPointer whose snapshotUrl returns the full BillsManifest as gzip-encoded JSON (no Authorization header; expires at expiresAt). If no snapshot exists yet, the full BillsManifest is returned inline instead.",
             "schema": { "type": "string", "enum": ["snapshot"] }
+          },
+          {
+            "name": "facts",
+            "in": "query",
+            "required": false,
+            "description": "Optional; app 1.3 and later send `1`. When `1`, each bill in an inline answer (windowed or full) carries the bill facts it has: isCommemorative, introducedDate, passedHouseOn, passedSenateOn and latestAction (UX-29, UX-38). Absent, or any other value: the bills carry none of them, so the answer is the one clients before 1.3 always got (a project decision, 2026-11-26: with the facts, a windowed answer wider than about 13 weeks would pass Lambda's 6 MiB response limit). It does not change the snapshot pointer. The snapshot always carries the facts, so a client that needs them for a window wider than about 8 weeks reads the snapshot and filters it.",
+            "schema": { "type": "string", "enum": ["1"] }
           }
         ],
         "responses": {
           "200": {
-            "description": "Bills, active priorities first, then by most recent update (never by vote count, and no voteCount, INT-11), with every companion group in companionGroups (also on windowed responses); or, with delivery=snapshot and no updatedAfter, a pointer to a snapshot of the full manifest",
+            "description": "Bills, active priorities first, then by most recent update (never by vote count, and no voteCount, INT-11), with every companion group in companionGroups (also on windowed responses), and the bill facts only with facts=1; or, with delivery=snapshot and no updatedAfter, a pointer to a snapshot of the full manifest",
             "content": {
               "application/json": {
                 "schema": {

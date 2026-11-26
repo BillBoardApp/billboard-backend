@@ -3,6 +3,7 @@ import {
   billOutcomeKindForAction,
   billOutcomeTextForAction,
   billStatusForOutcome,
+  chamberPassageDates,
   deriveBillStatusFromActions,
   deriveBillVetoedFromActions,
   FAILED_SIXTY_VOTES_TEXT,
@@ -1183,5 +1184,126 @@ describe("billOutcomes: Congressional Record citations are no new action (projec
       };
       expect(newBillActions([referral], [referral, { ...referral }]).size).toBe(0);
     });
+  });
+});
+
+describe("billOutcomes: chamberPassageDates (UX-38)", () => {
+  const house = (
+    actionDate: string,
+    text = "Passed/agreed to in House: On passage Passed by recorded vote: 220 - 210.",
+  ) => ({
+    actionCode: "8000",
+    actionDate,
+    text,
+    type: "Floor",
+  });
+  const senate = (
+    actionDate: string,
+    text = "Passed/agreed to in Senate: Passed Senate without amendment by Voice Vote.",
+  ) => ({
+    actionCode: "17000",
+    actionDate,
+    text,
+    type: "Floor",
+  });
+  const introduced = {
+    actionCode: "1000",
+    actionDate: "2026-01-12",
+    text: "Introduced in House",
+    type: "IntroReferral",
+  };
+
+  it.each([
+    ["no passage", [introduced], {}],
+    ["the House only", [house("2026-02-03"), introduced], { house: "2026-02-03" }],
+    ["the Senate only", [senate("2026-02-19"), introduced], { senate: "2026-02-19" }],
+    [
+      "both chambers, the Senate last",
+      [senate("2026-02-19"), house("2026-02-03"), introduced],
+      { house: "2026-02-03", senate: "2026-02-19" },
+    ],
+  ])("gives the day each chamber passed the bill: %s", (_label, actions, expected) => {
+    expect(chamberPassageDates(actions)).toEqual(expected);
+  });
+
+  it("takes the earliest passage of a chamber, whatever the order the actions are listed in", () => {
+    // A second passage (a vacated vote taken again, a measure agreed to twice) is no new first passage.
+    expect(chamberPassageDates([house("2026-02-03"), house("2026-03-10"), house("2026-02-01")])).toEqual({
+      house: "2026-02-01",
+    });
+  });
+
+  it("trusts codes only: amendment, motion, uncoded Senate, override and conference lines are no passage", () => {
+    const actions = [
+      // The Senate's own floor line for the vote carries no code; only its 17000 twin counts.
+      { actionDate: "2026-02-19", text: "Passed Senate without amendment by Voice Vote.", type: "Floor" },
+      { actionCode: "", actionDate: "2026-02-19", text: "Passed/agreed to in Senate.", type: "Floor" },
+      {
+        actionCode: "H37100",
+        actionDate: "2026-02-03",
+        text: "On passage Passed by recorded vote: 220 - 210.",
+        type: "Floor",
+      },
+      {
+        actionCode: "95000",
+        actionDate: "2026-02-18",
+        text: "Amendment SA 2205 agreed to in Senate by Voice Vote.",
+        type: "Floor",
+      },
+      {
+        actionCode: "H8D000",
+        actionDate: "2026-02-02",
+        text: "On motion to recommit Failed by recorded vote.",
+        type: "Floor",
+      },
+      { actionCode: "32000", actionDate: "2026-03-10", text: "Passed House over veto.", type: "Veto" },
+      { actionCode: "34000", actionDate: "2026-03-18", text: "Passed Senate over veto.", type: "Veto" },
+      {
+        actionCode: "22000",
+        actionDate: "2026-03-01",
+        text: "Conference report agreed to in Senate.",
+        type: "ResolvingDifferences",
+      },
+      introduced,
+    ];
+    expect(chamberPassageDates(actions)).toEqual({});
+  });
+
+  it("skips a passage without a real calendar day, and keeps the day of a timestamp", () => {
+    expect(chamberPassageDates([house(""), house("2026-02-30"), senate("Feb 19, 2026")])).toEqual({});
+    expect(chamberPassageDates([{ actionCode: " 8000 ", actionDate: "2026-02-03T00:00:00Z" }])).toEqual({
+      house: "2026-02-03",
+    });
+  });
+
+  it("never reads the status: a bill that later failed, was vetoed or became law keeps its passages", () => {
+    const actions = [
+      { actionCode: "36000", actionDate: "2026-03-20", text: "Became Public Law No: 119-90.", type: "BecameLaw" },
+      { actionCode: "31000", actionDate: "2026-03-02", text: "Vetoed by President.", type: "President" },
+      senate("2026-02-19"),
+      house("2026-02-03"),
+    ];
+    expect(deriveBillStatusFromActions(actions)).toBe("Finalized");
+    expect(chamberPassageDates(actions)).toEqual({ house: "2026-02-03", senate: "2026-02-19" });
+  });
+
+  it("gives only the second chamber's day when the first passage is older than the newest 250 stored actions", () => {
+    // An H.R. after a Senate vote-a-rama, newest first: one fetch stores 250 actions, and the House's passage, months
+    // before, is not among them. The schema says what it means: the Senate takes up a House bill only once it passed.
+    const amendments = Array.from({ length: 249 }, (_, index) => ({
+      actionCode: "95000",
+      actionDate: "2026-07-30",
+      text: `Amendment SA ${3000 + index} not agreed to in Senate by Yea-Nay Vote.`,
+      type: "Floor",
+    }));
+    const stored = [senate("2026-07-31"), ...amendments];
+    expect(stored).toHaveLength(250);
+    expect(chamberPassageDates(stored)).toEqual({ senate: "2026-07-31" });
+  });
+
+  it("reads nothing from a missing or malformed list", () => {
+    expect(chamberPassageDates(undefined)).toEqual({});
+    expect(chamberPassageDates(null)).toEqual({});
+    expect(chamberPassageDates([null, "8000", 17000, house("2026-02-03")])).toEqual({ house: "2026-02-03" });
   });
 });

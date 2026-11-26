@@ -1,4 +1,6 @@
 import { DynamoDBClient, QueryCommand, type AttributeValue } from "@aws-sdk/client-dynamodb";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { BillsManifestItemV1 as BillManifestEntry } from "../contracts";
 import { BillPriorityDao } from "../adapters/billPriorityDao";
 import type { BillPriorityRecord } from "../models/billPriority";
@@ -592,6 +594,166 @@ describe("billsManifestBuilder", () => {
     // Through the builder, so inline and windowed loads and the snapshot carry it.
     const manifest = await buildBillsManifest(sourceFor(MANIFEST_ENV, { Items: [vetoed] }).source);
     expect(manifest.bills[0].vetoed).toBe(true);
+  });
+
+  describe("the bill facts (UX-29, UX-38)", () => {
+    const FACTS: Row = {
+      isCommemorative: { BOOL: true },
+      introducedDate: { S: "2026-02-10" },
+      passedHouseOn: { S: "2026-02-03" },
+      passedSenateOn: { S: "2026-02-19" },
+      latestAction: { M: { actionDate: { S: "2026-03-04" }, text: { S: "Passed/agreed to in Senate." } } },
+    };
+    const WITH_FACTS = { withFacts: true };
+    const FACT_FIELDS = ["isCommemorative", "introducedDate", "passedHouseOn", "passedSenateOn", "latestAction"];
+
+    it("serves each as CreateBillsManifest writes it, after vetoed and before civicProfile, with withFacts", async () => {
+      const row = manifestItem({
+        billStatus: { S: "Passed" },
+        vetoed: { BOOL: true },
+        ...FACTS,
+        civicProfile: { M: { localVsFederal: { N: "0.5" } } },
+      });
+      const entry = toManifestEntry(row, WITH_FACTS)!;
+      expect(entry).toMatchObject({
+        isCommemorative: true,
+        introducedDate: "2026-02-10",
+        passedHouseOn: "2026-02-03",
+        passedSenateOn: "2026-02-19",
+        latestAction: { actionDate: "2026-03-04", text: "Passed/agreed to in Senate." },
+      });
+      expect(Object.keys(entry).slice(-8)).toEqual(["billStatus", "vetoed", ...FACT_FIELDS, "civicProfile"]);
+
+      // Through the builder, as the snapshot and a facts=1 request build it.
+      const manifest = await buildBillsManifest(sourceFor(MANIFEST_ENV, { Items: [row] }).source, WITH_FACTS);
+      expect(manifest.bills[0]).toEqual(entry);
+    });
+
+    it("leaves every fact out without withFacts, so the entry is the one it was before the facts", async () => {
+      const row = manifestItem({
+        billStatus: { S: "Passed" },
+        vetoed: { BOOL: true },
+        ...FACTS,
+        civicProfile: { M: { localVsFederal: { N: "0.5" } } },
+      });
+      const { isCommemorative, introducedDate, passedHouseOn, passedSenateOn, latestAction, ...withoutFacts } = row;
+      expect([isCommemorative, introducedDate, passedHouseOn, passedSenateOn, latestAction]).not.toContain(undefined);
+      const before = toManifestEntry(withoutFacts)!;
+
+      for (const entry of [
+        toManifestEntry(row),
+        toManifestEntry(row, {}),
+        toManifestEntry(row, { withFacts: false }),
+      ]) {
+        expect(JSON.stringify(entry)).toBe(JSON.stringify(before));
+        expect(Object.keys(entry!).slice(-3)).toEqual(["billStatus", "vetoed", "civicProfile"]);
+      }
+      for (const options of [undefined, {}, { withFacts: false }, { updatedAfter: "2025-01-01T00:00:00.000Z" }]) {
+        const manifest = await buildBillsManifest(sourceFor(MANIFEST_ENV, { Items: [row] }).source, options);
+        expect(JSON.stringify(manifest.bills)).toBe(JSON.stringify([before]));
+        for (const field of FACT_FIELDS) expect(manifest.bills[0]).not.toHaveProperty(field);
+      }
+    });
+
+    it("leaves out a row's malformed facts rather than serving them against the contract", () => {
+      const plain = toManifestEntry(manifestItem(), WITH_FACTS);
+      expect(plain).toEqual(toManifestEntry(manifestItem()));
+      for (const value of [{ BOOL: false }, { S: "true" }, { N: "1" }, { NULL: true } as AttributeValue]) {
+        expect(toManifestEntry(manifestItem({ isCommemorative: value }), WITH_FACTS)).toEqual(plain);
+      }
+      for (const field of ["introducedDate", "passedHouseOn", "passedSenateOn"]) {
+        for (const value of [
+          { S: "2026-02-30" },
+          { S: "Feb 3, 2026" },
+          { S: "" },
+          { N: "20260203" },
+        ] as AttributeValue[]) {
+          expect(toManifestEntry(manifestItem({ [field]: value }), WITH_FACTS)).toEqual(plain);
+        }
+      }
+      for (const value of [
+        { M: { text: { S: "Introduced in House" } } },
+        { M: { actionDate: { S: "2026-02-30" }, text: { S: "Introduced in House" } } },
+        { S: "Introduced in House" },
+        { L: [] },
+      ] as AttributeValue[]) {
+        expect(toManifestEntry(manifestItem({ latestAction: value }), WITH_FACTS)).toEqual(plain);
+      }
+      // A stored timestamp keeps its day; an action without text keeps its date.
+      expect(
+        toManifestEntry(manifestItem({ introducedDate: { S: "2026-02-10T00:00:00.000Z" } }), WITH_FACTS)
+          ?.introducedDate,
+      ).toBe("2026-02-10");
+      expect(
+        toManifestEntry(
+          manifestItem({ latestAction: { M: { actionDate: { S: "2026-03-04" }, text: { S: " " } } } }),
+          WITH_FACTS,
+        )?.latestAction,
+      ).toEqual({ actionDate: "2026-03-04" });
+      for (const latestAction of [
+        { M: { actionDate: { S: "2026-03-04" } } },
+        { M: { actionDate: { S: "2026-03-04" }, text: { N: "1" } } },
+      ] as AttributeValue[]) {
+        expect(toManifestEntry(manifestItem({ latestAction }), WITH_FACTS)?.latestAction).toEqual({
+          actionDate: "2026-03-04",
+        });
+      }
+    });
+
+    it("serves only fields of the contract's manifest item", () => {
+      const schema = JSON.parse(
+        readFileSync(join(__dirname, "../../../contracts/schemas/entities/bills-manifest.v1.schema.json"), "utf8"),
+      );
+      const item = schema.$defs.billManifestItem;
+      const entry = toManifestEntry(
+        manifestItem({
+          isPriority: { BOOL: true },
+          billStatus: { S: "Passed" },
+          vetoed: { BOOL: true },
+          ...FACTS,
+          civicProfile: { M: { localVsFederal: { N: "0.5" } } },
+        }),
+        WITH_FACTS,
+      )!;
+      expect(Object.keys(entry).filter((key) => !(key in item.properties))).toEqual([]);
+      expect(
+        Object.keys(entry.latestAction!).filter((key) => !(key in item.properties.latestAction.properties)),
+      ).toEqual([]);
+    });
+
+    it("still matches the pre-CAP-01 output byte for byte without withFacts when every row carries the facts", async () => {
+      const { pages, priorityPage } = generatePartition(600, 150);
+      const random = seededRandom(20261126);
+      const rowsWithFacts: Page[] = pages.map((page) => ({
+        ...page,
+        Items: (page.Items ?? []).map((item, index) => ({
+          ...item,
+          ...(random() < 0.1 ? { isCommemorative: { BOOL: true } } : {}),
+          introducedDate: { S: "2025-02-03" },
+          ...(random() < 0.3 ? { passedHouseOn: { S: "2025-06-04" } } : {}),
+          ...(random() < 0.2 ? { passedSenateOn: { S: "2025-07-15" } } : {}),
+          latestAction: { M: { actionDate: { S: "2026-11-20" }, text: { S: `Action ${index} "quoted"` } } },
+        })),
+      }));
+      const { client: priorityClient } = fakeDdb(priorityPage);
+      const activePriorities = await new BillPriorityDao(priorityClient, {
+        tableName: "BillPriority",
+        partitionKey: "guid",
+        activeIndexName: "PriorityStatusIndex",
+      }).listActive();
+      const expected = legacyBills(pages, activePriorities);
+
+      const plain = await buildBillsManifest(sourceFor(PRIORITY_ENV, priorityPage, ...rowsWithFacts).source);
+      expect(JSON.stringify(plain.bills)).toBe(JSON.stringify(expected));
+
+      // The same rows with withFacts: the same bills in the same order, each with its facts.
+      const full = await buildBillsManifest(sourceFor(PRIORITY_ENV, priorityPage, ...rowsWithFacts).source, WITH_FACTS);
+      expect(full.bills.map((bill) => bill.guid)).toEqual(expected.map((bill) => bill.guid));
+      for (const bill of full.bills) {
+        expect(bill.introducedDate).toBe("2025-02-03");
+        expect(bill.latestAction?.actionDate).toBe("2026-11-20");
+      }
+    });
   });
 
   it("drops items without a guid or billType", () => {
