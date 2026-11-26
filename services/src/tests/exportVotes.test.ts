@@ -380,9 +380,9 @@ describe("GET /account-data/votes (UX-40 L7)", () => {
       fakeTables([{ Items: items }], {});
 
       expect((await run()).json.votes).toHaveLength(150);
-      expect(batchGets("UserFeedback").map((command) => command.input.RequestItems.UserFeedback.Keys.length)).toEqual([
-        100, 50,
-      ]);
+      const twinReads: Array<{ input: { RequestItems: Record<string, { Keys: unknown[] }> } }> =
+        batchGets("UserFeedback");
+      expect(twinReads.map((command) => command.input.RequestItems.UserFeedback.Keys.length)).toEqual([100, 50]);
     });
   });
 
