@@ -19,9 +19,9 @@ at `billboard-project.com` and `share.billboard-project.com`.
 | `roadmap.html` | Roadmap page |
 | `robots.txt` | `Disallow: /public/`, so crawlers do not call the bill API. `/b/` stays open, because some link previewers obey `robots.txt`; `app.js` keeps share views out of search with a `noindex` instead |
 | `.well-known/security.txt` | How to report a security problem, in the RFC 9116 format: the private GitHub report and contact@billboard-project.com as contacts, the security policy, the canonical URLs and an Expires date that has to be renewed every year ("security.txt", below) |
-| `favicon.ico`, `apple-touch-icon.png` | The 1.2 app icon at 16, 32 and 48 px (on its rounded navy tile) and at 180 px (full-bleed navy, which iOS rounds itself), drawn from the same layers as `assets/favicon.svg` |
-| `assets/favicon.svg` | Favicon, and the app icon beside the App Store button: the 1.2 app icon's layers (`AppIcon.icon/Assets/*.svg` in the app repository), drawn flat |
-| `assets/share-preview.png` | Social preview image (1200 × 630): the app icon's artwork alone, centred on the masthead navy. It sets no type, so it carries no font licence |
+| `favicon.ico`, `apple-touch-icon.png` | The app icon (White) at 16, 32 and 48 px, on its rounded paper tile, and at 180 px, full-bleed paper, which iOS rounds itself. Both are drawn from `assets/favicon.svg` |
+| `assets/favicon.svg` | Favicon, and the app icon beside the App Store button: the app icon's B (`AppIcon.icon/Assets/b.svg` in the app repository) in navy on the icon's paper tile. In dark mode it shows the icon's dark look, a paper B on navy, as iOS does |
+| `assets/share-preview.png` | Social preview image (1200 × 630): the app icon (White) centred on the masthead navy. Its B is a drawn path, not type, so it carries no font licence |
 | `.gitignore` | Ignores `.DS_Store` |
 
 The icons and the preview image come from the app icon. They are Billboard marks, which the Apache License does not

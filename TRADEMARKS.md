@@ -9,7 +9,8 @@ how you may use them. "We" means the project's maintainers.
 - **The name "Billboard"**, as the name of this app, service and project. We do not claim the ordinary word
   "billboard". Other organizations use the name for unrelated products, and this project is not connected with them.
 - **The logos:**
-  - the app icon, `Billboard/Billboard/AppIcon.icon/` in billboard-ios;
+  - the app icons, `Billboard/Billboard/AppIcon.icon/` and `Billboard/Billboard/AppIcon-Navy.icon/` in
+    billboard-ios;
   - the website icons, `website/assets/favicon.svg`, `website/favicon.ico` and `website/apple-touch-icon.png` in
     billboard-backend;
   - the share image, `website/assets/share-preview.png` in billboard-backend, shown when a link to the site or to a

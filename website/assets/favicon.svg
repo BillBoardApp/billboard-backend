@@ -1,9 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Billboard icon">
-  <rect width="1024" height="1024" rx="226" fill="#0B1D3A" />
-  <rect x="464" y="610" width="96" height="218" rx="14" fill="#0F7F76" />
-  <rect x="172" y="250" width="680" height="384" rx="52" fill="#00BFA6" />
-  <rect x="362" y="196" width="300" height="352" rx="20" fill="#F3F2EE" />
-  <rect x="406" y="244" width="212" height="72" rx="10" fill="#0E1A2E" />
-  <rect x="406" y="356" width="212" height="52" rx="6" fill="#0E1A2E" />
-  <rect x="406" y="448" width="136" height="52" rx="26" fill="#5C6270" />
+  <style>
+    .tile { fill: url(#paper); }
+    .edge { fill: none; stroke: #0B1D3A; stroke-opacity: 0.13; stroke-width: 8; }
+    .letter { fill: #0B1D3A; }
+    @media (prefers-color-scheme: dark) {
+      .tile { fill: url(#navy); }
+      .edge { stroke: #FFFFFF; stroke-opacity: 0.12; }
+      .letter { fill: #F3F2EE; }
+    }
+  </style>
+  <defs><linearGradient id="paper" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F6F5F1"/><stop offset="1" stop-color="#EAE8E1"/></linearGradient><linearGradient id="navy" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0F2346"/><stop offset="1" stop-color="#081630"/></linearGradient></defs>
+  <rect class="tile" width="1024" height="1024" rx="226" />
+  <rect class="edge" x="4" y="4" width="1016" height="1016" rx="222" />
+  <path class="letter" fill-rule="evenodd" d="M283.93 162L558.51 162C679.56 162 741.93 231.26 741.93 333.01C741.93 433.24 676.78 478.52 616.64 489.02L616.64 492.23C716.52 503.83 760.35 569.77 760.35 665.51C760.35 792.25 673.49 862 566.25 862L283.93 862ZM467.73 295.48L467.73 445.14L502.18 445.14C534.75 445.14 563.06 428.18 563.06 368.93C563.06 325.96 546.69 295.48 505.11 295.48ZM467.73 558.96L467.73 728.44L507.23 728.44C537.25 728.44 572.84 712.59 572.84 645.03C572.84 595.97 554.2 558.96 503.8 558.96Z" />
 </svg>
