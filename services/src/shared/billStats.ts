@@ -270,6 +270,48 @@ function resolveReasonMinCount(): number {
   return Math.max(1, Math.trunc(BILL_STATS_REASON_MIN_COUNT));
 }
 
+/**
+ * UX-39k (a project decision, 2026-11-23): reasons a Yea or Nay never counts. Need More Information
+ * contradicts a Yea or Nay; app 1.2 and later offer it only with an Abstain, whose reasons are counted
+ * nowhere, but older builds can still send it with either. It stays stored on the vote row.
+ */
+const UNCOUNTED_DECISION_REASONS: ReadonlySet<string> = new Set(["need_more_info"]);
+
+/** Whether a Yea or Nay reason (trimmed) counts in the reason breakdown: every one but UNCOUNTED_DECISION_REASONS. */
+function isCountedDecisionReason(reasonKey: string): boolean {
+  return !UNCOUNTED_DECISION_REASONS.has(reasonKey);
+}
+
+function withCountedReasonsOnSide(side: ReasonBreakdownSide): ReasonBreakdownSide {
+  if (!side || typeof side !== "object" || !Array.isArray(side.reasons)) return side;
+  return {
+    ...side,
+    reasons: side.reasons.filter(
+      (bucket) => typeof bucket?.reasonKey !== "string" || isCountedDecisionReason(bucket.reasonKey.trim()),
+    ),
+  };
+}
+
+/**
+ * UX-39k: the stats with every uncounted reason (isCountedDecisionReason) left out of the Yea and Nay
+ * reason breakdown. The fold no longer counts them, but a document stored before it did keeps them until
+ * the bill's next vote folds it again, so every served answer (stored, freshly folded, companion group)
+ * goes through this; no stored row is rewritten. The vote counts, the other reasons and their pct (of
+ * voteCount) stay as they are. Pure and idempotent.
+ */
+export function withCountedReasons(stats: BillStatsResponse): BillStatsResponse {
+  const breakdown = stats.reasonBreakdown;
+  if (!breakdown || typeof breakdown !== "object") return stats;
+  return {
+    ...stats,
+    reasonBreakdown: {
+      ...breakdown,
+      yea: withCountedReasonsOnSide(breakdown.yea),
+      nay: withCountedReasonsOnSide(breakdown.nay),
+    },
+  };
+}
+
 function buildReasonBuckets(
   reasonCounts: Map<string, number>,
   voteCount: number,
@@ -552,11 +594,11 @@ export function withComparison(stats: BillStatsResponse): BillStatsResponse {
 
 /**
  * What GET /bill-stats serves for any stats document (cached bill stats, companion group stats and
- * folds, empty stats), in order: the sample floor (harmless twice), equal weights, then the
- * comparison. Pure and idempotent.
+ * folds, empty stats), in order: the sample floor (harmless twice), equal weights, the counted reasons
+ * (UX-39k), then the comparison. Pure and idempotent.
  */
 export function toServedStats(stats: BillStatsResponse): BillStatsResponse {
-  return withComparison(withEqualWeights(applyStatsSampleFloor(stats)));
+  return withComparison(withCountedReasons(withEqualWeights(applyStatsSampleFloor(stats))));
 }
 
 /** Bill stats with the sample floor applied: safe to cache and serve. */
@@ -633,13 +675,14 @@ export function createBillStatsAccumulator(billId: string): BillStatsAccumulator
     applyVote(totals, feedback);
     applyVote(isVerified ? verified : selfAttested, feedback);
 
+    // An Abstain's reasons are counted nowhere, and neither is Need More Information under a Yea or Nay (UX-39k).
     if (feedback === "Yea" || feedback === "Nay") {
       const map = feedback === "Yea" ? yeaReasonCounts : nayReasonCounts;
       const reasons = Array.isArray(item.reasons?.SS) ? item.reasons.SS : [];
       for (const reason of reasons) {
         if (typeof reason !== "string") continue;
         const normalizedReason = reason.trim();
-        if (!normalizedReason) continue;
+        if (!normalizedReason || !isCountedDecisionReason(normalizedReason)) continue;
         map.set(normalizedReason, (map.get(normalizedReason) ?? 0) + 1);
       }
     }
