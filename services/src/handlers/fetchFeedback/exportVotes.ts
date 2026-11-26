@@ -27,10 +27,12 @@ import { emitEmbeddedMetric } from "../../shared/metrics";
  *   malformed cursor) is 400 INVALID_CURSOR.
  * - Left out: an Abstain stored for a 1.0 or 1.1 Updates dismissal (INT-11: not a vote; the apps show those bills as
  *   not voted) and any row without a Yea, Nay or Abstain.
- * - Each bill once: a row stored under a legacy id (BILLS-119hr1181rh, before votes were kept under the plain guid) is
- *   left out when the row under its plain guid holds a vote, as GET /feedback reads the plain guid's row alone. The
- *   twin can be on another page (BILLS-119hr11810 sorts between BILLS-119hr1181 and BILLS-119hr1181rh), so each
- *   legacy row's twin is read by key (legacyRowsWithVotedTwin). A legacy row with no voted twin stays.
+ * - A legacy row beside a voted plain row: a row stored under a legacy id (BILLS-119hr1181rh, before votes were kept
+ *   under the plain guid) is left out when the row under its plain guid holds a vote, as GET /feedback reads the plain
+ *   guid's row alone. The twin can be on another page (BILLS-119hr11810 sorts between BILLS-119hr1181 and
+ *   BILLS-119hr1181rh), so each legacy row's twin is read by key (plainGuidsWithVote). A legacy row with no voted twin
+ *   stays, so a bill with several legacy rows (…ih and …rh) and no voted plain row is listed once for each; app 1.3
+ *   keeps the first of them by bill id.
  * - Each vote: the bill (id, and the Congress, type and number its id carries), its title from the bills manifest (null
  *   when the bill has no manifest row), the vote, the reasons (keys, sorted), when it was first cast (the UX-31
  *   first-vote time, else the row's votedAt) and last changed, and the state, district and verification stored with
