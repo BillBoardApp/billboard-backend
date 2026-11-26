@@ -383,10 +383,10 @@ const VOTE_READ_BACKOFF_MS = 50;
  * Unwatching a bill keeps the user's Bill row when they voted on it. DELETE /preferences removes the bill's row under
  * every spelling whatever its type, and since a vote no longer replaces a Watch row (putBillRowsUnlessWatched), the
  * row a voter unwatches is often the only follow they hold: deleting it would stop the pushes a voter gets (an
- * `updated` push asking them to vote again, actions, the outcome). So for each bill unwatched, the plain guids among
- * `storedBillGuids`' keys, this reads the user's own vote rows under every spelling (one consistent BatchGetItem per
- * 100 keys, retried while keys stay unprocessed, else it throws) and answers the plain guids that hold a vote (a Yea,
- * Nay or Abstain, not a 1.0 or 1.1 dismissal: unlocksResults).
+ * `updated` push asking them to vote again, actions, the outcome). So for each bill unwatched (the plain guids that
+ * key `spellings`, unwatchedBillSpellings), this reads the user's own vote rows under every spelling (one consistent
+ * BatchGetItem per 100 keys, retried while keys stay unprocessed, else it throws) and answers the plain guids that
+ * hold a vote (a Yea, Nay or Abstain, not a 1.0 or 1.1 dismissal: unlocksResults).
  */
 export async function findVotedBillGuids(params: {
   db: Pick<DynamoDBClient, "send">;
