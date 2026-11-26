@@ -2794,7 +2794,13 @@ describe("createBillsManifest handler", () => {
         expect(ddbItems).toEqual(before);
         expect(transactions(ddbSend)).toEqual([]);
         expect(skipLines(info)).toEqual([
-          expect.objectContaining({ guid: hresGuid, reason: "older_sort_key", rowSk, storedAt: ceremonial.storedAt }),
+          expect.objectContaining({
+            guid: hresGuid,
+            key: hresKey,
+            reason: "older_sort_key",
+            rowSk,
+            storedAt: ceremonial.storedAt,
+          }),
         ]);
       });
 
@@ -2915,7 +2921,14 @@ describe("createBillsManifest handler", () => {
         expect(transactions(ddbSend)).toEqual([]);
         expect(dateLines(info)).toEqual([]);
         expect(skipLines(info)).toEqual([
-          { guid, reason: "older_document", rowSk: baseSk, storedAt: v1.storedAt, rowDocumentStoredAt: V2_STORED_AT },
+          {
+            guid,
+            key,
+            reason: "older_document",
+            rowSk: baseSk,
+            storedAt: v1.storedAt,
+            rowDocumentStoredAt: V2_STORED_AT,
+          },
         ]);
         expect(sentTo(sqsSend, NOTIFY_QUEUE)).toEqual([{ bucket: { name: "test-bucket" }, object: { key } }]);
       });

@@ -781,9 +781,11 @@ const upsertManifestEntry = async (read: ManifestRead, nowIso: string): Promise<
             ? "older_document"
             : null;
     if (skipReason !== null) {
-      // One line per skipped key, so a replay can list the rows it left as they were (upsertsSkipped counts them).
+      // One line per skipped key, so a replay can list the rows it left as they were (upsertsSkipped counts them). The
+      // key is the processed-bills key as read, in either layout, so the lines give a --keys-file as they are.
       console.info("Skipped manifest upsert", {
         guid: entry.guid,
+        key: read.key,
         reason: skipReason,
         rowSk: existingSk,
         storedAt: updatedAt,
