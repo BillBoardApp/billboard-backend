@@ -267,7 +267,8 @@ export interface ProcessedBillV1 {
  * billManifestFacts.ts latestManifestAction): of the processed bill's actions, those of the greatest actionDate, then
  * the first listed (congress.gov lists the newest first; actionTime is not read, as many Library of Congress lines have
  * none). An action without text counts only when no action of its date has text and its type or veto code has a label
- * in the apps. Absent when there is no such action or its date is not a calendar day.
+ * in the apps. Absent when there is no such action or its date is not a calendar day. Sent only in the snapshot and in
+ * inline answers to a request with facts=1 (UX-29, UX-38; a project decision, 2026-11-26).
  */
 export interface BillsManifestLatestActionV1 {
   /** YYYY-MM-DD. */
@@ -328,7 +329,8 @@ export interface BillsManifestItemV1 {
   /**
    * Only as true, when the bill is a ceremonial resolution (one that designates a day or week, or recognizes, honors or
    * congratulates someone; commemorativeResolutions.ts isCommemorativeResolution, the rule that also leaves its
-   * subCategories and lifeAreas empty); absent otherwise. Clients that predate it ignore it.
+   * subCategories and lifeAreas empty); absent otherwise. Clients that predate it ignore it. Sent only in the snapshot
+   * and in inline answers to a request with facts=1 (UX-29, UX-38; a project decision, 2026-11-26).
    */
   isCommemorative?: true;
   /**
@@ -336,7 +338,8 @@ export interface BillsManifestItemV1 {
    * the earliest dated action the processed bill stores (billManifestFacts.ts billIntroducedDate); a processed bill
    * that carries one gives that day. Absent when neither gives a date, and when the processed bill stores a full page
    * of 250 actions (a fetch stores only the newest 250), whose earliest may be long after the introduction. Its absence
-   * never means the bill is new.
+   * never means the bill is new. Sent only in the snapshot and in inline answers to a request with facts=1 (UX-29,
+   * UX-38; a project decision, 2026-11-26).
    */
   introducedDate?: string;
   /**
@@ -345,7 +348,8 @@ export interface BillsManifestItemV1 {
    * amendment or on a motion is not one. Set whatever billStatus says: a bill that later failed or became law keeps it.
    * A bill reaches the second chamber only once the chamber it began in passed it, so a bill that began in the Senate
    * and has passedHouseOn passed the Senate too, even when passedSenateOn is absent because that action is older than
-   * the stored ones.
+   * the stored ones. Sent only in the snapshot and in inline answers to a request with facts=1 (UX-29, UX-38; a project
+   * decision, 2026-11-26).
    */
   passedHouseOn?: string;
   /**
@@ -353,7 +357,8 @@ export interface BillsManifestItemV1 {
    * absent when no stored action records it (a fetch stores the newest 250 actions). A vote over a veto (34000), on an
    * amendment or on a motion is not one. Set whatever billStatus says. A bill reaches the second chamber only once the
    * chamber it began in passed it, so a bill that began in the House and has passedSenateOn passed the House too, even
-   * when passedHouseOn is absent because that action is older than the stored ones.
+   * when passedHouseOn is absent because that action is older than the stored ones. Sent only in the snapshot and in
+   * inline answers to a request with facts=1 (UX-29, UX-38; a project decision, 2026-11-26).
    */
   passedSenateOn?: string;
   /**
@@ -361,7 +366,8 @@ export interface BillsManifestItemV1 {
    * billManifestFacts.ts latestManifestAction): of the processed bill's actions, those of the greatest actionDate, then
    * the first listed (congress.gov lists the newest first; actionTime is not read, as many Library of Congress lines
    * have none). An action without text counts only when no action of its date has text and its type or veto code has a
-   * label in the apps. Absent when there is no such action or its date is not a calendar day.
+   * label in the apps. Absent when there is no such action or its date is not a calendar day. Sent only in the snapshot
+   * and in inline answers to a request with facts=1 (UX-29, UX-38; a project decision, 2026-11-26).
    */
   latestAction?: BillsManifestLatestActionV1;
   civicProfile?: CivicProfileScoresV1;

@@ -230,12 +230,21 @@ and `cursor`) it serves only the member's votes on those bills. New and additive
 
 ## Bill facts on manifest rows (UX-29, UX-38)
 
-Facts the apps rank and label a bill by before they open it, on `BillsManifest.bills[]` (inline, windowed and
-snapshot alike), optional and additive; clients that predate them ignore them. CreateBillsManifest derives each from
-the processed bill on every row write and writes it only when the document gives it. None of them is part of what
-dates a row, so a rows-only replay adds them to a row that reflects its document without moving it. A row whose
-document has news it never got moves, as at any write, and a row at a key newer than its document (unless written from
-it) is skipped and gets none.
+Facts the apps rank and label a bill by before they open it, on `BillsManifest.bills[]`, optional and additive;
+clients that predate them ignore them. Which answers carry them (a project decision, 2026-11-26):
+
+- The S3 snapshot (`delivery=snapshot`) always does. It is read from S3, so Lambda's 6 MiB response limit does not
+  apply, and apps 1.1 and 1.2 decode its rows with keyed decoders that skip fields they do not know.
+- An inline answer of `GET /bills-manifest`, windowed or full, carries them only for a request with `facts=1` (an
+  optional query parameter in `openapi/user-api.v1.json`; app 1.3 sends it). Without it, or with any other value, the
+  answer is byte for byte the one it was before the facts. With them, a windowed answer wider than about 13 weeks
+  would pass the limit (26 weeks fit without them; measured on production rows, 2026-11-26), so app 1.3 reads
+  windows wider than 8 weeks from the snapshot.
+
+CreateBillsManifest derives each from the processed bill on every row write and writes it only when the document gives
+it. None of them is part of what dates a row, so a rows-only replay adds them to a row that reflects its document
+without moving it. A row whose document has news it never got moves, as at any write, and a row at a key newer than its
+document (unless written from it) is skipped and gets none.
 
 - `isCommemorative`: `{"type": "boolean", "const": true}`, like `vetoed`, for a ceremonial resolution
   (`services/src/shared/commemorativeResolutions.ts`, the rule that also empties its topics and life areas).
