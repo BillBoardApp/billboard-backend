@@ -361,6 +361,9 @@ their own votes, a page at a time; app 1.3 writes them as CSV or JSON on the pho
   first-vote time, else `votedAt`), `votedAt` (last change), `state`, `district` and `verified` (as stored with the
   vote). Never the weight, the App Attest outcome, the adult flag or the bill's theme scores; the schema is closed.
 - Left out: an `Abstain` stored for a 1.0 or 1.1 dismissal (INT-11), and rows with no Yea, Nay or Abstain.
+- Each bill once: a row stored under a legacy id (`BILLS-119hr1181rh`) is left out when the row under its plain guid
+  holds a vote, as `GET /feedback` reads only the plain guid's row; the plain row can be on another page, so the
+  handler reads it by key. A legacy row with no voted plain row stays.
 - `fixtures/openapi/VoteExport.valid.json` is a sample with a `nextToken`; the `VOTE_EXPORT_*` cases accept the last
   page, an empty page and a non-guid bill id, and reject the internal fields, another vote value, a missing field,
   a `null` or padded `nextToken` and an undeclared field. The sample's reasons must be sorted and distinct. Not

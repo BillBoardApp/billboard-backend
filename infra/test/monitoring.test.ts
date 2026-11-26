@@ -107,6 +107,8 @@ const STANDALONE_ALARM_NAMES = [
   "Billboard-Accounts-DeletionsStuck",
   // REL-53: routine.
   "Billboard-Accounts-UnconfirmedSignUpCleanupErrors",
+  // UX-40 L7: routine.
+  "Billboard-Accounts-VoteExportFailed",
   // LLM-11 and REL-40: routine.
   "Billboard-Bedrock-RequestRejected",
   "Billboard-Summarizer-FieldRepairRate",
@@ -210,9 +212,10 @@ describe("MonitoringStack", () => {
     // The poller's heartbeat (Billboard-Heartbeat-BillsApiPoller) adds 1. REL-56 adds 4: Ingestion-BillPollerFilterImprecise,
     // Ingestion-BillPollerPageDrift, Ingestion-BillPollerFallback and Ingestion-BillPollerLateRows. REL-58 adds 1:
     // Ingestion-FetchRawBillFailing. UX-28 adds 2: WeeklyDigest-BriefPushFailed and WeeklyBriefPush's Errors. UX-39d
-    // adds 1: FetchCongressMemberRecord's Errors. UX-35 adds 1: FetchRecentActions' Errors.
-    test("MonitoringStack has 148 metric alarms and 3 composites", () => {
-      expect(Object.keys(metricAlarms())).toHaveLength(148);
+    // adds 1: FetchCongressMemberRecord's Errors. UX-35 adds 1: FetchRecentActions' Errors. UX-40 L7 adds 1:
+    // Accounts-VoteExportFailed.
+    test("MonitoringStack has 149 metric alarms and 3 composites", () => {
+      expect(Object.keys(metricAlarms())).toHaveLength(149);
       expect(Object.values(compositeAlarms()).map((resource) => resource.Properties.AlarmName).sort()).toEqual([
         "Billboard-Ingest-Unhealthy",
         "Billboard-Page-AppBroken",
@@ -775,6 +778,43 @@ describe("MonitoringStack", () => {
         expect(pageRules).not.toContain(`"${alarmLogicalId(alarmName)}"`);
         expect(groups).not.toContain(alarmName);
       });
+    });
+  });
+
+  // UX-40 L7: Download my votes answers a failed read with a handled 500, so only its own metric shows it.
+  describe("votes export", () => {
+    test("alarms on 1 VoteExportFailed in 5 minutes, routine, with no dimensions", () => {
+      templates.monitoringTemplate.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: "Billboard-Accounts-VoteExportFailed",
+        Namespace: "BillBoard/Accounts",
+        MetricName: "VoteExportFailed",
+        Dimensions: Match.absent(),
+        Statistic: "Sum",
+        Period: 300,
+        Threshold: 1,
+        ComparisonOperator: "GreaterThanOrEqualToThreshold",
+        EvaluationPeriods: 1,
+        DatapointsToAlarm: 1,
+        TreatMissingData: "notBreaching",
+        AlarmDescription: Match.stringLikeRegexp("account-data/votes.*FetchFeedback.*exportVotes could not read the caller's votes"),
+        AlarmActions: [alarmTopicRef],
+      });
+    });
+
+    test("the metric is the one the export emits, in that namespace", () => {
+      const exportVotes = fs.readFileSync(
+        path.join(__dirname, "..", "..", "services", "src", "handlers", "fetchFeedback", "exportVotes.ts"),
+        "utf8",
+      );
+      expect(exportVotes).toContain('export const VOTE_EXPORT_METRIC_NAMESPACE = "BillBoard/Accounts";');
+      expect(exportVotes).toContain('emitEmbeddedMetric(VOTE_EXPORT_METRIC_NAMESPACE, "VoteExportFailed", 1)');
+    });
+
+    test("is no page, page member or rollback alarm", () => {
+      const pageRules = JSON.stringify(Object.values(compositeAlarms()).map((resource) => resource.Properties.AlarmRule));
+      const groups = JSON.stringify(templates.userApiTemplate.findResources("AWS::CodeDeploy::DeploymentGroup"));
+      expect(pageRules).not.toContain(`"${alarmLogicalId("Billboard-Accounts-VoteExportFailed")}"`);
+      expect(groups).not.toContain("VoteExportFailed");
     });
   });
 
@@ -2563,12 +2603,12 @@ describe("MonitoringStack", () => {
     // MonitoringStack 149, and its alias error alarm the service stacks 52: 201. UX-39d: FetchCongressMemberRecord's
     // Errors alarm here and its alias's error alarm in UserAPIServiceStack make it 150 and 203 (53 in the service stacks).
     // UX-35: FetchRecentActions' Errors alarm here and its alias's error alarm make it 151 and 205 (54 in the service
-    // stacks).
-    test("the app has 205 alarms: 151 in MonitoringStack and 54 in the service stacks", () => {
+    // stacks). UX-40 L7: Billboard-Accounts-VoteExportFailed makes it 152 and 206.
+    test("the app has 206 alarms: 152 in MonitoringStack and 54 in the service stacks", () => {
       const alarms = resources.filter((resource) =>
         resource.Type === "AWS::CloudWatch::Alarm" || resource.Type === "AWS::CloudWatch::CompositeAlarm");
-      expect(alarms).toHaveLength(205);
-      expect(Object.keys({ ...metricAlarms(), ...compositeAlarms() })).toHaveLength(151);
+      expect(alarms).toHaveLength(206);
+      expect(Object.keys({ ...metricAlarms(), ...compositeAlarms() })).toHaveLength(152);
     });
 
     // infra/README.md gives the totals twice (the stack table and the alarm list); a PR that adds an alarm must move

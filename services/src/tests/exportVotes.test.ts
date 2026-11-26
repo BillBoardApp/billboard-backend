@@ -75,14 +75,16 @@ const voteRow = (billId: string, feedback: string, extra: Item = {}): Item => ({
 });
 
 /**
- * A fake of the two tables: `pages` are the Query answers in order (each Items and LastEvaluatedKey), and the manifest
- * holds a lookup row and a bill row for each entry of `titles` (a guid with title null has a lookup row only).
+ * A fake of the two tables: `pages` are the Query answers in order (each Items and LastEvaluatedKey), and the votes
+ * table holds every row of every page (read by key too); the manifest holds a lookup row and a bill row for each entry
+ * of `titles` (a guid with title null has a lookup row only).
  */
 const fakeTables = (
   pages: Array<{ Items: Item[]; LastEvaluatedKey?: Item }>,
   titles: Record<string, string | null>,
 ) => {
   let page = 0;
+  const voteRows = new Map(pages.flatMap((answer) => answer.Items).map((row) => [row.billId.S, row]));
   const lookups = new Map(Object.keys(titles).map((guid) => [guid, `2026-10-01T00:00:00.000Z#${guid}`]));
   const bills = new Map(
     Object.entries(titles)
@@ -91,6 +93,14 @@ const fakeTables = (
   );
   mockSend.mockImplementation(async (command: unknown) => {
     if (command instanceof QueryCommand) return pages[page++] ?? { Items: [] };
+    if (command instanceof BatchGetItemCommand && command.input.RequestItems!.UserFeedback) {
+      const { Keys } = command.input.RequestItems!.UserFeedback;
+      const rows = (Keys as unknown as Item[]).flatMap((key): Item[] => {
+        const row = key.userId.S === CALLER ? voteRows.get(key.billId.S) : undefined;
+        return row ? [row] : [];
+      });
+      return { Responses: { UserFeedback: rows } };
+    }
     if (command instanceof BatchGetItemCommand) {
       const { Keys } = command.input.RequestItems!.BillsManifest;
       const items = (Keys as unknown as Item[]).flatMap((key): Item[] => {
@@ -111,10 +121,12 @@ const queries = () =>
   mockSend.mock.calls
     .map(([command]: [unknown]) => command)
     .filter((command: unknown) => command instanceof QueryCommand);
-const batchGets = () =>
+const batchGets = (table = "BillsManifest") =>
   mockSend.mock.calls
     .map(([command]: [unknown]) => command)
-    .filter((command: unknown) => command instanceof BatchGetItemCommand);
+    .filter(
+      (command: unknown) => command instanceof BatchGetItemCommand && Boolean(command.input.RequestItems?.[table]),
+    );
 
 const run = async (options: Parameters<typeof exportEvent>[0] = { sub: CALLER }) => {
   const response = await handler(exportEvent(options));
@@ -273,7 +285,11 @@ describe("GET /account-data/votes (UX-40 L7)", () => {
     fakeTables(
       [
         {
-          Items: [voteRow("BILLS-119hr1181rh", "Yea"), voteRow("BILLS-119hr1181", "Nay"), voteRow("not-a-bill", "Yea")],
+          Items: [
+            voteRow("BILLS-119hr1181ih", "Yea"),
+            voteRow("BILLS-119hr1181rh", "Nay"),
+            voteRow("not-a-bill", "Yea"),
+          ],
         },
       ],
       { "BILLS-119hr1181": "The Same Bill" },
@@ -282,13 +298,92 @@ describe("GET /account-data/votes (UX-40 L7)", () => {
     const votes = (await run()).json.votes;
 
     expect(votes.map((vote: Vote) => [vote.billId, vote.title, vote.billNumber])).toEqual([
+      ["BILLS-119hr1181ih", "The Same Bill", "1181"],
       ["BILLS-119hr1181rh", "The Same Bill", "1181"],
-      ["BILLS-119hr1181", "The Same Bill", "1181"],
       ["not-a-bill", null, null],
     ]);
     // BatchGetItem refuses a request that repeats a key.
     const lookupKeys = batchGets()[0].input.RequestItems.BillsManifest.Keys;
     expect(lookupKeys).toEqual([{ pk: { S: "BILL_GUID" }, sk: { S: "BILLS-119hr1181" } }]);
+    expect(batchGets("UserFeedback")[0].input.RequestItems.UserFeedback.Keys).toEqual([
+      { userId: { S: CALLER }, billId: { S: "BILLS-119hr1181" } },
+    ]);
+  });
+
+  describe("a bill with a vote under a legacy id and under its plain guid", () => {
+    it("lists it once, from the plain guid's row, when both are on one page, reading no twin", async () => {
+      fakeTables([{ Items: [voteRow("BILLS-119hr1181", "Nay"), voteRow("BILLS-119hr1181rh", "Yea")] }], {
+        "BILLS-119hr1181": "The Same Bill",
+      });
+
+      const votes = (await run()).json.votes;
+
+      expect(votes.map((vote: Vote) => [vote.billId, vote.vote, vote.title])).toEqual([
+        ["BILLS-119hr1181", "Nay", "The Same Bill"],
+      ]);
+      expect(batchGets("UserFeedback")).toHaveLength(0);
+    });
+
+    it("lists it once when the two rows fall on different pages", async () => {
+      // BILLS-119hr11810 sorts between the plain guid and its legacy id, so a page can end between them.
+      fakeTables(
+        [
+          {
+            Items: [voteRow("BILLS-119hr1181", "Nay"), voteRow("BILLS-119hr11810", "Yea")],
+            LastEvaluatedKey: { userId: { S: CALLER }, billId: { S: "BILLS-119hr11810" } },
+          },
+          { Items: [voteRow("BILLS-119hr1181rh", "Yea"), voteRow("BILLS-119hr1182", "Abstain")] },
+        ],
+        { "BILLS-119hr1181": "The Same Bill" },
+      );
+
+      const first = await run();
+      const second = await run({ sub: CALLER, cursor: first.json.nextToken });
+
+      expect([...first.json.votes, ...second.json.votes].map((vote: Vote) => vote.billId)).toEqual([
+        "BILLS-119hr1181",
+        "BILLS-119hr11810",
+        "BILLS-119hr1182",
+      ]);
+      // The twin is read by key, in the caller's partition only.
+      const twinReads = batchGets("UserFeedback");
+      expect(twinReads).toHaveLength(1);
+      expect(twinReads[0].input.RequestItems.UserFeedback.Keys).toEqual([
+        { userId: { S: CALLER }, billId: { S: "BILLS-119hr1181" } },
+      ]);
+    });
+
+    it("keeps a legacy row whose plain guid has no row, or only a 1.0 or 1.1 dismissal", async () => {
+      fakeTables(
+        [
+          {
+            Items: [
+              voteRow("BILLS-119hr1181rh", "Yea"),
+              voteRow("BILLS-119hr77", "Abstain", { legacyDismiss: { BOOL: true } }),
+              voteRow("BILLS-119hr77eh", "Nay"),
+            ],
+          },
+        ],
+        {},
+      );
+
+      const votes = (await run()).json.votes;
+
+      expect(votes.map((vote: Vote) => [vote.billId, vote.vote])).toEqual([
+        ["BILLS-119hr1181rh", "Yea"],
+        ["BILLS-119hr77eh", "Nay"],
+      ]);
+    });
+
+    it("reads the twins in requests of at most 100 keys", async () => {
+      const items = Array.from({ length: 150 }, (_, i) => voteRow(`BILLS-119hr${i + 1}rh`, "Yea"));
+      fakeTables([{ Items: items }], {});
+
+      expect((await run()).json.votes).toHaveLength(150);
+      expect(batchGets("UserFeedback").map((command) => command.input.RequestItems.UserFeedback.Keys.length)).toEqual([
+        100, 50,
+      ]);
+    });
   });
 
   it("reads the manifest in requests of at most 100 keys", async () => {
@@ -442,6 +537,52 @@ describe("GET /account-data/votes (UX-40 L7)", () => {
       }
     } finally {
       spies.forEach((spy) => spy.mockRestore());
+    }
+  });
+
+  it("counts each failed export in VoteExportFailed, a failed twin read too, and nothing on success", async () => {
+    const lines = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const errors = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    const exportFailures = () =>
+      lines.mock.calls
+        .map(([line]) => String(line))
+        .filter((line) => line.includes('"_aws"'))
+        .map((line) => JSON.parse(line))
+        .filter((metric) => metric.VoteExportFailed !== undefined);
+    try {
+      fakeTables([{ Items: [voteRow("BILLS-119hr1181rh", "Yea")] }], {});
+      expect((await run()).statusCode).toBe(200);
+      expect(exportFailures()).toEqual([]);
+
+      mockSend.mockReset();
+      mockSend.mockRejectedValue(Object.assign(new Error("Throughput exceeded"), { name: "ThrottlingException" }));
+      expect((await run()).statusCode).toBe(500);
+
+      fakeTables([{ Items: [voteRow("BILLS-119hr1181rh", "Yea")] }], {});
+      const route = mockSend.getMockImplementation()!;
+      mockSend.mockImplementation(async (command: unknown) => {
+        if (command instanceof BatchGetItemCommand && command.input.RequestItems?.UserFeedback) {
+          throw Object.assign(new Error("denied"), { name: "AccessDeniedException" });
+        }
+        return route(command);
+      });
+      expect((await run()).statusCode).toBe(500);
+
+      const failures = exportFailures();
+      expect(failures).toHaveLength(2);
+      failures.forEach((metric) => {
+        expect(metric.VoteExportFailed).toBe(1);
+        expect(metric._aws.CloudWatchMetrics).toEqual([
+          expect.objectContaining({
+            Namespace: "BillBoard/Accounts",
+            Metrics: [expect.objectContaining({ Name: "VoteExportFailed" })],
+          }),
+        ]);
+        expect(JSON.stringify(metric)).not.toContain(CALLER);
+      });
+    } finally {
+      lines.mockRestore();
+      errors.mockRestore();
     }
   });
 
