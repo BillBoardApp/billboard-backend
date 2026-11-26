@@ -85,7 +85,8 @@ export const PIPELINE_METRIC_NAMESPACE = 'BillBoard/Pipeline';
  * C1.10: where CleanupOrphanedUsers writes AccountDeletionsStuck. REL-53: also its unconfirmed sign-up step's counts
  * (UnconfirmedSignUpsDeleted, Expired, Pending, Skipped by Reason, UnconfirmedSignUpCleanupErrors and CapReached), its
  * SignUpsConfirmed (users created in the 24 hours before the run and CONFIRMED by it) and PreSignUpCheck's
- * SignUpAllowed (real sign-ups let through; the filter check's probes are left out).
+ * SignUpAllowed (real sign-ups let through; the filter check's probes are left out). UX-40 L7: FetchFeedback's
+ * VoteExportFailed (a GET /account-data/votes that answered 500).
  */
 export const ACCOUNTS_METRIC_NAMESPACE = 'BillBoard/Accounts';
 /** REL-53: the Reason values of UnconfirmedSignUpsSkipped (SKIP_REASONS in services/src/handlers/cleanupOrphanedUsers/unconfirmedSignUps.ts). */
@@ -910,6 +911,25 @@ export class MonitoringStack extends cdk.Stack {
         period: cdk.Duration.days(1),
       }),
       threshold: 1,
+      evaluationPeriods: 1,
+      datapointsToAlarm: 1,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    }));
+
+    // UX-40 L7: Download my votes answers a failed read with a handled 500 instead of throwing, so the alias Errors
+    // alarm never counts it, and at a few exports a day the API 5XX alarms cannot reach their thresholds. Routine only,
+    // in no deployment group, like the other handled-500 alarms.
+    notify('service', new cloudwatch.Alarm(this, 'VoteExportFailedAlarm', {
+      alarmName: 'Billboard-Accounts-VoteExportFailed',
+      alarmDescription: 'GET /account-data/votes (Download my votes) answered 500: FetchFeedback could not read a page of the caller\'s votes, the votes stored under a legacy bill id\'s plain guid, or the bills manifest titles, so that download failed. Check /aws/lambda/FetchFeedback for "exportVotes could not read the caller\'s votes": AccessDeniedException means the role lost a read on UserFeedback or BillsManifest, throttling means a table\'s capacity. The log line names no bill and no vote. Rolling FetchFeedback back is safe: the export then lists a bill voted under a legacy id twice again.',
+      metric: new cloudwatch.Metric({
+        namespace: ACCOUNTS_METRIC_NAMESPACE,
+        metricName: 'VoteExportFailed',
+        statistic: 'Sum',
+        period: cdk.Duration.minutes(5),
+      }),
+      threshold: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       evaluationPeriods: 1,
       datapointsToAlarm: 1,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,

@@ -10,6 +10,7 @@ import {
 } from "../../models/feedback";
 import { parseBillGuid } from "../../shared/billCompanions";
 import { logger } from "../../shared/logger";
+import { emitEmbeddedMetric } from "../../shared/metrics";
 
 /**
  * UX-40 L7, "Download my votes": GET /account-data/votes, the caller's own votes, a page at a time, for app 1.3 to
@@ -26,12 +27,18 @@ import { logger } from "../../shared/logger";
  *   malformed cursor) is 400 INVALID_CURSOR.
  * - Left out: an Abstain stored for a 1.0 or 1.1 Updates dismissal (INT-11: not a vote; the apps show those bills as
  *   not voted) and any row without a Yea, Nay or Abstain.
+ * - Each bill once: a row stored under a legacy id (BILLS-119hr1181rh, before votes were kept under the plain guid) is
+ *   left out when the row under its plain guid holds a vote, as GET /feedback reads the plain guid's row alone. The
+ *   twin can be on another page (BILLS-119hr11810 sorts between BILLS-119hr1181 and BILLS-119hr1181rh), so each
+ *   legacy row's twin is read by key (legacyRowsWithVotedTwin). A legacy row with no voted twin stays.
  * - Each vote: the bill (id, and the Congress, type and number its id carries), its title from the bills manifest (null
  *   when the bill has no manifest row), the vote, the reasons (keys, sorted), when it was first cast (the UX-31
  *   first-vote time, else the row's votedAt) and last changed, and the state, district and verification stored with
  *   it. Never the vote's weight, the App Attest outcome, the adult flag or the bill's theme scores and topics: those are
  *   anti-abuse and internal details, projected out of the read.
- * - Nothing about the rows is logged: no bill id, vote or reason, only the error of a failed read.
+ * - Nothing about the rows is logged: no bill id, vote or reason, only the error of a failed read, which also emits
+ *   VoteExportFailed (BillBoard/Accounts, alarm Billboard-Accounts-VoteExportFailed): the handler answers 500 rather
+ *   than throwing, so the function's Errors alarm never counts it.
  */
 
 export const VOTE_EXPORT_RESOURCE = "/account-data/votes";
@@ -42,6 +49,8 @@ const BATCH_GET_MAX_KEYS = 100;
 /** Retries of a BatchGetItem's UnprocessedKeys before the page fails (500). */
 const BATCH_GET_MAX_RETRIES = 4;
 const BATCH_GET_RETRY_BASE_MS = 50;
+/** Where a failed export is counted (VoteExportFailed). */
+export const VOTE_EXPORT_METRIC_NAMESPACE = "BillBoard/Accounts";
 /** A cursor longer than this is refused unread. */
 const MAX_CURSOR_LENGTH = 2048;
 /** The longest sort key a cursor may carry (DynamoDB allows 1,024 bytes). */
@@ -206,6 +215,41 @@ async function manifestTitles(
   return titles;
 }
 
+/**
+ * The plain guids among `plainGuids` whose row in the caller's partition holds a vote (voteOf): from `pageRows` when
+ * the row is on this page, else read by key (BatchGetItem, at most 100 keys a request).
+ */
+async function plainGuidsWithVote(
+  db: DynamoDBClient,
+  config: VoteExportConfig,
+  userId: string,
+  plainGuids: ReadonlySet<string>,
+  pageRows: ReadonlyMap<string, Record<string, AttributeValue>>,
+): Promise<Set<string>> {
+  const voted = new Set<string>();
+  const unread: string[] = [];
+  for (const guid of plainGuids) {
+    const row = pageRows.get(guid);
+    if (!row) unread.push(guid);
+    else if (voteOf(row)) voted.add(guid);
+  }
+  const { partitionKey, sortKey } = config;
+  const twins = await batchGetAll(
+    db,
+    config.tableName,
+    unread.map((guid) => ({ [partitionKey]: { S: userId }, [sortKey]: { S: guid } })),
+    {
+      expression: "#sk, feedback, #legacyDismiss",
+      names: { "#sk": sortKey, "#legacyDismiss": LEGACY_DISMISS_ATTRIBUTE },
+    },
+  );
+  for (const twin of twins) {
+    const guid = twin[sortKey]?.S;
+    if (guid && plainGuids.has(guid) && voteOf(twin)) voted.add(guid);
+  }
+  return voted;
+}
+
 /** GET /account-data/votes for the authorizer's `userId` (the handler has already answered 401 without one). */
 export async function exportVotes(
   event: APIGatewayProxyEvent,
@@ -244,11 +288,26 @@ export async function exportVotes(
       }),
     );
 
-    const rows = (page.Items ?? []).flatMap((row) => {
+    const pageRows = new Map<string, Record<string, AttributeValue>>();
+    for (const row of page.Items ?? []) {
+      const billId = row[sortKey]?.S;
+      if (billId) pageRows.set(billId, row);
+    }
+    const voteRows = (page.Items ?? []).flatMap((row) => {
       const billId = row[sortKey]?.S;
       const vote = voteOf(row);
       return billId && vote ? [{ row, billId, vote, bill: parseBillGuid(billId) }] : [];
     });
+    // A legacy row (its id is not its plain guid) is left out when the plain guid's row holds a vote, wherever it is.
+    const isLegacy = ({ billId, bill }: (typeof voteRows)[number]) => bill !== null && bill.plainGuid !== billId;
+    const votedTwins = await plainGuidsWithVote(
+      db,
+      config,
+      userId,
+      new Set(voteRows.filter(isLegacy).map(({ bill }) => bill!.plainGuid)),
+      pageRows,
+    );
+    const rows = voteRows.filter((entry) => !(isLegacy(entry) && votedTwins.has(entry.bill!.plainGuid)));
     const titles = await manifestTitles(
       db,
       config,
@@ -278,6 +337,7 @@ export async function exportVotes(
   } catch (error) {
     // The error only: never the rows, a bill id or a vote.
     logger.error("exportVotes could not read the caller's votes; answering 500", { error });
+    emitEmbeddedMetric(VOTE_EXPORT_METRIC_NAMESPACE, "VoteExportFailed", 1);
     return respond(500, { error: "Internal server error" });
   }
 }
