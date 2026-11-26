@@ -53,8 +53,11 @@ const BATCH_GET_RETRY_BASE_MS = 50;
 export const VOTE_EXPORT_METRIC_NAMESPACE = "BillBoard/Accounts";
 /** A cursor longer than this is refused unread. */
 const MAX_CURSOR_LENGTH = 2048;
-/** The longest sort key a cursor may carry (DynamoDB allows 1,024 bytes). */
-const MAX_CURSOR_SORT_KEY_LENGTH = 1024;
+/**
+ * The longest sort key a cursor may carry, in UTF-8 bytes: DynamoDB refuses a longer key, and that refusal would be a
+ * 500 counted in VoteExportFailed rather than a 400.
+ */
+const MAX_CURSOR_SORT_KEY_BYTES = 1024;
 
 export interface VoteExportConfig {
   tableName: string;
@@ -114,7 +117,8 @@ export const decodeVoteExportCursor = (userId: string, cursor: string): string |
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const { v, u, after, ...rest } = payload as Record<string, unknown>;
   if (v !== 1 || u !== ownerTag(userId) || Object.keys(rest).length > 0) return null;
-  if (typeof after !== "string" || after.length === 0 || after.length > MAX_CURSOR_SORT_KEY_LENGTH) return null;
+  if (typeof after !== "string" || after.length === 0) return null;
+  if (Buffer.byteLength(after, "utf8") > MAX_CURSOR_SORT_KEY_BYTES) return null;
   return after;
 };
 
