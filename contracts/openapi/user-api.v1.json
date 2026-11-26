@@ -1370,15 +1370,15 @@
           },
           "state": {
             "type": ["string", "null"],
-            "description": "The state stored with the vote (where the caller voted from at the time); null when none."
+            "description": "The state stored with the vote; a later district verification can update it on every vote (RestampUserVotes); null when none."
           },
           "district": {
             "type": ["string", "null"],
-            "description": "The district stored with the vote; null when none."
+            "description": "The district stored with the vote; a later district verification can update it on every vote (RestampUserVotes); null when none."
           },
           "verified": {
             "type": "boolean",
-            "description": "Whether the vote was stored as a verified constituent's (false when not recorded)."
+            "description": "Whether the vote is stored as a verified constituent's; a later district verification can update it on every vote (RestampUserVotes); false when not recorded."
           }
         }
       },
@@ -1638,7 +1638,7 @@
           "streakBonus": {
             "type": "integer",
             "minimum": 0,
-            "description": "The day-streak bonus, frozen (D85 (a), with UX-41) at the freeze, Monday 2026-11-23 00:00 America/New_York: 5 x the larger of the best streak the caller's record held (the one the score last showed) and the longest run of days with a bill first voted on before the freeze; 0 for a caller who first voted after it. The same at every read, and never changed once stored: a longer streak adds nothing, so it can be less than 5 x longestStreak. Never goes down."
+            "description": "The day-streak bonus, frozen (D85 (a), with UX-41) at the freeze, Monday 2026-11-23 00:00 America/New_York: 5 x the larger of the best streak the caller's record held (the one the score last showed) and the longest run of days with a bill first voted on before the freeze; 0 for a caller who first voted after it, unless the score code before D85 (live until its deploy, or after a rollback) had already stored a best streak for them, which then counts. The same at every read, and never changed once stored: a longer streak adds nothing, so it can be less than 5 x longestStreak. Never goes down."
           },
           "honorBonus": {
             "type": "integer",
