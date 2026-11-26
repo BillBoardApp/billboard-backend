@@ -332,10 +332,11 @@ and every day field stays.
 - Weeks earn no points, and the day-streak bonus is frozen (project decision 2026-11-23, D85 (a)) at the freeze,
   Monday 2026-11-23 00:00 America/New_York. `streakBonus` is 5 x the larger of the best streak on the caller's record
   (the one the score last showed) and the longest run of days with a bill first voted on before the freeze, so it is
-  the same whenever the app reads, and 0 for a caller who first voted after the freeze. It is stored once and never
-  changes, so it can be below 5 x `longestStreak`. `longestStreak` and `currentStreak` still follow the days, because
-  1.1 and 1.2 show them; 1.3 shows the bonus as "Best streak +N". The record on `UserPII` gains `civicStreakBonus`,
-  the frozen value, and holds no week.
+  the same whenever the app reads, and 0 for a caller who first voted after the freeze unless the score code before
+  D85 (live until its deploy, or after a rollback) had already stored a best streak for them, which then counts. It
+  is stored once and never changes, so it can be below 5 x `longestStreak`. `longestStreak` and `currentStreak` still
+  follow the days, because 1.1 and 1.2 show them; 1.3 shows the bonus as "Best streak +N". The record on `UserPII`
+  gains `civicStreakBonus`, the frozen value, and holds no week.
 - The `CivicScore` sample carries both; the `CIVIC_SCORE_*` cases accept a body without them and one with no vote in
   8 weeks, and reject 7 or 9 weeks, a week without or with a non-date `weekStart`, a negative count, an undeclared
   field, `weeksVotedRecent` above 8 or fractional, and `null`. The sample's weeks must be consecutive Sundays ending
@@ -359,7 +360,7 @@ their own votes, a page at a time; app 1.3 writes them as CSV or JSON on the pho
   bills manifest; `null` without a manifest row), `congress`, `billType` and `billNumber` (from the bill id; `null`
   when it is not a bill guid), `vote` (`Yea`, `Nay` or `Abstain`), `reasons` (keys, sorted), `firstVotedAt` (UX-31's
   first-vote time, else `votedAt`), `votedAt` (last change), `state`, `district` and `verified` (as stored with the
-  vote). Never the weight, the App Attest outcome, the adult flag or the bill's theme scores; the schema is closed.
+  vote, which a later district verification updates on every vote: `RestampUserVotes`). Never the weight, the App Attest outcome, the adult flag or the bill's theme scores; the schema is closed.
 - Left out: an `Abstain` stored for a 1.0 or 1.1 dismissal (INT-11), and rows with no Yea, Nay or Abstain.
 - Each bill once: a row stored under a legacy id (`BILLS-119hr1181rh`) is left out when the row under its plain guid
   holds a vote, as `GET /feedback` reads only the plain guid's row; the plain row can be on another page, so the
