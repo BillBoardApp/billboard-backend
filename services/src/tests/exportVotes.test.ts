@@ -508,6 +508,31 @@ describe("GET /account-data/votes (UX-40 L7)", () => {
     expect(decodeVoteExportCursor(CALLER, valid)).toBe("BILLS-119hr1");
   });
 
+  it("measures a cursor's bill id in bytes, so a key DynamoDB would refuse is a 400 and counts no failure", async () => {
+    const lines = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const encode = (after: string) => encodeVoteExportCursor(CALLER, after);
+      // 400 three-byte characters: 1,200 bytes, under 1,024 characters and under the 2,048-character cursor limit.
+      const wide = encode("\u20ac".repeat(400));
+      expect(wide.length).toBeLessThanOrEqual(2048);
+      for (const cursor of [wide, encode("\u00e9".repeat(513))]) {
+        const response = await run({ sub: CALLER, cursor });
+        expect({ status: response.statusCode, body: response.json }).toEqual({
+          status: 400,
+          body: { error: "INVALID_CURSOR", message: expect.any(String) },
+        });
+      }
+      expect(mockSend).not.toHaveBeenCalled();
+      expect(
+        lines.mock.calls.map(([line]) => String(line)).filter((line) => line.includes("VoteExportFailed")),
+      ).toEqual([]);
+      // Exactly 1,024 bytes is a key DynamoDB takes.
+      expect(decodeVoteExportCursor(CALLER, encode("\u00e9".repeat(512)))).toBe("\u00e9".repeat(512));
+    } finally {
+      lines.mockRestore();
+    }
+  });
+
   it("answers 500 when a read fails, and logs neither bill ids nor votes on any path", async () => {
     const spies = (["log", "info", "warn", "error", "debug"] as const).map((level) =>
       jest.spyOn(console, level).mockImplementation(() => undefined),
