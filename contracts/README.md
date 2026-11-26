@@ -420,9 +420,10 @@ gets `UserAPIContractsV1.RecentActions` with `./scripts/syncContracts.sh`):
 - `id` is the bill's key (a group's primary guid, as the app keys the group's card), the day and the wording, so only a
   newer action gives a new id, never a change in which member the row shows. `billStatus` and `vetoed` are the bill's
   as everywhere else (for a group, the member the row shows).
-- `watched` comes from the caller's Watch rows. The Bill row a vote saves has the same key as the bill's Watch row and
-  replaces it, so right after a vote on a watched bill `watched` can be false until the watch is saved again: the app
-  shows its own watch state when it has one.
+- `watched` comes from the caller's Watch rows. The Bill row a vote saves has the same key as the bill's Watch row.
+  Since UX-47 `PUT /preferences` no longer lets it replace a Watch row, but a watch a vote replaced before then reads
+  as `false` until the watch is saved again, so the app still shows its own watch state when it has one (the schema's
+  description of `watched` is unchanged so the generated Swift stays as it is).
 - `yourVote` and `votedOn` are the caller's own vote and the Eastern day it was last saved. `voteTiming` (UX-41
   concept 2) is the latest House or Senate roll call in the window (How Congress voted's), with `daysBefore`, the days
   from `votedOn` to it, only when that is at least 1: a vote changed or saved again on or after the roll call's day has

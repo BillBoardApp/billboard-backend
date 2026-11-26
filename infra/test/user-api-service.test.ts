@@ -1254,6 +1254,24 @@ describe("UserAPIServiceStack", () => {
       expect(partitionScopedGrants(roleStatements("PublishBillsManifest")).flatMap((grant) => grant.actions))
         .toEqual(["dynamodb:PutItem"]);
     });
+
+    // UX-47: unwatching a bill the caller voted on writes back their Bill row, after reading their own vote rows by
+    // key. SetPreferences' conditional PutItem of a Bill row needs no read of UserFeedback.
+    test("DeletePreferences may BatchGetItem UserFeedback rows by key, and nothing else in UserFeedback", () => {
+      const access = storeActions(roleStatements("DeletePreferences"));
+      expect(Object.keys(access).filter((resource) => resource.startsWith("table/UserFeedback"))).toEqual([
+        "table/UserFeedback",
+      ]);
+      expect(access["table/UserFeedback"]).toEqual(["dynamodb:BatchGetItem"]);
+      expect(functionEnvironment("DeletePreferences")).toEqual(expect.objectContaining({
+        FEEDBACK_TABLE_NAME: "UserFeedback",
+        FEEDBACK_PARTITION_KEY: "userId",
+        FEEDBACK_SORT_KEY: "billId",
+      }));
+      const setAccess = storeActions(roleStatements("SetPreferences"));
+      expect(Object.keys(setAccess).filter((resource) => resource.startsWith("table/UserFeedback"))).toEqual([]);
+      expect(setAccess["table/UserPreferences"]).toContain("dynamodb:PutItem");
+    });
   });
 
   // ── APPF-23: companion bills ──────────────────────────────────────────────

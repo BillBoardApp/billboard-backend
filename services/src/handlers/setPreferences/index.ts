@@ -6,7 +6,9 @@ import { batchWriteAll } from "../../shared/dynamoBatchWrite";
 import {
   PreferenceMutationError,
   buildPreferencePutRequests,
+  isBillRowPut,
   parsePreferenceMutationBody,
+  putBillRowsUnlessWatched,
 } from "../../shared/userPreferenceMutations";
 
 const TABLE_NAME = process.env.TABLE_NAME!;
@@ -45,10 +47,18 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         preferences,
       });
 
+      // A Bill row (saved with each vote) never replaces the bill's Watch row (UX-47, UX-35): it is written on its
+      // own, conditional on the stored row (putBillRowsUnlessWatched). Every other row is one BatchWriteItem, which
+      // takes no condition.
       await batchWriteAll({
         db,
         tableName: TABLE_NAME,
-        requests,
+        requests: requests.filter((request) => !isBillRowPut(request)),
+      });
+      await putBillRowsUnlessWatched({
+        db,
+        tableName: TABLE_NAME,
+        items: requests.filter(isBillRowPut).map((request) => request.PutRequest!.Item!),
       });
 
       return jsonResponse(200, {

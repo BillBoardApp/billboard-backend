@@ -1,4 +1,11 @@
-import { QueryCommand, type AttributeValue, type DynamoDBClient, type WriteRequest } from "@aws-sdk/client-dynamodb";
+import {
+  BatchGetItemCommand,
+  PutItemCommand,
+  QueryCommand,
+  type AttributeValue,
+  type DynamoDBClient,
+  type WriteRequest,
+} from "@aws-sdk/client-dynamodb";
 import {
   BILL_SUBCATEGORY_TO_CATEGORY,
   canonicalSubCategory,
@@ -7,9 +14,11 @@ import {
   isLegacySubCategoryName,
   subCategoryNameVariants,
 } from "../models/categories";
+import { LEGACY_DISMISS_ATTRIBUTE, unlocksResults } from "../models/feedback";
 import { isLifeAreaName } from "../models/lifeAreas";
 import { plainBillGuid } from "./billCompanions";
 import { isBillContentTypePreference } from "./billContentTypes";
+import { sleep } from "./retry";
 
 /** Types whose value is a bill guid: Bill (written with a vote) and Watch. */
 const BILL_GUID_TYPES: ReadonlySet<string> = new Set(["Bill", "Watch"]);
@@ -108,11 +117,20 @@ function normalizePreferenceValue(preference: string, type: string): string {
   return preference;
 }
 
-/** One request per key: DynamoDB refuses a BatchWriteItem that names the same item twice. Later entries win. */
-function uniqueBySortKey<T>(entries: T[], sortKeyOf: (entry: T) => string): T[] {
+/**
+ * One request per key: DynamoDB refuses a BatchWriteItem that names the same item twice. Later entries win, except
+ * where `keeps(kept, later)` says the entry already held stays.
+ */
+function uniqueBySortKey<T>(
+  entries: T[],
+  sortKeyOf: (entry: T) => string,
+  keeps: (kept: T, later: T) => boolean = () => false,
+): T[] {
   const byKey = new Map<string, T>();
   for (const entry of entries) {
     const key = sortKeyOf(entry);
+    const kept = byKey.get(key);
+    if (kept !== undefined && keeps(kept, entry)) continue;
     byKey.delete(key);
     byKey.set(key, entry);
   }
@@ -186,7 +204,8 @@ export function parsePreferenceMutationBody(
 
 /**
  * One PutRequest per stored value. A body naming a label under both its former and its current name (or any value
- * twice) writes it once, from the last entry.
+ * twice) writes it once, from the last entry; a bill named both as a Watch and as a Bill is written as the Watch,
+ * whatever the order, as putBillRowsUnlessWatched keeps a stored Watch row.
  */
 export function buildPreferencePutRequests(params: {
   userId: string;
@@ -194,7 +213,11 @@ export function buildPreferencePutRequests(params: {
   sortKey: string;
   preferences: NormalizedPreferenceMutation[];
 }): WriteRequest[] {
-  return uniqueBySortKey(params.preferences, (preference) => preference.preference).map((preference) => {
+  return uniqueBySortKey(
+    params.preferences,
+    (preference) => preference.preference,
+    (kept, later) => kept.type === "Watch" && later.type === "Bill",
+  ).map((preference) => {
     const item: Record<string, { S: string }> = {
       [params.partitionKey]: toDdbString(params.userId),
       [params.sortKey]: toDdbString(preference.preference),
@@ -286,5 +309,163 @@ export function buildPreferenceDeleteRequests(params: {
         [params.sortKey]: toDdbString(value),
       },
     },
+  }));
+}
+
+// ─── A vote's Bill row and the bill's Watch row (UX-47, UX-35) ──────────────────────────────────────────────────────
+
+/**
+ * The stored types of a Watch row: the one setPreferences writes, and the lowercase one an older row may hold
+ * (fetchRecentActions reads either).
+ */
+const WATCH_TYPE_SPELLINGS: readonly string[] = ["Watch", "watch"];
+
+/** Bill rows written at once by putBillRowsUnlessWatched. */
+const BILL_ROW_WRITE_CONCURRENCY = 10;
+
+/** Whether `request` writes a Bill row: the follow both apps save with each stored vote. */
+export function isBillRowPut(request: WriteRequest): boolean {
+  return request.PutRequest?.Item?.type?.S === "Bill";
+}
+
+const isConditionalCheckFailed = (error: unknown): boolean =>
+  (error as { name?: unknown } | null)?.name === "ConditionalCheckFailedException";
+
+/**
+ * Writes each Bill row (PutRequest items of isBillRowPut) unless the user's row on that key is a Watch row. Both are
+ * stored under the same key (user, plain guid), and the apps save a Bill row after every stored vote, so a vote
+ * used to turn the bill's Watch row into a Bill row and the watch was gone at the next preferences load. A Watch
+ * row reaches the user with every push a Bill row does (shared/pushAudience.ts, `billFollowers`), so the watch is
+ * kept. BatchWriteItem takes no condition, so each row is its own PutItem, conditional on the stored row; a failed
+ * condition means the bill is already watched, and that row is done. The condition is checked where the row is
+ * written, so a Watch row written at any moment around the vote is never replaced.
+ */
+export async function putBillRowsUnlessWatched(params: {
+  db: Pick<DynamoDBClient, "send">;
+  tableName: string;
+  items: readonly Record<string, AttributeValue>[];
+}): Promise<{ written: number; keptWatch: number }> {
+  let written = 0;
+  let keptWatch = 0;
+  for (let start = 0; start < params.items.length; start += BILL_ROW_WRITE_CONCURRENCY) {
+    await Promise.all(
+      params.items.slice(start, start + BILL_ROW_WRITE_CONCURRENCY).map(async (item) => {
+        try {
+          await params.db.send(
+            new PutItemCommand({
+              TableName: params.tableName,
+              Item: item,
+              ConditionExpression: "attribute_not_exists(#type) OR NOT (#type IN (:watch, :watchLower))",
+              ExpressionAttributeNames: { "#type": "type" },
+              ExpressionAttributeValues: {
+                ":watch": toDdbString(WATCH_TYPE_SPELLINGS[0]),
+                ":watchLower": toDdbString(WATCH_TYPE_SPELLINGS[1]),
+              },
+            }),
+          );
+          written += 1;
+        } catch (error) {
+          if (!isConditionalCheckFailed(error)) throw error;
+          keptWatch += 1;
+        }
+      }),
+    );
+  }
+  return { written, keptWatch };
+}
+
+/** BatchGetItem's most keys per request. */
+const VOTE_READ_BATCH_SIZE = 100;
+const VOTE_READ_MAX_ATTEMPTS = 4;
+const VOTE_READ_BACKOFF_MS = 50;
+
+/**
+ * Unwatching a bill keeps the user's Bill row when they voted on it. DELETE /preferences removes the bill's row under
+ * every spelling whatever its type, and since a vote no longer replaces a Watch row (putBillRowsUnlessWatched), the
+ * row a voter unwatches is often the only follow they hold: deleting it would stop the pushes a voter gets (an
+ * `updated` push asking them to vote again, actions, the outcome). So for each bill unwatched, the plain guids among
+ * `storedBillGuids`' keys, this reads the user's own vote rows under every spelling (one consistent BatchGetItem per
+ * 100 keys, retried while keys stay unprocessed, else it throws) and answers the plain guids that hold a vote (a Yea,
+ * Nay or Abstain, not a 1.0 or 1.1 dismissal: unlocksResults).
+ */
+export async function findVotedBillGuids(params: {
+  db: Pick<DynamoDBClient, "send">;
+  feedbackTableName: string;
+  feedbackPartitionKey: string;
+  feedbackSortKey: string;
+  userId: string;
+  /** Plain guid to every spelling to read the vote under: the plain guid itself, the one sent, the stored ones. */
+  spellings: ReadonlyMap<string, readonly string[]>;
+}): Promise<Set<string>> {
+  const keys = [...new Set([...params.spellings.values()].flat())].map((billId) => ({
+    [params.feedbackPartitionKey]: toDdbString(params.userId),
+    [params.feedbackSortKey]: toDdbString(billId),
+  }));
+  const voted = new Set<string>();
+  for (let start = 0; start < keys.length; start += VOTE_READ_BATCH_SIZE) {
+    let pending: Record<string, AttributeValue>[] = keys.slice(start, start + VOTE_READ_BATCH_SIZE);
+    for (let attempt = 1; pending.length > 0; attempt += 1) {
+      const response = await params.db.send(
+        new BatchGetItemCommand({
+          RequestItems: {
+            [params.feedbackTableName]: {
+              Keys: pending,
+              ConsistentRead: true,
+              ProjectionExpression: "#billId, #feedback, #legacyDismiss",
+              ExpressionAttributeNames: {
+                "#billId": params.feedbackSortKey,
+                "#feedback": "feedback",
+                "#legacyDismiss": LEGACY_DISMISS_ATTRIBUTE,
+              },
+            },
+          },
+        }),
+      );
+      for (const row of response.Responses?.[params.feedbackTableName] ?? []) {
+        const guid = plainBillGuid(row[params.feedbackSortKey]?.S);
+        if (guid && params.spellings.has(guid) && unlocksResults(row)) voted.add(guid);
+      }
+      pending = response.UnprocessedKeys?.[params.feedbackTableName]?.Keys ?? [];
+      if (pending.length === 0) break;
+      if (attempt >= VOTE_READ_MAX_ATTEMPTS) {
+        throw new Error(`BatchGetItem left ${pending.length} vote lookups unprocessed after ${attempt} attempts`);
+      }
+      await sleep(VOTE_READ_BACKOFF_MS * attempt);
+    }
+  }
+  return voted;
+}
+
+/**
+ * The bills `preferences` unwatches (type Watch), by plain guid, with every spelling of each to read the user's vote
+ * under: the plain guid, the legacy id sent and the ones the user has preference rows under (`storedBillGuids`).
+ */
+export function unwatchedBillSpellings(
+  preferences: readonly NormalizedPreferenceMutation[],
+  storedBillGuids: ReadonlyMap<string, readonly string[]>,
+): Map<string, string[]> {
+  const spellings = new Map<string, string[]>();
+  for (const preference of preferences) {
+    if (preference.type !== "Watch") continue;
+    const plain = preference.preference;
+    const known = new Set(spellings.get(plain) ?? [plain]);
+    if (preference.legacyGuid) known.add(preference.legacyGuid);
+    for (const stored of storedBillGuids.get(plain) ?? []) known.add(stored);
+    spellings.set(plain, [...known]);
+  }
+  return spellings;
+}
+
+/** The Bill row items (as buildPreferencePutRequests writes them) for each plain guid in `guids`. */
+export function billRowItems(params: {
+  userId: string;
+  partitionKey: string;
+  sortKey: string;
+  guids: Iterable<string>;
+}): Record<string, AttributeValue>[] {
+  return [...params.guids].map((guid) => ({
+    [params.partitionKey]: toDdbString(params.userId),
+    [params.sortKey]: toDdbString(guid),
+    type: toDdbString("Bill"),
   }));
 }
