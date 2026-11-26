@@ -53,9 +53,9 @@ const conditionalCheckFailed = () =>
 /** The one condition setPreferences and deletePreferences put on a Bill row: the stored row is no Watch row. */
 const putAllowed = (input: { ConditionExpression?: string; ExpressionAttributeValues?: Item }, stored?: Item) => {
   if (!input.ConditionExpression) return true;
-  expect(input.ConditionExpression).toBe("attribute_not_exists(#type) OR NOT (#type IN (:watch, :watchLower))");
-  const watchTypes = [input.ExpressionAttributeValues![":watch"].S, input.ExpressionAttributeValues![":watchLower"].S];
-  return stored?.type?.S === undefined || !watchTypes.includes(stored.type.S);
+  expect(input.ConditionExpression).toBe("attribute_not_exists(#type) OR #type <> :watch");
+  expect(input.ExpressionAttributeValues).toEqual({ ":watch": { S: "Watch" } });
+  return stored?.type?.S === undefined || stored.type.S !== "Watch";
 };
 
 const fakeTable = async (command: FakeCommand): Promise<unknown> => {
@@ -143,11 +143,12 @@ describe("a vote's Bill row keeps the bill's Watch row (UX-47)", () => {
     expect(commandsNamed("BatchWriteItemCommand")).toHaveLength(0);
   });
 
-  it("keeps a Watch row an older build stored with a lowercase type", async () => {
+  it("replaces a row typed a lowercase watch, as before, since bill followers are found by the exact types", async () => {
+    // Only another client could have stored one, before REL-42; userMatcher would not find it as a follower.
     storeRow(BILL, "watch");
 
     expect((await put(bill(BILL))).statusCode).toBe(200);
-    expect(typeOf(BILL)).toBe("watch");
+    expect(typeOf(BILL)).toBe("Bill");
   });
 
   it("writes a Bill row on a bill the user does not watch, and over an earlier Bill row", async () => {

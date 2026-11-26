@@ -111,7 +111,8 @@ describe("setPreferences handler", () => {
       expect.objectContaining({
         TableName: "test-table",
         Item: { user_id: { S: "user-1" }, sort_key: { S: "BILLS-119hr900" }, type: { S: "Bill" } },
-        ConditionExpression: "attribute_not_exists(#type) OR NOT (#type IN (:watch, :watchLower))",
+        ConditionExpression: "attribute_not_exists(#type) OR #type <> :watch",
+        ExpressionAttributeValues: { ":watch": { S: "Watch" } },
       }),
     );
     expect(call.input.Item).not.toHaveProperty("category");

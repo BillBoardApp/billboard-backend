@@ -315,10 +315,12 @@ export function buildPreferenceDeleteRequests(params: {
 // ─── A vote's Bill row and the bill's Watch row (UX-47, UX-35) ──────────────────────────────────────────────────────
 
 /**
- * The stored types of a Watch row: the one setPreferences writes, and the lowercase one an older row may hold
- * (fetchRecentActions reads either).
+ * The type of a Watch row, as setPreferences has written it since REL-42 and as the app has always sent it. A row
+ * typed some other way (a lowercase "watch", which only another client could have stored before REL-42) is replaced
+ * by a vote's Bill row, as before UX-47: userMatcher finds a bill's followers by the exact types Bill and Watch, so
+ * only the Bill row keeps that voter's pushes.
  */
-const WATCH_TYPE_SPELLINGS: readonly string[] = ["Watch", "watch"];
+const WATCH_TYPE = "Watch";
 
 /** Bill rows written at once by putBillRowsUnlessWatched. */
 const BILL_ROW_WRITE_CONCURRENCY = 10;
@@ -355,12 +357,9 @@ export async function putBillRowsUnlessWatched(params: {
             new PutItemCommand({
               TableName: params.tableName,
               Item: item,
-              ConditionExpression: "attribute_not_exists(#type) OR NOT (#type IN (:watch, :watchLower))",
+              ConditionExpression: "attribute_not_exists(#type) OR #type <> :watch",
               ExpressionAttributeNames: { "#type": "type" },
-              ExpressionAttributeValues: {
-                ":watch": toDdbString(WATCH_TYPE_SPELLINGS[0]),
-                ":watchLower": toDdbString(WATCH_TYPE_SPELLINGS[1]),
-              },
+              ExpressionAttributeValues: { ":watch": toDdbString(WATCH_TYPE) },
             }),
           );
           written += 1;
