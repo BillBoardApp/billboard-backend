@@ -217,6 +217,35 @@ describe("fetchBillStats handler", () => {
     expect(mockSend.mock.calls[1][0].input.Item).toBeUndefined();
   });
 
+  it("serves a document stored with Need More Information under Yea and Nay without it (UX-39k)", async () => {
+    const counted = { reasonKey: "economic_impact", count: 12, pct: 60 };
+    const cached = statsPayload({
+      reasonBreakdown: {
+        minCount: 5,
+        yea: { voteCount: 20, reasons: [counted, { reasonKey: "need_more_info", count: 7, pct: 35 }] },
+        nay: { voteCount: 10, reasons: [{ reasonKey: "need_more_info", count: 5, pct: 50 }] },
+      },
+    });
+    mockSend.mockResolvedValueOnce(holdsVote());
+    mockSend.mockResolvedValueOnce({ Item: { schemaVersion: { S: "4" }, payload: { S: JSON.stringify(cached) } } });
+
+    const response = await handler({
+      requestContext: { authorizer: { jwt: { claims: { sub: "user-1" } } } },
+      queryStringParameters: { billId: "BILLS-119hr1" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body);
+    expect(body.reasonBreakdown).toEqual({
+      minCount: 5,
+      yea: { voteCount: 20, reasons: [counted] },
+      nay: { voteCount: 10, reasons: [] },
+    });
+    expect(body.totals).toEqual(cached.totals);
+    expect(response.body).not.toContain("need_more_info");
+    expect(mockSend.mock.calls.filter(([command]: [FakeCommand]) => command.input?.Item)).toHaveLength(0);
+  });
+
   it("returns empty stats shape when cache is missing", async () => {
     mockSend.mockResolvedValueOnce(holdsVote("Abstain"));
     mockSend.mockResolvedValueOnce({});
@@ -543,6 +572,61 @@ describe("fetchBillStats scope=companions (APPF-23)", () => {
     expect(statusCode).toBe(200);
     expect(body).toEqual({ ...served(statsPayload()), billId: SENATE, companionBillIds: [HOUSE, SENATE] });
     expect(featureQueries()).toHaveLength(0);
+  });
+
+  it("serves a group document stored with Need More Information under Yea and Nay without it (UX-39k)", async () => {
+    const counted = { reasonKey: "healthcare", count: 5, pct: 50 };
+    stored[GROUP_KEY] = statsPayload({
+      billId: GROUP_KEY,
+      reasonBreakdown: {
+        minCount: 5,
+        yea: { voteCount: 20, reasons: [{ reasonKey: "need_more_info", count: 9, pct: 45 }] },
+        nay: { voteCount: 10, reasons: [{ reasonKey: "need_more_info", count: 6, pct: 60 }, counted] },
+      },
+    });
+
+    const { statusCode, body } = await request(SENATE, "companions");
+
+    expect(statusCode).toBe(200);
+    expect(body.companionBillIds).toEqual([HOUSE, SENATE]);
+    expect(body.reasonBreakdown).toEqual({
+      minCount: 5,
+      yea: { voteCount: 20, reasons: [] },
+      nay: { voteCount: 10, reasons: [counted] },
+    });
+    expect(body.totals).toEqual(statsPayload().totals);
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("leaves Need More Information out of the reasons it folds for a group with no document (UX-39k)", async () => {
+    const withReasons = (userId: string, feedback: string, reasons: string[]) => ({
+      ...vote(userId, feedback),
+      reasons: { SS: reasons },
+    });
+    const route = send.getMockImplementation()!;
+    send.mockImplementation(async (command: FakeCommand) => {
+      if (command.input?.IndexName) {
+        const billId = command.input.ExpressionAttributeValues![":billId"].S!;
+        const users = billId === HOUSE ? ["h1", "h2", "h3"] : ["s1", "s2", "s3"];
+        return {
+          Items: users.flatMap((userId) => [
+            withReasons(`${userId}-yea`, "Yea", ["need_more_info", "education"]),
+            withReasons(`${userId}-nay`, "Nay", ["need_more_info"]),
+          ]),
+        };
+      }
+      return route(command);
+    });
+
+    const { body } = await request(HOUSE, "companions");
+
+    expect(body.totals).toMatchObject({ votes: 12, yea: 6, nay: 6 });
+    expect(body.reasonBreakdown).toEqual({
+      minCount: 5,
+      yea: { voteCount: 6, reasons: [{ reasonKey: "education", count: 6, pct: 100 }] },
+      nay: { voteCount: 6, reasons: [] },
+    });
+    expect(writes()).toHaveLength(0);
   });
 
   it("serves a group document stored at the old 1.25 weight with equal weights (2C)", async () => {
