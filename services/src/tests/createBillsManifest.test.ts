@@ -1592,6 +1592,8 @@ describe("createBillsManifest handler", () => {
 
     const dateLines = (info: jest.SpyInstance) =>
       info.mock.calls.filter(([message]) => message === "Dated manifest upsert").map(([, fields]) => fields);
+    const skipLines = (info: jest.SpyInstance) =>
+      info.mock.calls.filter(([message]) => message === "Skipped manifest upsert").map(([, fields]) => fields);
 
     const rowKeys = (ddbItems: Items) => Object.keys(ddbItems).sort();
 
@@ -2791,6 +2793,9 @@ describe("createBillsManifest handler", () => {
         expect(JSON.parse(res.body).stats).toMatchObject({ upsertsSkipped: 1, upsertsSucceeded: 0 });
         expect(ddbItems).toEqual(before);
         expect(transactions(ddbSend)).toEqual([]);
+        expect(skipLines(info)).toEqual([
+          expect.objectContaining({ guid: hresGuid, reason: "older_sort_key", rowSk, storedAt: ceremonial.storedAt }),
+        ]);
       });
 
       it("relabels an existing row at its date when a newer version brings no news (a refetch)", async () => {
@@ -2909,6 +2914,9 @@ describe("createBillsManifest handler", () => {
         expect(ddbItems).toEqual(before);
         expect(transactions(ddbSend)).toEqual([]);
         expect(dateLines(info)).toEqual([]);
+        expect(skipLines(info)).toEqual([
+          { guid, reason: "older_document", rowSk: baseSk, storedAt: v1.storedAt, rowDocumentStoredAt: V2_STORED_AT },
+        ]);
         expect(sentTo(sqsSend, NOTIFY_QUEUE)).toEqual([{ bucket: { name: "test-bucket" }, object: { key } }]);
       });
 

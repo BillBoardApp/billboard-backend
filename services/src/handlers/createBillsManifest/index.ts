@@ -772,8 +772,25 @@ const upsertManifestEntry = async (read: ManifestRead, nowIso: string): Promise<
     // document older than the one a row reflects (reflectsNewerDocument), whatever its sort key.
     const ownVersion =
       existingSk !== null && existingSk > newSk && isRowsOwnVersion(read, updatedAt, observedRow, existingSk);
-    if (existingSk !== null && existingSk > newSk && !ownVersion) return "skipped";
-    if (existingSk !== null && existingSk !== newSk && reflectsNewerDocument(observedRow, updatedAt)) return "skipped";
+    const skipReason =
+      existingSk === null
+        ? null
+        : existingSk > newSk && !ownVersion
+          ? "older_sort_key"
+          : existingSk !== newSk && reflectsNewerDocument(observedRow, updatedAt)
+            ? "older_document"
+            : null;
+    if (skipReason !== null) {
+      // One line per skipped key, so a replay can list the rows it left as they were (upsertsSkipped counts them).
+      console.info("Skipped manifest upsert", {
+        guid: entry.guid,
+        reason: skipReason,
+        rowSk: existingSk,
+        storedAt: updatedAt,
+        rowDocumentStoredAt: observedRow.documentStoredAt ?? null,
+      });
+      return "skipped";
+    }
 
     const decision =
       existingSk && existingSk < newSk
