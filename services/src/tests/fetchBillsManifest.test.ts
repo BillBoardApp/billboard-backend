@@ -2,6 +2,8 @@ process.env.TABLE_NAME = "test-table";
 process.env.PRIMARY_KEY = "pk";
 process.env.PK_VALUE = "BILL";
 import type { QueryCommandInput } from "@aws-sdk/client-dynamodb";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { handler } from "../handlers/fetchBillsManifest";
 import { applyTestEnv } from "./fixtures/env";
 import { logLines, logLinesWithMessage } from "./logLines";
@@ -721,6 +723,195 @@ describe("fetchBillsManifest handler with delivery=snapshot", () => {
     expect(JSON.parse(res.body)).toEqual({ status: "healthy", synthetic: true });
     expect(ddbSend).not.toHaveBeenCalled();
     expect(s3Send).not.toHaveBeenCalled();
+  });
+});
+
+// ─── the bill facts, only on request (UX-29, UX-38) ───────────────────────────
+
+describe("fetchBillsManifest bill facts (facts=1)", () => {
+  const ENV = {
+    TABLE_NAME: "test-table",
+    PRIMARY_KEY: "pk",
+    PK_VALUE: "BILL",
+    MANIFEST_SNAPSHOT_BUCKET: "manifest-snapshots",
+    MANIFEST_SNAPSHOT_KEY: undefined,
+    PRIORITY_TABLE_NAME: undefined,
+    PRIORITY_ACTIVE_INDEX_NAME: undefined,
+  };
+  const NOW = new Date("2026-11-26T12:00:00.000Z");
+  const SNAPSHOT_METADATA = { "generated-at": "2026-11-26T11:50:00.000Z", count: "20107", sha256: "ab".repeat(32) };
+  const PRESIGNED_URL =
+    "https://manifest-snapshots.s3.us-east-1.amazonaws.com/bills/manifest-v1.json?X-Amz-Signature=abc";
+
+  // A row as CreateBillsManifest writes it once the rows-only replay has run: every fact, a veto and a profile.
+  const ROW = {
+    pk: { S: "BILL" },
+    sk: { S: "2026-11-20T15:00:00.000Z#BILLS-119hr2207" },
+    guid: { S: "BILLS-119hr2207" },
+    billType: { S: "hr" },
+    congress: { S: "119" },
+    billNumber: { S: "2207" },
+    updatedAt: { S: "2026-11-20T15:00:00.000Z" },
+    title: { S: 'A bill with "quotes"' },
+    subCategories: { L: [{ S: "Health" }] },
+    lifeAreas: { L: [] },
+    sponsors: { L: [{ S: "A000001" }] },
+    cosponsors: { L: [] },
+    voteCount: { N: "4" },
+    billStatus: { S: "Failed" },
+    vetoed: { BOOL: true },
+    isCommemorative: { BOOL: true },
+    introducedDate: { S: "2025-03-20" },
+    passedHouseOn: { S: "2025-06-04" },
+    passedSenateOn: { S: "2025-07-15" },
+    latestAction: { M: { actionDate: { S: "2026-11-20" }, text: { S: "Vetoed by President." } } },
+    civicProfile: { M: { localVsFederal: { N: "0.5" } } },
+  };
+
+  // The entry as main gave it before the facts, written out so the key order is part of the check.
+  const BILL_BEFORE_FACTS = {
+    guid: "BILLS-119hr2207",
+    billType: "hr",
+    congress: "119",
+    billNumber: "2207",
+    updatedAt: "2026-11-20T15:00:00.000Z",
+    title: 'A bill with "quotes"',
+    subCategories: ["Health"],
+    lifeAreas: [],
+    sponsors: ["A000001"],
+    cosponsors: [],
+    billStatus: "Failed",
+    vetoed: true,
+    civicProfile: { localVsFederal: 0.5 },
+  };
+  const { civicProfile, ...beforeProfile } = BILL_BEFORE_FACTS;
+  const BILL_WITH_FACTS = {
+    ...beforeProfile,
+    isCommemorative: true,
+    introducedDate: "2025-03-20",
+    passedHouseOn: "2025-06-04",
+    passedSenateOn: "2025-07-15",
+    latestAction: { actionDate: "2026-11-20", text: "Vetoed by President." },
+    civicProfile,
+  };
+  const bodyOf = (bill: object) =>
+    JSON.stringify({ generatedAt: NOW.toISOString(), count: 1, bills: [bill], companionGroups: [] });
+
+  let restoreEnv: (() => void) | undefined;
+  let ddbSend: jest.Mock;
+  let s3Send: jest.Mock;
+  let getSignedUrl: jest.Mock;
+  let fetchHandler: typeof handler;
+
+  beforeEach(() => {
+    jest.useFakeTimers({ now: NOW, doNotFake: ["nextTick", "setImmediate", "queueMicrotask"] });
+    jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    jest.spyOn(console, "log").mockImplementation(() => undefined);
+    restoreEnv = applyTestEnv(ENV);
+    jest.resetModules();
+    ddbSend = jest.requireMock("@aws-sdk/client-dynamodb").__mockSend;
+    s3Send = jest.requireMock("@aws-sdk/client-s3").__mockSend;
+    getSignedUrl = jest.requireMock("@aws-sdk/s3-request-presigner").getSignedUrl;
+    ddbSend.mockReset();
+    s3Send.mockReset();
+    getSignedUrl.mockReset();
+    fetchHandler = require("../handlers/fetchBillsManifest").handler;
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+    restoreEnv?.();
+    restoreEnv = undefined;
+  });
+
+  it.each([
+    ["a direct invoke without an event", undefined],
+    ["no query string", { queryStringParameters: null }],
+    ["a windowed request (apps 1.1 and 1.2)", { queryStringParameters: { updatedAfter: "2026-10-01T00:00:00.000Z" } }],
+    ["a windowed direct invoke", { updatedAfter: "2026-10-01T00:00:00.000Z" }],
+    ["facts=0", { queryStringParameters: { facts: "0" } }],
+    ["facts=true", { queryStringParameters: { facts: "true" } }],
+    ["an empty facts", { queryStringParameters: { facts: "" } }],
+    ["a padded facts", { queryStringParameters: { facts: " 1" } }],
+    ["facts=1 at the top level of a direct invoke", { facts: "1" }],
+    ["a facts parameter under another name", { queryStringParameters: { Facts: "1" } }],
+  ])("answers %s byte for byte as before the facts, though the row carries them", async (_label, event) => {
+    ddbSend.mockResolvedValueOnce({ Items: [ROW] });
+
+    const res = await fetchHandler(event as Parameters<typeof handler>[0]);
+
+    expect(res).toEqual({
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: bodyOf(BILL_BEFORE_FACTS),
+    });
+    expect(res.body).toBe(bodyOf(BILL_BEFORE_FACTS));
+    expect(s3Send).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a full inline request", { facts: "1" }],
+    ["a windowed request", { updatedAfter: "2026-10-01T00:00:00.000Z", facts: "1" }],
+    [
+      "a windowed request that also sends delivery=snapshot",
+      { delivery: "snapshot", updatedAfter: "2026-10-01T00:00:00.000Z", facts: "1" },
+    ],
+  ])("adds the facts, after vetoed and before civicProfile, to %s with facts=1", async (_label, query) => {
+    ddbSend.mockResolvedValueOnce({ Items: [ROW] });
+
+    const res = await fetchHandler({ queryStringParameters: query });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers).toEqual({ "Content-Type": "application/json" });
+    expect(res.body).toBe(bodyOf(BILL_WITH_FACTS));
+    expect(s3Send).not.toHaveBeenCalled();
+  });
+
+  it("leaves the snapshot pointer as it is for facts=1 (the snapshot always carries the facts)", async () => {
+    s3Send.mockResolvedValueOnce({ Metadata: SNAPSHOT_METADATA });
+    getSignedUrl.mockResolvedValueOnce(PRESIGNED_URL);
+
+    const res = await fetchHandler({ queryStringParameters: { delivery: "snapshot", facts: "1" } });
+
+    expect(res.headers).toEqual({ "Content-Type": "application/json", "Cache-Control": "no-store" });
+    expect(Object.keys(JSON.parse(res.body))).toEqual(["snapshotUrl", "generatedAt", "count", "expiresAt"]);
+    expect(ddbSend).not.toHaveBeenCalled();
+  });
+
+  it("adds the facts to the inline fallback for facts=1, and only then", async () => {
+    const missing = () =>
+      s3Send.mockRejectedValueOnce(
+        Object.assign(new Error("NotFound"), { name: "NotFound", $metadata: { httpStatusCode: 404 } }),
+      );
+    missing();
+    ddbSend.mockResolvedValueOnce({ Items: [ROW] });
+    const withFacts = await fetchHandler({ queryStringParameters: { delivery: "snapshot", facts: "1" } });
+    expect(withFacts.body).toBe(bodyOf(BILL_WITH_FACTS));
+
+    missing();
+    ddbSend.mockResolvedValueOnce({ Items: [ROW] });
+    const without = await fetchHandler({ queryStringParameters: { delivery: "snapshot" } });
+    expect(without.body).toBe(bodyOf(BILL_BEFORE_FACTS));
+  });
+
+  it("matches the OpenAPI document: facts is an optional query parameter whose one value is FACTS_REQUESTED", () => {
+    const { FACTS_REQUESTED } = require("../handlers/fetchBillsManifest");
+    const openapi = JSON.parse(readFileSync(join(__dirname, "../../../contracts/openapi/user-api.v1.json"), "utf8"));
+    const parameters = openapi.paths["/bills-manifest"].get.parameters as {
+      name?: string;
+      in?: string;
+      required?: boolean;
+      schema?: unknown;
+    }[];
+    const facts = parameters.filter((parameter) => parameter.name === "facts");
+    expect(facts).toHaveLength(1);
+    expect(facts[0]).toMatchObject({
+      in: "query",
+      required: false,
+      schema: { type: "string", enum: [FACTS_REQUESTED] },
+    });
+    expect(FACTS_REQUESTED).toBe("1");
   });
 });
 

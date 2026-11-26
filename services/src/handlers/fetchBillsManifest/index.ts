@@ -26,11 +26,22 @@ import { isSyntheticEvent } from "../../shared/syntheticEvent";
 // of companion groups PublishBillsManifest last published ([] when there are none or they are
 // disabled), read at most every 60 s. If that read fails the field is left out, which tells the app
 // to keep the list it has. The snapshot pointer is unchanged; the snapshot carries its own list.
+//
+// The bill facts (isCommemorative, introducedDate, passedHouseOn, passedSenateOn, latestAction;
+// UX-29, UX-38) are added to an inline answer only for a request with facts=1, which apps from 1.3
+// send. Any other request, including every one from 1.1 and 1.2, gets the answer it got before the
+// facts, byte for byte: with them, a windowed answer wider than about 13 weeks would pass Lambda's
+// 6 MiB response limit (a project decision, 2026-11-26). The snapshot always carries them (it is read
+// from S3, with no such limit), so a client that wants wider windows with the facts filters the
+// snapshot instead.
 
 export const METRIC_NAMESPACE = "BillBoard/BillsManifest";
 export const DEFAULT_SNAPSHOT_KEY = "bills/manifest-v1.json";
 /** Lifetime of the presigned snapshot URL. */
 export const SNAPSHOT_URL_TTL_SECONDS = 300;
+
+/** The value of the facts query parameter that asks for the bill facts; any other value is ignored. */
+export const FACTS_REQUESTED = "1";
 
 /** How long a read of the published companion groups is reused. */
 export const COMPANION_GROUPS_MAX_AGE_MS = 60_000;
@@ -162,8 +173,9 @@ export async function handler(
       }
     }
 
+    const withFacts = event?.queryStringParameters?.facts === FACTS_REQUESTED;
     const companionGroups = await readCompanionGroups();
-    const manifest = await buildBillsManifest(manifestSource, { updatedAfter, companionGroups });
+    const manifest = await buildBillsManifest(manifestSource, { updatedAfter, companionGroups, withFacts });
     return {
       statusCode: 200,
       headers: { ...JSON_HEADERS },

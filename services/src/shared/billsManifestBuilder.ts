@@ -26,6 +26,12 @@ import { logger } from "./logger";
  * signed-in user (and, as the S3 snapshot, to anyone holding a pointer). The manifest row keeps its
  * voteCount attribute (BillStatsAggregator writes it); this builder no longer reads it.
  *
+ * The bill facts (isCommemorative, introducedDate, passedHouseOn, passedSenateOn, latestAction; UX-29, UX-38) are
+ * added only when the caller asks for them (`withFacts`). PublishBillsManifest always asks, so the S3 snapshot carries
+ * them; FetchBillsManifest asks only for a request with facts=1, so an answer to any other request is exactly what it
+ * was before the facts: windowed answers must stay under Lambda's 6 MiB response limit for the apps that predate them
+ * (a project decision, 2026-11-26).
+ *
  * One bill has one row, but the pre-remediation upsert (delete, put, re-point the lookup, not in a
  * transaction) left stale copies of some bills under older sort keys (CAP-13). The build keeps
  * only the newest row of each guid, so neither the snapshot nor the inline manifest carries a bill
@@ -50,6 +56,13 @@ export interface BuildBillsManifestOptions {
    * sorts them). Absent: the field is left out, as before.
    */
   companionGroups?: CompanionGroupV1[];
+  /** Add the bill facts to each entry (see toManifestEntry). Absent or false: entries as before the facts. */
+  withFacts?: boolean;
+}
+
+export interface ManifestEntryOptions {
+  /** Add the bill facts the row carries. Absent or false: they are left out, as before the facts. */
+  withFacts?: boolean;
 }
 
 // The manifest table's sort key is "<updatedAt>#<guid>".
@@ -140,10 +153,33 @@ export const compareManifestEntries = (lhs: BillManifestEntry, rhs: BillManifest
 };
 
 /**
- * A manifest table item as a manifest entry, or null when it has no guid or billType. The item's
- * voteCount is left out (INT-11); clients decode the field as optional.
+ * The bill facts (UX-29, UX-38) as CreateBillsManifest writes them: the flag only as true, the days only as real
+ * calendar days, so a malformed attribute is left out rather than served against the contract.
  */
-export const toManifestEntry = (item: ManifestItem | null | undefined): BillManifestEntry | null => {
+const toManifestFacts = (item: ManifestItem): Partial<BillManifestEntry> => {
+  const introducedDate = toCalendarDay(item.introducedDate);
+  const passedHouseOn = toCalendarDay(item.passedHouseOn);
+  const passedSenateOn = toCalendarDay(item.passedSenateOn);
+  const latestAction = toLatestAction(item.latestAction);
+  return {
+    ...(item.isCommemorative?.BOOL === true ? { isCommemorative: true as const } : {}),
+    ...(introducedDate ? { introducedDate } : {}),
+    ...(passedHouseOn ? { passedHouseOn } : {}),
+    ...(passedSenateOn ? { passedSenateOn } : {}),
+    ...(latestAction ? { latestAction } : {}),
+  };
+};
+
+/**
+ * A manifest table item as a manifest entry, or null when it has no guid or billType. The item's
+ * voteCount is left out (INT-11); clients decode the field as optional. The bill facts come only
+ * with `withFacts`, after vetoed and before civicProfile; without it the entry has the fields, in
+ * the order, it had before the facts.
+ */
+export const toManifestEntry = (
+  item: ManifestItem | null | undefined,
+  options: ManifestEntryOptions = {},
+): BillManifestEntry | null => {
   if (!item) return null;
   const guid = item.guid?.S ?? "";
   const billType = item.billType?.S ?? "";
@@ -151,10 +187,6 @@ export const toManifestEntry = (item: ManifestItem | null | undefined): BillMani
 
   const billStatus = item.billStatus?.S ?? undefined;
   const civicProfile = toNumberMap(item.civicProfile);
-  const introducedDate = toCalendarDay(item.introducedDate);
-  const passedHouseOn = toCalendarDay(item.passedHouseOn);
-  const passedSenateOn = toCalendarDay(item.passedSenateOn);
-  const latestAction = toLatestAction(item.latestAction);
 
   return {
     guid,
@@ -172,13 +204,7 @@ export const toManifestEntry = (item: ManifestItem | null | undefined): BillMani
       : {}),
     // Only as true, as CreateBillsManifest writes it (project decision 2026-11-19); any other value is left out.
     ...(item.vetoed?.BOOL === true ? { vetoed: true as const } : {}),
-    // The bill facts (UX-29, UX-38) as CreateBillsManifest writes them: the flag only as true, the days only as real
-    // calendar days, so a malformed attribute is left out rather than served against the contract.
-    ...(item.isCommemorative?.BOOL === true ? { isCommemorative: true as const } : {}),
-    ...(introducedDate ? { introducedDate } : {}),
-    ...(passedHouseOn ? { passedHouseOn } : {}),
-    ...(passedSenateOn ? { passedSenateOn } : {}),
-    ...(latestAction ? { latestAction } : {}),
+    ...(options.withFacts ? toManifestFacts(item) : {}),
     ...(civicProfile ? { civicProfile } : {}),
   };
 };
@@ -201,6 +227,7 @@ export const buildBillsManifest = async (
     ? new Map((await source.priorityDao.listActive()).map((record) => [record.guid, record]))
     : new Map<string, BillPriorityRecord>();
   const updatedAfter = normalizeUpdatedAfter(options.updatedAfter);
+  const entryOptions: ManifestEntryOptions = { withFacts: options.withFacts === true };
 
   // guid -> the entry built from its newest row (greatest sort key, i.e. latest updatedAt).
   const newestByGuid = new Map<string, { sortKey: string; entry: BillManifestEntry }>();
@@ -224,7 +251,7 @@ export const buildBillsManifest = async (
     );
 
     for (const item of result.Items ?? []) {
-      const entry = toManifestEntry(item);
+      const entry = toManifestEntry(item, entryOptions);
       if (!entry) continue;
       const sortKey = item[SORT_KEY_ATTRIBUTE]?.S ?? entry.updatedAt ?? "";
       const kept = newestByGuid.get(entry.guid);
