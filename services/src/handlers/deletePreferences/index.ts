@@ -33,7 +33,8 @@ const db = new DynamoDBClient({});
  * voter keeps the pushes a vote gives (an `updated` push asking them to vote again, actions, the outcome). The row is
  * deleted first and the votes read after it, so a vote saved at any moment around the unwatch is either read here or
  * writes its own Bill row afterwards (both apps send it once the vote is stored), and the put is conditional, so a
- * watch saved again meanwhile is kept (putBillRowsUnlessWatched). Throws when the votes cannot be read.
+ * watch saved again meanwhile is kept (putBillRowsUnlessWatched). Throws when the votes cannot be read or a row
+ * cannot be written.
  */
 async function restoreVoterBillRows(
   userId: string,
@@ -102,9 +103,11 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         const restored = await restoreVoterBillRows(userId, unwatchedBillSpellings(preferences, storedBillGuids));
         if (restored > 0) logger.info("Unwatched bills keep the voter's Bill row", { restored });
       } catch (error) {
-        // The watch is deleted, but a voter's Bill row may be missing: a 500 lets the app keep the watch and try again,
-        // and the retry puts the row back.
-        logger.error("Could not read the caller's votes after an unwatch; their Bill rows may be missing", { error });
+        // The watch is deleted, but a voter's Bill row may be missing. On a 500 the app keeps the watch and saves the
+        // Watch row again at its next preferences load, or the person unwatches again, which puts the Bill row back.
+        logger.error("Could not restore the caller's Bill rows after an unwatch; a voted bill may have none", {
+          error,
+        });
         return jsonResponse(500, { message: "Internal Server Error" });
       }
 
