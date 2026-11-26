@@ -48,12 +48,11 @@ async function restoreVoterBillRows(
     userId,
     spellings,
   });
-  const { written } = await putBillRowsUnlessWatched({
+  return putBillRowsUnlessWatched({
     db,
     tableName: TABLE_NAME,
     items: billRowItems({ userId, partitionKey: PARTITION_KEY, sortKey: SORT_KEY, guids: voted }),
   });
-  return written;
 }
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
