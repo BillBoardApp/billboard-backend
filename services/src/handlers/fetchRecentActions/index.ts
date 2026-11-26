@@ -122,8 +122,9 @@ const readCallerVotes = async (userId: string): Promise<Map<string, CallerVote &
 
 /**
  * The plain guids of the caller's Watch rows (not the Bill rows a vote writes). A vote's Bill row has the same key as
- * the bill's Watch row and replaces it, so a watched bill voted on since is missing here until the watch is saved
- * again; the contract's `watched` tells the app to show its own watch state when it has one.
+ * the bill's Watch row; since UX-47 it no longer replaces it (setPreferences), but a watch a vote replaced before then
+ * is missing here until it is saved again, so the contract's `watched` still tells the app to show its own watch state
+ * when it has one.
  */
 const readWatchedGuids = async (userId: string): Promise<Set<string>> => {
   const items = await queryAll({

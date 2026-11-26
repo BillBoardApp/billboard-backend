@@ -103,29 +103,18 @@ describe("setPreferences handler", () => {
 
     expect(result.statusCode).toBe(200);
     expect(JSON.parse(result.body)).toEqual({ message: "Preferences updated", count: 1 });
-    expect(mockSendSet).toHaveBeenCalledWith(
+    // UX-47: a Bill row is its own PutItem, conditional on the stored row not being a Watch row.
+    expect(mockSendSet).toHaveBeenCalledTimes(2);
+    const call = mockSendSet.mock.calls[1]?.[0];
+    expect(call.constructor.name).toBe("PutItemCommand");
+    expect(call.input).toEqual(
       expect.objectContaining({
-        input: expect.objectContaining({
-          RequestItems: expect.objectContaining({
-            ["test-table"]: expect.arrayContaining([
-              expect.objectContaining({
-                PutRequest: expect.objectContaining({
-                  Item: expect.objectContaining({
-                    user_id: { S: "user-1" },
-                    sort_key: { S: "BILLS-119hr900" },
-                    type: { S: "Bill" },
-                  }),
-                }),
-              }),
-            ]),
-          }),
-        }),
+        TableName: "test-table",
+        Item: { user_id: { S: "user-1" }, sort_key: { S: "BILLS-119hr900" }, type: { S: "Bill" } },
+        ConditionExpression: "attribute_not_exists(#type) OR NOT (#type IN (:watch, :watchLower))",
       }),
     );
-
-    const call = mockSendSet.mock.calls[1]?.[0];
-    const item = call?.input?.RequestItems?.["test-table"]?.[0]?.PutRequest?.Item ?? {};
-    expect(item).not.toHaveProperty("category");
+    expect(call.input.Item).not.toHaveProperty("category");
   });
 
   it("should accept watch preferences without writing empty category", async () => {
@@ -334,8 +323,13 @@ describe("setPreferences handler", () => {
       expect(JSON.parse(result.body)).toEqual({ message: "Preferences updated", count: 3 });
       expect(putItems()).toEqual([
         { user_id: { S: "user-1" }, sort_key: { S: "BILLS-119hr1181" }, type: { S: "Watch" } },
-        { user_id: { S: "user-1" }, sort_key: { S: "BILLS-119hres1061" }, type: { S: "Bill" } },
       ]);
+      // UX-47: the Bill row on its own, conditional on the stored row.
+      expect(mockSendSet.mock.calls[2]?.[0]?.input?.Item).toEqual({
+        user_id: { S: "user-1" },
+        sort_key: { S: "BILLS-119hres1061" },
+        type: { S: "Bill" },
+      });
     });
 
     it("rejects a value that is not a bill guid, or a category, for Bill and Watch", async () => {

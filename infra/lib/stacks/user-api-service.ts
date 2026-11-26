@@ -554,6 +554,10 @@ export class UserAPIServiceStack extends cdk.Stack {
         PARTITION_KEY: USER_PARTITION_KEY,
         SORT_KEY: USER_PREFERENCES_SORT_KEY,
         ...piiTableReferenceEnvironment,
+        // UX-47: unwatching a bill the caller voted on writes back the Bill row a vote saves.
+        FEEDBACK_TABLE_NAME: USER_FEEDBACK_TABLE_NAME,
+        FEEDBACK_PARTITION_KEY: USER_PARTITION_KEY,
+        FEEDBACK_SORT_KEY: USER_FEEDBACK_SORT_KEY,
       },
       timeout: cdk.Duration.seconds(USER_API_DEFAULT_TIMEOUT_SECONDS),
     }).alias;
@@ -564,6 +568,13 @@ export class UserAPIServiceStack extends cdk.Stack {
       grantee: this.deletePreferences,
       actions: ['dynamodb:Query'],
       resourceArns: [preferencesTable.tableArn],
+    });
+    // UX-47: after an unwatch it reads the caller's own vote rows on the bill (one consistent BatchGetItem keyed by the
+    // authorizer's sub), and nothing else on UserFeedback: no GetItem, Query, index or write.
+    iam.Grant.addToPrincipal({
+      grantee: this.deletePreferences,
+      actions: ['dynamodb:BatchGetItem'],
+      resourceArns: [feedbackTable.tableArn],
     });
     piiTable.grantReadData(this.deletePreferences);
 
